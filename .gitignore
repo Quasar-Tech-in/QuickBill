@@ -1,0 +1,54 @@
+# Node & Mobile Dependencies
+node_modules/
+.pnp
+.pnp.js
+.expo/
+dist/
+build/
+web-build/
+
+# Python Virtual Environments & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Next.js
+.next/
+out/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS & IDE Files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Project Reference Media
+project_details/
+project_details/*
+project details/
+project details/*
+*.mp4
+*.mov

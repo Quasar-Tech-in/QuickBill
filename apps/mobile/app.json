@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "QuickBill",
+    "slug": "quickbill-pos",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#4F46E5"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#4F46E5"
+      },
+      "permissions": ["CAMERA"]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow QuickBill to access your camera to scan item QR codes for billing."
+        }
+      ]
+    ]
+  }
+}

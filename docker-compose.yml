@@ -1,0 +1,43 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: quickbill_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: secretpassword
+      MONGO_INITDB_DATABASE: quickbill_db
+    volumes:
+      - mongo_data:/data/db
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: quickbill_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: quickbill_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URI=mongodb://admin:secretpassword@mongodb:27017/quickbill_db?authSource=admin
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=development_jwt_secret_key_32_characters_minimum
+      - APP_ENV=development
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - ./apps/api:/app
+
+volumes:
+  mongo_data:
