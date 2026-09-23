@@ -32,8 +32,12 @@ import { store } from '../services/store';
 import { StatusBadge } from '../components/StatusBadge';
 import { QRModal } from '../components/QRModal';
 import { CustomSelect } from '../components/CustomSelect';
-import { compressImage, formatBytes } from '../utils/imageCompressor';
+import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
 import { uploadItemImage, deleteItemImages } from '../services/supabaseStorage';
+
+export interface FormImageItem extends ItemImage {
+  pendingCompressed?: CompressionResult;
+}
 
 export const InventoryView: React.FC = () => {
   const currentUser = store.getCurrentUser();
@@ -93,9 +97,10 @@ export const InventoryView: React.FC = () => {
   const [locationOverrides, setLocationOverrides] = useState<Record<string, ItemLocationInventory>>({});
 
   // Item Images & Gallery State
-  const [formImages, setFormImages] = useState<ItemImage[]>([]);
+  const [formImages, setFormImages] = useState<FormImageItem[]>([]);
   const [pendingDeletedImageUrls, setPendingDeletedImageUrls] = useState<string[]>([]);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [uploadStatusMsg, setUploadStatusMsg] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -104,9 +109,9 @@ export const InventoryView: React.FC = () => {
     if (files.length === 0) return;
 
     setIsUploadingImage(true);
-    setUploadStatusMsg(`Preparing ${files.length} image(s)...`);
+    setUploadStatusMsg(`Compressing ${files.length} image(s)...`);
 
-    const newUploadedImages: ItemImage[] = [];
+    const newStagedImages: FormImageItem[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -114,31 +119,26 @@ export const InventoryView: React.FC = () => {
         setUploadStatusMsg(`Compressing ${file.name} (Step 1)...`);
         const compressed = await compressImage(file, { maxWidth: 1000, maxHeight: 1000, quality: 0.82 });
 
-        const savings = formatBytes(compressed.originalSizeBytes - compressed.compressedSizeBytes);
-        setUploadStatusMsg(`Uploading ${file.name} (${formatBytes(compressed.compressedSizeBytes)}, saved ${savings})...`);
+        const currentIndex = formImages.length + newStagedImages.length;
+        const tempId = `staged_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
 
-        const businessId = currentUser?.businessId || 'default_tenant';
-        const itemId = editingItem?.id || 'new_item';
-        const currentIndex = formImages.length + newUploadedImages.length;
-
-        const uploadRes = await uploadItemImage(businessId, itemId, compressed, currentIndex);
-
-        newUploadedImages.push({
-          id: uploadRes.id,
-          url: uploadRes.url,
+        newStagedImages.push({
+          id: tempId,
+          url: compressed.dataUrl, // Local in-memory preview with zero network calls
           order: currentIndex,
-          isPrimary: formImages.length === 0 && newUploadedImages.length === 0,
+          isPrimary: formImages.length === 0 && newStagedImages.length === 0,
           name: file.name,
-          sizeBytes: uploadRes.sizeBytes,
-          originalSizeBytes: uploadRes.originalSizeBytes,
+          sizeBytes: compressed.compressedSizeBytes,
+          originalSizeBytes: compressed.originalSizeBytes,
+          pendingCompressed: compressed, // Staged locally in memory until Save Product is clicked
         });
       } catch (err) {
-        console.error('Failed to compress and upload image:', err);
+        console.error('Failed to compress image:', err);
       }
     }
 
     setFormImages(prev => {
-      const combined = [...prev, ...newUploadedImages];
+      const combined = [...prev, ...newStagedImages];
       return combined.map((img, idx) => ({
         ...img,
         order: idx,
@@ -172,10 +172,11 @@ export const InventoryView: React.FC = () => {
 
   const deleteImage = (index: number) => {
     const toRemove = formImages[index];
-    if (toRemove && toRemove.url) {
-      // Stage for remote deletion ONLY upon final form submission/save
+    // If the image was already persisted remotely (no pendingCompressed), stage for remote deletion upon save
+    if (toRemove && toRemove.url && !toRemove.pendingCompressed) {
       setPendingDeletedImageUrls(prev => [...prev, toRemove.url]);
     }
+    // If it was just staged locally in this modal session, simply discard from state without any network call
     const filtered = formImages.filter((_, idx) => idx !== index);
     const updated = filtered.map((img, idx) => ({
       ...img,
@@ -370,78 +371,125 @@ export const InventoryView: React.FC = () => {
     }
   };
 
-  const handleSaveItem = (e: React.FormEvent) => {
+  const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim()) return;
+    if (!formName.trim() || isSaving) return;
 
-    const locArray: ItemLocationInventory[] = Object.values(locationOverrides).map(loc => ({
-      ...loc,
-      salePrice: calculateEffectiveSalePrice(loc),
-    }));
+    setIsSaving(true);
+    setUploadStatusMsg('Saving product and processing images...');
 
-    // Master fallback defaults
-    const currentLocInv = locationOverrides[selectedLocationId] || locArray[0];
-    const masterMrp = currentLocInv ? currentLocInv.mrp : 100;
-    const masterSalePrice = currentLocInv ? calculateEffectiveSalePrice(currentLocInv) : 100;
-    const masterPurchasePrice = currentLocInv ? currentLocInv.purchasePrice : 80;
-    const masterStock = currentLocInv ? currentLocInv.currentStock : 10;
-    const masterMinAlert = currentLocInv ? currentLocInv.minStockAlert : 5;
-
-    // Ordered image gallery & primary image resolution
-    const sortedImages = [...formImages].sort((a, b) => a.order - b.order);
-    const primaryImg = sortedImages.find(img => img.isPrimary) || sortedImages[0];
-    const primaryImageUrl = primaryImg ? primaryImg.url : undefined;
-
-    if (editingItem) {
-      store.updateItem(editingItem.id, {
-        name: formName.trim(),
-        sku: formSku.trim() || undefined,
-        barcode: formBarcode.trim() || undefined,
-        category: formCategory.trim(),
-        taxRate: formTaxRate,
-        unit: formUnit,
-        description: formDescription.trim() || undefined,
-        mrp: masterMrp,
-        salePrice: masterSalePrice,
-        purchasePrice: masterPurchasePrice,
-        currentStock: masterStock,
-        minStockAlert: masterMinAlert,
-        locations: locArray,
-        images: sortedImages,
-        imageUrl: primaryImageUrl,
-      });
-    } else {
-      store.addItem({
-        name: formName.trim(),
-        sku: formSku.trim() || undefined,
-        barcode: formBarcode.trim() || undefined,
-        category: formCategory.trim(),
-        taxRate: formTaxRate,
-        unit: formUnit,
-        description: formDescription.trim() || undefined,
-        mrp: masterMrp,
-        salePrice: masterSalePrice,
-        purchasePrice: masterPurchasePrice,
-        currentStock: masterStock,
-        minStockAlert: masterMinAlert,
-        locations: locArray,
-        images: sortedImages,
-        imageUrl: primaryImageUrl,
-      });
-    }
-
-    // Purge removed images from Supabase storage ONLY upon confirming and saving product
-    if (pendingDeletedImageUrls.length > 0) {
+    try {
       const businessId = currentUser?.businessId || 'default_tenant';
-      deleteItemImages(businessId, pendingDeletedImageUrls);
-      setPendingDeletedImageUrls([]);
-    }
+      const itemId = editingItem?.id || `itm_${Date.now()}`;
 
-    refreshData();
-    setIsAddModalOpen(false);
-    setEditingItem(null);
-    setFormImages([]);
-    setPendingDeletedImageUrls([]);
+      // 1. Upload newly staged images (only those with pendingCompressed) to Supabase Storage
+      const finalImages: ItemImage[] = [];
+      const sortedFormImages = [...formImages].sort((a, b) => a.order - b.order);
+
+      for (let i = 0; i < sortedFormImages.length; i++) {
+        const img = sortedFormImages[i];
+        if (img.pendingCompressed) {
+          setUploadStatusMsg(`Uploading image #${i + 1} to storage...`);
+          const uploadRes = await uploadItemImage(businessId, itemId, img.pendingCompressed, i);
+          finalImages.push({
+            id: uploadRes.id || img.id,
+            url: uploadRes.url,
+            order: i,
+            isPrimary: img.isPrimary,
+            name: img.name,
+            sizeBytes: uploadRes.sizeBytes || img.sizeBytes,
+            originalSizeBytes: uploadRes.originalSizeBytes || img.originalSizeBytes,
+          });
+        } else {
+          // Already uploaded remotely, update order and primary designation
+          finalImages.push({
+            id: img.id,
+            url: img.url,
+            order: i,
+            isPrimary: img.isPrimary,
+            name: img.name,
+            sizeBytes: img.sizeBytes,
+            originalSizeBytes: img.originalSizeBytes,
+          });
+        }
+      }
+
+      // Ensure at least one image is marked primary if images exist
+      if (finalImages.length > 0 && !finalImages.some(img => img.isPrimary)) {
+        finalImages[0].isPrimary = true;
+      }
+
+      const primaryImg = finalImages.find(img => img.isPrimary) || finalImages[0];
+      const primaryImageUrl = primaryImg ? primaryImg.url : undefined;
+
+      const locArray: ItemLocationInventory[] = Object.values(locationOverrides).map(loc => ({
+        ...loc,
+        salePrice: calculateEffectiveSalePrice(loc),
+      }));
+
+      // Master fallback defaults
+      const currentLocInv = locationOverrides[selectedLocationId] || locArray[0];
+      const masterMrp = currentLocInv ? currentLocInv.mrp : 100;
+      const masterSalePrice = currentLocInv ? calculateEffectiveSalePrice(currentLocInv) : 100;
+      const masterPurchasePrice = currentLocInv ? currentLocInv.purchasePrice : 80;
+      const masterStock = currentLocInv ? currentLocInv.currentStock : 10;
+      const masterMinAlert = currentLocInv ? currentLocInv.minStockAlert : 5;
+
+      if (editingItem) {
+        store.updateItem(editingItem.id, {
+          name: formName.trim(),
+          sku: formSku.trim() || undefined,
+          barcode: formBarcode.trim() || undefined,
+          category: formCategory.trim(),
+          taxRate: formTaxRate,
+          unit: formUnit,
+          description: formDescription.trim() || undefined,
+          mrp: masterMrp,
+          salePrice: masterSalePrice,
+          purchasePrice: masterPurchasePrice,
+          currentStock: masterStock,
+          minStockAlert: masterMinAlert,
+          locations: locArray,
+          images: finalImages,
+          imageUrl: primaryImageUrl,
+        });
+      } else {
+        store.addItem({
+          name: formName.trim(),
+          sku: formSku.trim() || undefined,
+          barcode: formBarcode.trim() || undefined,
+          category: formCategory.trim(),
+          taxRate: formTaxRate,
+          unit: formUnit,
+          description: formDescription.trim() || undefined,
+          mrp: masterMrp,
+          salePrice: masterSalePrice,
+          purchasePrice: masterPurchasePrice,
+          currentStock: masterStock,
+          minStockAlert: masterMinAlert,
+          locations: locArray,
+          images: finalImages,
+          imageUrl: primaryImageUrl,
+        });
+      }
+
+      // 2. Purge removed images from Supabase storage ONLY upon confirming and saving product
+      if (pendingDeletedImageUrls.length > 0) {
+        deleteItemImages(businessId, pendingDeletedImageUrls);
+        setPendingDeletedImageUrls([]);
+      }
+
+      refreshData();
+      setIsAddModalOpen(false);
+      setEditingItem(null);
+      setFormImages([]);
+      setPendingDeletedImageUrls([]);
+    } catch (err) {
+      console.error('Error saving item and uploading images:', err);
+    } finally {
+      setIsSaving(false);
+      setUploadStatusMsg('');
+    }
   };
 
   const handleStockAdjustment = (e: React.FormEvent) => {
@@ -1608,13 +1656,18 @@ export const InventoryView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="modal-footer" style={{ flexShrink: 0, padding: '14px 24px', borderTop: '1px solid var(--neutral-200)', background: 'var(--neutral-50)' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setIsAddModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  {editingItem ? 'Save Product & Pricing' : 'Create Product'}
-                </button>
+              <div className="modal-footer" style={{ flexShrink: 0, padding: '14px 24px', borderTop: '1px solid var(--neutral-200)', background: 'var(--neutral-50)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ fontSize: '0.82rem', color: isSaving ? 'var(--primary-700)' : 'var(--neutral-500)', fontWeight: 600 }}>
+                  {uploadStatusMsg || (formImages.some(img => img.pendingCompressed) ? `📸 ${formImages.filter(img => img.pendingCompressed).length} new image(s) staged to upload on save` : '')}
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setIsAddModalOpen(false)} disabled={isSaving}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={isSaving || isUploadingImage}>
+                    {isSaving ? 'Uploading & Saving...' : (editingItem ? 'Save Product & Pricing' : 'Create Product')}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
