@@ -1,12 +1,16 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection
-from app.api.v1 import auth, items, sales, parties, payments, expenses, reports, tenants
+from app.api.v1 import auth, items, sales, parties, payments, expenses, reports, tenants, users, locations, categories
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Ensure uploads directory exists
+    os.makedirs("uploads/item-images", exist_ok=True)
     # Startup
     try:
         await connect_to_mongo()
@@ -33,8 +37,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static media mount
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 # Register API v1 Routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
+app.include_router(users.router, prefix=settings.API_V1_STR)
+app.include_router(locations.router, prefix=settings.API_V1_STR)
+app.include_router(categories.router, prefix=settings.API_V1_STR)
 app.include_router(items.router, prefix=settings.API_V1_STR)
 app.include_router(sales.router, prefix=settings.API_V1_STR)
 app.include_router(parties.router, prefix=settings.API_V1_STR)

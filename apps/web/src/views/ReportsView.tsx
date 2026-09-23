@@ -7,16 +7,20 @@ import {
   TrendingUp, 
   TrendingDown, 
   Package, 
-  FileSpreadsheet 
+  FileSpreadsheet,
+  MapPin
 } from 'lucide-react';
 import { store } from '../services/store';
 
 export const ReportsView: React.FC = () => {
   const [reportType, setReportType] = useState<'PNL' | 'STOCK_VALUATION' | 'DAY_BOOK'>('PNL');
+  const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
+
+  const locations = store.getAllLocations();
   
-  const invoices = store.getInvoices();
-  const items = store.getItems();
-  const parties = store.getParties();
+  // Query location-scoped invoices and items
+  const invoices = selectedLocationId === 'ALL' ? store.getInvoices() : store.getInvoices(selectedLocationId);
+  const items = selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true);
 
   // Financial Metrics
   const totalRevenue = invoices.reduce((s, i) => s + i.grandTotal, 0);
@@ -26,7 +30,7 @@ export const ReportsView: React.FC = () => {
   // Cost of Goods Sold (COGS) Estimation
   const estimatedCOGS = totalNetSales * 0.72; // ~72% average cost
   const grossProfit = totalNetSales - estimatedCOGS;
-  const operatingExpenses = 1200.0; // Rent, utilities, packaging
+  const operatingExpenses = selectedLocationId === 'ALL' ? 3600.0 : 1200.0;
   const netProfit = grossProfit - operatingExpenses;
 
   // Stock Valuation
@@ -43,42 +47,72 @@ export const ReportsView: React.FC = () => {
         csvContent += `"${i.publicItemId}","${i.name}","${i.category}",${i.currentStock},${i.purchasePrice},${i.salePrice},${i.currentStock * i.purchasePrice},${i.currentStock * i.salePrice}\n`;
       });
     } else {
-      csvContent += 'Invoice Number,Date,Party,Payment Mode,Subtotal,Tax Total,Grand Total,Status\n';
+      csvContent += 'Invoice Number,Date,Branch,Party,Payment Mode,Subtotal,Tax Total,Grand Total,Status\n';
       invoices.forEach(i => {
-        csvContent += `"${i.invoiceNumber}","${i.date}","${i.partyName}","${i.paymentMode}",${i.subtotal},${i.taxTotal},${i.grandTotal},"${i.status}"\n`;
+        csvContent += `"${i.invoiceNumber}","${i.date}","${i.locationName || 'Main Store'}","${i.partyName}","${i.paymentMode}",${i.subtotal},${i.taxTotal},${i.grandTotal},"${i.status}"\n`;
       });
     }
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `QuickBill_Report_${reportType}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `QuickBill_Report_${reportType}_${selectedLocationId}_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
+  const activeLocObj = locations.find(l => l.id === selectedLocationId);
+
   return (
     <div className="page-container">
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 16 }}>
         <div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
-            Financial Reports & Analytics
+            Financial Reports & Branch Analytics
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-            Instant Profit & Loss statements, Stock Valuation, and CSV accounting exports.
+            Instant Profit & Loss statements, Multi-Branch Stock Valuation, and CSV accounting exports.
           </p>
         </div>
 
-        <button className="btn btn-secondary" onClick={handleExportCSV}>
-          <FileSpreadsheet size={16} color="var(--success-600)" />
-          <span>Export CSV Report</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Branch Location Scope Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <MapPin size={16} color="var(--primary-600)" />
+            <select
+              className="form-select"
+              style={{ padding: '6px 12px', fontSize: '0.82rem', fontWeight: 600, width: 'auto' }}
+              value={selectedLocationId}
+              onChange={(e) => setSelectedLocationId(e.target.value)}
+            >
+              <option value="ALL">🌐 Consolidated (All Branches)</option>
+              {locations.map((loc) => (
+                <option key={loc.id} value={loc.id}>
+                  📍 {loc.name} ({loc.code})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button className="btn btn-secondary" onClick={handleExportCSV}>
+            <FileSpreadsheet size={16} color="var(--success-600)" />
+            <span>Export CSV</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Scope Pill */}
+      <div style={{ marginBottom: 16, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: 'var(--neutral-100)', borderRadius: 20, fontSize: '0.78rem', color: 'var(--neutral-700)', fontWeight: 600 }}>
+        <span>Analytics Filter:</span>
+        <span style={{ color: 'var(--primary-700)' }}>
+          {selectedLocationId === 'ALL' ? '🌐 All Store Branches (Consolidated Total)' : `📍 ${activeLocObj?.name} (${activeLocObj?.code})`}
+        </span>
       </div>
 
       {/* Report Switcher Tabs */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
         {[
           { id: 'PNL', label: '📊 Profit & Loss Statement' },
           { id: 'STOCK_VALUATION', label: '📦 Inventory Valuation' },
@@ -110,7 +144,7 @@ export const ReportsView: React.FC = () => {
           {/* Income Summary Card */}
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title">Trading & Income Statement</h3>
+              <h3 className="card-title">Trading & Income Statement ({selectedLocationId === 'ALL' ? 'Consolidated' : activeLocObj?.name})</h3>
             </div>
             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)' }}>
@@ -147,7 +181,7 @@ export const ReportsView: React.FC = () => {
           {/* Quick Insights Card */}
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title">Key Financial Performance Ratios</h3>
+              <h3 className="card-title">Key Performance Indicators</h3>
             </div>
             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
@@ -163,9 +197,9 @@ export const ReportsView: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>Average Bill Ticket Size</p>
+                <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>Total Bills Processed</p>
                 <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary-600)' }}>
-                  ₹{invoices.length > 0 ? (totalRevenue / invoices.length).toFixed(2) : '0.00'}
+                  {invoices.length} Invoices
                 </p>
               </div>
             </div>
@@ -176,11 +210,11 @@ export const ReportsView: React.FC = () => {
       {/* Stock Valuation View */}
       {reportType === 'STOCK_VALUATION' && (
         <div className="card">
-          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <div>
-              <span className="card-title">Inventory Valuation Summary</span>
+              <span className="card-title">Inventory Valuation ({selectedLocationId === 'ALL' ? 'All Branches' : activeLocObj?.name})</span>
               <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-                Current asset value of all products in stock
+                Current asset value of products in stock at this location
               </p>
             </div>
             <div style={{ display: 'flex', gap: 20 }}>
@@ -204,7 +238,7 @@ export const ReportsView: React.FC = () => {
                 <tr>
                   <th>Product</th>
                   <th>Category</th>
-                  <th>Quantity</th>
+                  <th>Branch Stock</th>
                   <th>Cost / Unit</th>
                   <th>Total Cost Valuation</th>
                   <th>Sale / Unit</th>
@@ -235,14 +269,15 @@ export const ReportsView: React.FC = () => {
       {reportType === 'DAY_BOOK' && (
         <div className="card">
           <div className="card-header">
-            <h3 className="card-title">Day Book Journal</h3>
+            <h3 className="card-title">Day Book Journal ({selectedLocationId === 'ALL' ? 'All Branches' : activeLocObj?.name})</h3>
           </div>
           <div className="table-responsive">
             <table className="table">
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Transaction ID</th>
+                  <th>Invoice No</th>
+                  <th>Branch Location</th>
                   <th>Party / Customer</th>
                   <th>Payment Mode</th>
                   <th>Debit / Credit</th>
@@ -250,16 +285,29 @@ export const ReportsView: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {invoices.map((inv) => (
-                  <tr key={inv.id}>
-                    <td>{inv.date}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)' }}>{inv.invoiceNumber}</td>
-                    <td style={{ fontWeight: 600 }}>{inv.partyName}</td>
-                    <td>{inv.paymentMode}</td>
-                    <td style={{ color: 'var(--success-700)', fontWeight: 700 }}>Credit (Sale)</td>
-                    <td style={{ fontWeight: 800 }}>₹{inv.grandTotal.toFixed(2)}</td>
+                {invoices.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: 20, color: 'var(--neutral-400)' }}>
+                      No transactions found for the selected branch.
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  invoices.map((inv) => (
+                    <tr key={inv.id}>
+                      <td>{inv.date}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)' }}>{inv.invoiceNumber}</td>
+                      <td>
+                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 10, background: 'var(--neutral-100)', color: 'var(--neutral-700)' }}>
+                          📍 {inv.locationName || 'Main Store'}
+                        </span>
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{inv.partyName}</td>
+                      <td>{inv.paymentMode}</td>
+                      <td style={{ color: 'var(--success-700)', fontWeight: 700 }}>Credit (Sale)</td>
+                      <td style={{ fontWeight: 800 }}>₹{inv.grandTotal.toFixed(2)}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

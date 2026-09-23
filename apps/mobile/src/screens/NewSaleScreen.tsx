@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { colors } from '../theme/colors';
+import { QRScannerModal } from '../components/QRScannerModal';
 
 interface CartItem {
   id: string;
@@ -10,26 +11,61 @@ interface CartItem {
   taxRate: number;
 }
 
+const PRODUCT_CATALOG: Record<string, { name: string; price: number; taxRate: number }> = {
+  'ITM-1001': { name: 'Basmati Rice (1kg Pack)', price: 120.0, taxRate: 5.0 },
+  'ITM-1002': { name: 'Refined Sunflower Oil (1L)', price: 145.0, taxRate: 5.0 },
+  'ITM-1003': { name: 'Wireless Optical Mouse', price: 499.0, taxRate: 18.0 },
+  'ITM-1004': { name: 'USB-C Fast Charging Cable', price: 249.0, taxRate: 18.0 },
+  'ITM-1005': { name: 'Dairy Milk Silk Chocolate', price: 90.0, taxRate: 12.0 },
+  'ITM-1006': { name: 'Organic Green Tea (25 Bags)', price: 185.0, taxRate: 5.0 },
+};
+
 export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
   const [customerName, setCustomerName] = useState('Aarav Sharma');
   const [customerPhone, setCustomerPhone] = useState('+91 98765 43210');
   const [cart, setCart] = useState<CartItem[]>([
-    { id: '1', name: 'Organic Almond Milk 1L', price: 240.0, qty: 2, taxRate: 5.0 },
-    { id: '2', name: 'Lavender Body Wash 250ml', price: 350.0, qty: 1, taxRate: 18.0 }
+    { id: 'ITM-1001', name: 'Basmati Rice (1kg Pack)', price: 120.0, qty: 2, taxRate: 5.0 },
+    { id: 'ITM-1005', name: 'Dairy Milk Silk Chocolate', price: 90.0, qty: 3, taxRate: 12.0 }
   ]);
-  const [paidAmount, setPaidAmount] = useState('800');
+  const [paidAmount, setPaidAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('UPI');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
-  // Simulated QR Scan Handler
-  const handleSimulateQRScan = () => {
-    // Adds a demo scanned item or increments existing
-    const existing = cart.find(c => c.id === '1');
-    if (existing) {
-      setCart(cart.map(c => c.id === '1' ? { ...c, qty: c.qty + 1 } : c));
-      Alert.alert('QR Scanned', 'Increased quantity for Organic Almond Milk 1L');
-    } else {
-      setCart([...cart, { id: '3', name: 'Herbal Shampoo 200ml', price: 180.0, qty: 1, taxRate: 18.0 }]);
+  // Hardware Camera QR / Barcode Scan Handler
+  const handleQRScanResult = (barcodeData: string) => {
+    let cleanCode = barcodeData.trim();
+    if (cleanCode.startsWith('ITEM:')) {
+      cleanCode = cleanCode.substring(5).trim();
     }
+
+    const matchedProduct = PRODUCT_CATALOG[cleanCode] || {
+      name: `Scanned Item (${cleanCode})`,
+      price: 150.0,
+      taxRate: 5.0,
+    };
+
+    setCart((prevCart) => {
+      const existingIdx = prevCart.findIndex(c => c.id === cleanCode || c.name === matchedProduct.name);
+      if (existingIdx >= 0) {
+        const nextCart = [...prevCart];
+        nextCart[existingIdx] = {
+          ...nextCart[existingIdx],
+          qty: nextCart[existingIdx].qty + 1,
+        };
+        return nextCart;
+      } else {
+        return [
+          ...prevCart,
+          {
+            id: cleanCode,
+            name: matchedProduct.name,
+            price: matchedProduct.price,
+            qty: 1,
+            taxRate: matchedProduct.taxRate,
+          },
+        ];
+      }
+    });
   };
 
   const calculateSubtotal = () => cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
@@ -37,10 +73,11 @@ export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete
   const subtotal = calculateSubtotal();
   const tax = calculateTax();
   const grandTotal = Math.round(subtotal + tax);
-  const balanceDue = Math.max(0, grandTotal - parseFloat(paidAmount || '0'));
+  const effectivePaid = paidAmount !== '' ? parseFloat(paidAmount) : grandTotal;
+  const balanceDue = Math.max(0, grandTotal - effectivePaid);
 
   const handleCompleteSale = () => {
-    Alert.alert('Sale Completed!', `Invoice INV-2026-000142 created for ₹ ${grandTotal}.`, [
+    Alert.alert('Sale Completed!', `Invoice created for ₹ ${grandTotal.toFixed(2)}.`, [
       { text: 'Share Invoice PDF', onPress: onComplete },
       { text: 'Done', onPress: onComplete }
     ]);
@@ -72,36 +109,53 @@ export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete
         {/* Cart Items Section */}
         <View style={styles.card}>
           <View style={styles.cartHeader}>
-            <Text style={styles.sectionHeader}>Billing Cart ({cart.length} items)</Text>
-            <TouchableOpacity style={styles.scanButton} onPress={handleSimulateQRScan}>
-              <Text style={styles.scanButtonText}>📷 Scan QR</Text>
+            <Text style={styles.sectionHeader}>Billing Cart ({cart.reduce((s, c) => s + c.qty, 0)} items)</Text>
+            
+            {/* Open Hardware Camera Scanner */}
+            <TouchableOpacity 
+              style={styles.scanButton} 
+              onPress={() => setIsScannerOpen(true)}
+            >
+              <Text style={styles.scanButtonText}>📷 Open Camera Scanner</Text>
             </TouchableOpacity>
           </View>
 
-          {cart.map((item, idx) => (
-            <View key={idx} style={styles.cartItemRow}>
-              <View style={{ flex: 2 }}>
-                <Text style={styles.itemName}>{item.name}</Text>
-                <Text style={styles.itemMeta}>₹ {item.price.toFixed(2)} • GST {item.taxRate}%</Text>
-              </View>
-              <View style={styles.qtyControls}>
-                <TouchableOpacity
-                  style={styles.qtyBtn}
-                  onPress={() => setCart(cart.map((c, i) => i === idx ? { ...c, qty: Math.max(1, c.qty - 1) } : c))}
-                >
-                  <Text style={styles.qtyBtnText}>-</Text>
-                </TouchableOpacity>
-                <Text style={styles.qtyText}>{item.qty}</Text>
-                <TouchableOpacity
-                  style={styles.qtyBtn}
-                  onPress={() => setCart(cart.map((c, i) => i === idx ? { ...c, qty: c.qty + 1 } : c))}
-                >
-                  <Text style={styles.qtyBtnText}>+</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.itemTotal}>₹ {(item.price * item.qty).toFixed(2)}</Text>
+          {cart.length === 0 ? (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <Text style={{ color: colors.neutral[400], fontSize: 13 }}>Cart is empty. Tap 'Open Camera Scanner' to scan items.</Text>
             </View>
-          ))}
+          ) : (
+            cart.map((item, idx) => (
+              <View key={idx} style={styles.cartItemRow}>
+                <View style={{ flex: 2 }}>
+                  <Text style={styles.itemName}>{item.name}</Text>
+                  <Text style={styles.itemMeta}>₹ {item.price.toFixed(2)} • GST {item.taxRate}%</Text>
+                </View>
+                <View style={styles.qtyControls}>
+                  <TouchableOpacity
+                    style={styles.qtyBtn}
+                    onPress={() => {
+                      if (item.qty === 1) {
+                        setCart(cart.filter((_, i) => i !== idx));
+                      } else {
+                        setCart(cart.map((c, i) => i === idx ? { ...c, qty: c.qty - 1 } : c));
+                      }
+                    }}
+                  >
+                    <Text style={styles.qtyBtnText}>-</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.qtyText}>{item.qty}</Text>
+                  <TouchableOpacity
+                    style={styles.qtyBtn}
+                    onPress={() => setCart(cart.map((c, i) => i === idx ? { ...c, qty: c.qty + 1 } : c))}
+                  >
+                    <Text style={styles.qtyBtnText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.itemTotal}>₹ {(item.price * item.qty).toFixed(2)}</Text>
+              </View>
+            ))
+          )}
         </View>
 
         {/* Bill Summary */}
@@ -121,9 +175,10 @@ export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete
           </View>
 
           <View style={{ marginTop: 12 }}>
-            <Text style={styles.inputLabel}>Paid Amount</Text>
+            <Text style={styles.inputLabel}>Paid Amount (Leave blank for full paid)</Text>
             <TextInput
               style={styles.input}
+              placeholder={`₹ ${grandTotal.toFixed(2)}`}
               value={paidAmount}
               onChangeText={setPaidAmount}
               keyboardType="decimal-pad"
@@ -145,6 +200,13 @@ export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete
           <Text style={styles.completeBtnText}>Confirm & Generate Bill (₹ {grandTotal})</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Hardware Camera QR Scanner Modal */}
+      <QRScannerModal
+        visible={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScanSuccess={handleQRScanResult}
+      />
     </View>
   );
 };
@@ -158,8 +220,8 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: colors.neutral[200], borderRadius: 8, padding: 10, fontSize: 14, color: colors.neutral[900] },
   inputLabel: { fontSize: 12, fontWeight: '600', color: colors.neutral[700], marginBottom: 4 },
   cartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  scanButton: { backgroundColor: colors.primary[50], paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  scanButtonText: { color: colors.primary[600], fontWeight: '700', fontSize: 13 },
+  scanButton: { backgroundColor: colors.primary[500], paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+  scanButtonText: { color: '#ffffff', fontWeight: '700', fontSize: 13 },
   cartItemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.neutral[100] },
   itemName: { fontSize: 14, fontWeight: '600', color: colors.neutral[900] },
   itemMeta: { fontSize: 12, color: colors.neutral[400], marginTop: 2 },

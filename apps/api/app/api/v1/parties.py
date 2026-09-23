@@ -79,3 +79,31 @@ async def create_party(
     doc["_id"] = doc_id
     doc["businessId"] = business_id
     return PartyResponse(**doc)
+
+@router.get("/{party_id}", response_model=PartyResponse)
+async def get_party(
+    party_id: str,
+    business_id: str = Depends(get_current_business_id),
+    db = Depends(get_database)
+):
+    repo = BaseTenantRepository(db, "parties")
+    doc = await repo.get_by_id(business_id, party_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Party contact not found in current store")
+    doc["_id"] = str(doc["_id"])
+    doc["businessId"] = str(doc["businessId"])
+    return PartyResponse(**doc)
+
+@router.delete("/{party_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_party(
+    party_id: str,
+    business_id: str = Depends(get_current_business_id),
+    db = Depends(get_database)
+):
+    repo = BaseTenantRepository(db, "parties")
+    existing = await repo.get_by_id(business_id, party_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Party contact not found in current store")
+    await repo.delete_by_id(business_id, party_id)
+    return None
+

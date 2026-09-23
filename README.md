@@ -241,26 +241,26 @@ cd apps/web && npx tsc --noEmit
 ## 🔄 Recommended Build Sequence
 
 When adding new modules or building out the MVP, follow the phased order:
-1. **01. Project skeleton + architecture**
-2. **02. MongoDB connection + base models**
-3. **03. Authentication (JWT + refresh)**
-4. **04. Business tenancy + RBAC**
-5. **05. Item / Category / Unit master**
-6. **06. Party / Customer / Supplier master**
-7. **07. QR generation (`ITEM:<publicItemId>`)**
-8. **08. Mobile QR scanner + item lookup**
-9. **09. Billing calculation engine**
-10. **10. Sales transaction + stock movement**
-11. **11. Inventory movement engine & stock alerts**
-12. **12. Purchase transaction**
-13. **13. Payments In / Out**
-14. **14. Expenses**
-15. **15. Invoice PDF / Share**
-16. **16. Home Dashboard & Quick Actions**
-17. **17. Reports (P&L, Day Book, Stock Summary)**
-18. **18. Audit + Observability**
-19. **19. End-to-end testing**
-20. **20. Production deployment**
+**01. Project skeleton + architect**
+**02. MongoDB connection + base models**
+**03. Authentication (JWT + refresh)**
+**04. Business tenancy + RBAC**
+**05. Item / Category / Unit master**
+**06. Party / Customer / Supplier master**
+**07. QR generation (`ITEM:<publicItemId>`)**
+**08. Mobile QR scanner + item lookup**
+**09. Billing calculation engine**
+**10. Sales transaction + stock movement**
+**11. Inventory movement engine & stock alerts**
+**12. Purchase transaction**
+**13. Payments In / Out**
+**14. Expenses**
+**15. Invoice PDF / Share**
+**16. Home Dashboard & Quick Actions**
+**17. Reports (P&L, Day Book, Stock Summary)**
+**18. Audit + Observability**
+**19. End-to-end testing**
+**20. Production deployment**
 
 ---
 

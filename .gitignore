@@ -52,3 +52,4 @@ project details/
 project details/*
 *.mp4
 *.mov
+apps/api/uploads/*

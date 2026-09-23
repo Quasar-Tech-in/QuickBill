@@ -157,7 +157,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
         <div style={{ display: 'flex', gap: 12 }}>
           <button className="btn btn-primary" onClick={() => setIsCreateModalOpen(true)}>
             <Plus size={16} />
-            <span>+ Provision New Tenant</span>
+            <span>Provision New Tenant</span>
           </button>
           <button 
             className="btn btn-secondary" 

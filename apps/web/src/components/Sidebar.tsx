@@ -8,28 +8,78 @@ import {
   BarChart3, 
   Settings, 
   Sparkles,
-  ShieldCheck
+  ShieldCheck,
+  LogOut
 } from 'lucide-react';
 import { store } from '../services/store';
 
 interface SidebarProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  onLogout?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogout }) => {
   const activeTenant = store.getActiveTenant();
+  const currentUser = store.getCurrentUser();
+  const userRole = currentUser?.role || 'TENANT_ADMIN';
+  const isSuperAdmin = userRole === 'SUPER_ADMIN';
 
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'pos', label: 'POS Billing', icon: ReceiptText, badge: 'Fast' },
-    { id: 'inventory', label: 'Inventory & Items', icon: Package },
-    { id: 'parties', label: 'Parties & Ledger', icon: Users },
-    { id: 'transactions', label: 'Invoices & Bills', icon: FileText },
-    { id: 'reports', label: 'Reports & Analytics', icon: BarChart3 },
-    { id: 'superadmin', label: 'Super Admin', icon: ShieldCheck, badge: 'Multi-Tenant', isSuper: true },
-    { id: 'settings', label: 'Settings & DB', icon: Settings },
+  const allNavItems = [
+    { 
+      id: 'dashboard', 
+      label: 'Dashboard', 
+      icon: LayoutDashboard, 
+      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
+    },
+    { 
+      id: 'pos', 
+      label: 'POS Billing', 
+      icon: ReceiptText, 
+      badge: 'Fast', 
+      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
+    },
+    { 
+      id: 'inventory', 
+      label: 'Inventory & Items', 
+      icon: Package, 
+      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
+    },
+    { 
+      id: 'parties', 
+      label: userRole === 'CASHIER' ? 'Customer Ledger' : 'Parties & Ledger', 
+      icon: Users, 
+      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
+    },
+    { 
+      id: 'transactions', 
+      label: userRole === 'CASHIER' ? 'Counter Receipts' : 'Invoices & Bills', 
+      icon: FileText, 
+      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
+    },
+    { 
+      id: 'reports', 
+      label: 'Reports & Analytics', 
+      icon: BarChart3, 
+      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
+    },
+    { 
+      id: 'superadmin', 
+      label: 'Super Admin', 
+      icon: ShieldCheck, 
+      badge: 'Multi-Tenant', 
+      isSuper: true, 
+      roles: ['SUPER_ADMIN'] 
+    },
+    { 
+      id: 'settings', 
+      label: 'Settings & DB', 
+      icon: Settings, 
+      roles: ['SUPER_ADMIN', 'TENANT_ADMIN'] 
+    },
   ];
+
+  const navItems = allNavItems.filter(item => item.roles.includes(userRole));
 
   return (
     <aside className="sidebar">
@@ -81,18 +131,62 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
       {/* Sidebar Footer */}
       <div className="sidebar-footer">
         <div className="business-pill">
-          <div className="business-avatar">
-            {activeTenant.name.slice(0, 2).toUpperCase()}
+          <div className="business-avatar" style={{ backgroundColor: isSuperAdmin ? '#7c3aed' : undefined }}>
+            {isSuperAdmin ? '⚡' : activeTenant.name.slice(0, 2).toUpperCase()}
           </div>
-          <div style={{ overflow: 'hidden' }}>
+          <div style={{ overflow: 'hidden', flex: 1 }}>
             <p style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-              {activeTenant.name}
+              {isSuperAdmin ? 'Root Super Admin' : activeTenant.name}
             </p>
-            <p style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
-              Tenant: {activeTenant.slug}
-            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <span style={{ 
+                fontSize: '0.68rem', 
+                fontWeight: 700,
+                padding: '1px 6px',
+                borderRadius: 4,
+                backgroundColor: userRole === 'SUPER_ADMIN' ? 'rgba(124, 58, 237, 0.4)' :
+                                 userRole === 'TENANT_ADMIN' ? 'rgba(79, 70, 229, 0.4)' :
+                                 userRole === 'MANAGER' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)',
+                color: userRole === 'SUPER_ADMIN' ? '#d8b4fe' :
+                       userRole === 'TENANT_ADMIN' ? '#c7d2fe' :
+                       userRole === 'MANAGER' ? '#a7f3d0' : '#fde68a'
+              }}>
+                {userRole === 'SUPER_ADMIN' ? '⚡ Super Admin' :
+                 userRole === 'TENANT_ADMIN' ? '👑 Store Admin' :
+                 userRole === 'MANAGER' ? '🏪 Manager' : '🧾 Cashier'}
+              </span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)' }}>
+                {isSuperAdmin ? 'Platform' : activeTenant.slug}
+              </span>
+            </div>
           </div>
         </div>
+
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              marginTop: 10,
+              padding: '8px 12px',
+              backgroundColor: 'rgba(239, 68, 68, 0.15)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: 'var(--radius-md)',
+              color: '#fca5a5',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <LogOut size={14} />
+            <span>Sign Out</span>
+          </button>
+        )}
       </div>
     </aside>
   );

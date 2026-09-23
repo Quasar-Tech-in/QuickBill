@@ -70,7 +70,7 @@ A simple mobile navigation structure is recommended:
 
 1.  **Home**
 2.  **Transactions**
-3.  **+ New Transaction**
+3.  **New Transaction**
 4.  **Items**
 5.  **Reports**
 6.  **More / Business Settings**

@@ -1,3 +1,30 @@
+export type UserRole = 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'CASHIER' | 'MANAGER';
+
+export interface StoreLocation {
+  id: string;
+  businessId: string;
+  name: string;
+  code: string;
+  address?: string;
+  phone?: string;
+  isDefault?: boolean;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  businessId: string;
+  tenantName?: string;
+  token?: string;
+  assignedLocationIds?: string[];
+  isActive?: boolean;
+  createdAt?: string;
+}
+
 export interface Business {
   id: string;
   name: string;
@@ -8,28 +35,78 @@ export interface Business {
   currency: string;
 }
 
+export interface ItemLocationInventory {
+  locationId: string;
+  locationName?: string;
+  mrp?: number; // Base MRP / List Price (defaults to salePrice if not set)
+  salePrice: number; // Effective selling price (after discount)
+  purchasePrice: number;
+  currentStock: number;
+  minStockAlert: number;
+  isListed: boolean; // whether this item is active/sold at this branch
+  hasDiscount?: boolean;
+  discountType?: 'PERCENT' | 'FLAT'; // '%' or '₹'
+  discountValue?: number;
+}
+
+export interface ItemCategory {
+  id: string;
+  businessId?: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+}
+
+export interface ItemImage {
+  id: string;
+  url: string;
+  order: number; // 0, 1, 2...
+  isPrimary?: boolean;
+  name?: string;
+  sizeBytes?: number;
+  originalSizeBytes?: number;
+}
+
 export interface Item {
   id: string;
+  businessId?: string;
   publicItemId: string;
   name: string;
   sku?: string;
+  barcode?: string;
   category: string;
-  salePrice: number;
-  purchasePrice: number;
   taxRate: number; // e.g. 5, 12, 18, 0
   unit: string;
+  description?: string;
+  // Master defaults (fallback)
+  mrp?: number;
+  salePrice: number;
+  purchasePrice: number;
   currentStock: number;
   minStockAlert: number;
+  hasDiscount?: boolean;
+  discountType?: 'PERCENT' | 'FLAT';
+  discountValue?: number;
+  // Multi-location specific stock and pricing overrides
+  locations?: ItemLocationInventory[];
+  // Product image gallery with ordered indexing
+  images?: ItemImage[];
+  imageUrl?: string;
 }
 
 export interface Party {
   id: string;
+  businessId?: string;
   name: string;
   type: 'CUSTOMER' | 'SUPPLIER';
   phone?: string;
   email?: string;
   gstin?: string;
+  address?: string;
   currentBalance: number; // Positive = Receivable, Negative = Payable
+  locationIds?: string[]; // Assigned locations (empty/null means Global / All Locations)
+  locationId?: string;
+  locationName?: string;
 }
 
 export interface CartItem {
@@ -54,6 +131,9 @@ export interface InvoiceItem {
 
 export interface Invoice {
   id: string;
+  businessId?: string;
+  locationId?: string;
+  locationName?: string;
   invoiceNumber: string;
   date: string;
   partyId?: string;
@@ -74,12 +154,13 @@ export interface Invoice {
 
 export interface Payment {
   id: string;
+  businessId?: string;
   date: string;
   partyId: string;
   partyName: string;
   type: 'PAYMENT_IN' | 'PAYMENT_OUT';
   amount: number;
-  paymentMode: 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE';
+  paymentMode: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE';
   referenceNumber?: string;
   notes?: string;
 }

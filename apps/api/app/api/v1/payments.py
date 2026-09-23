@@ -89,9 +89,15 @@ async def create_payment(
     # Adjust party balance if applicable
     if party_oid:
         if payload.direction == "IN":
-            await db.parties.update_one({"_id": party_oid}, {"$inc": {"currentReceivable": -float(payload.amount)}})
+            await db.parties.update_one(
+                {"_id": party_oid, "businessId": b_oid},
+                {"$inc": {"currentReceivable": -float(payload.amount)}}
+            )
         else:
-            await db.parties.update_one({"_id": party_oid}, {"$inc": {"currentPayable": -float(payload.amount)}})
+            await db.parties.update_one(
+                {"_id": party_oid, "businessId": b_oid},
+                {"$inc": {"currentPayable": -float(payload.amount)}}
+            )
 
     doc["_id"] = str(res.inserted_id)
     doc["businessId"] = business_id

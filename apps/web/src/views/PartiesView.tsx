@@ -5,20 +5,24 @@ import {
   Search, 
   Phone, 
   Mail, 
-  ArrowDownLeft, 
-  ArrowUpRight, 
   CreditCard, 
   X,
-  FileText
+  FileText,
+  MapPin
 } from 'lucide-react';
 import { Party, Payment } from '../types';
 import { store } from '../services/store';
 
 export const PartiesView: React.FC = () => {
+  const currentUser = store.getCurrentUser();
+  const isCashier = currentUser?.role === 'CASHIER';
+  const locations = store.getAllLocations();
+
+  const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
   const [parties, setParties] = useState<Party[]>(store.getParties());
   const [payments, setPayments] = useState<Payment[]>(store.getPayments());
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>('ALL');
+  const [filterType, setFilterType] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>(isCashier ? 'CUSTOMER' : 'ALL');
 
   // Modals
   const [isAddPartyOpen, setIsAddPartyOpen] = useState(false);
@@ -32,7 +36,11 @@ export const PartiesView: React.FC = () => {
     phone: '',
     email: '',
     gstin: '',
+    address: '',
+    locationIds: [],
   });
+
+  const [partySelectedLocIds, setPartySelectedLocIds] = useState<string[]>([]);
 
   const [paymentForm, setPaymentForm] = useState({
     amount: 1000,
@@ -48,6 +56,14 @@ export const PartiesView: React.FC = () => {
   };
 
   const filteredParties = parties.filter(p => {
+    if (isCashier && p.type !== 'CUSTOMER') return false;
+    
+    // Branch Filter
+    if (selectedLocationId !== 'ALL') {
+      const matchLoc = !p.locationIds || p.locationIds.length === 0 || p.locationIds.includes(selectedLocationId) || p.locationId === selectedLocationId;
+      if (!matchLoc) return false;
+    }
+
     const matchesSearch = 
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (p.phone && p.phone.includes(searchQuery)) ||
@@ -59,7 +75,11 @@ export const PartiesView: React.FC = () => {
   const handleCreateParty = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newParty.name.trim()) return;
-    store.addParty(newParty);
+
+    store.addParty({
+      ...newParty,
+      locationIds: partySelectedLocIds.length > 0 ? partySelectedLocIds : undefined,
+    });
     refreshData();
     setIsAddPartyOpen(false);
     setNewParty({
@@ -68,7 +88,18 @@ export const PartiesView: React.FC = () => {
       phone: '',
       email: '',
       gstin: '',
+      address: '',
+      locationIds: [],
     });
+    setPartySelectedLocIds([]);
+  };
+
+  const handleTogglePartyLoc = (locId: string) => {
+    if (partySelectedLocIds.includes(locId)) {
+      setPartySelectedLocIds(partySelectedLocIds.filter(id => id !== locId));
+    } else {
+      setPartySelectedLocIds([...partySelectedLocIds, locId]);
+    }
   };
 
   const handleRecordPayment = (e: React.FormEvent) => {
@@ -79,7 +110,7 @@ export const PartiesView: React.FC = () => {
       date: new Date().toISOString().split('T')[0],
       partyId: selectedPartyForPayment.id,
       partyName: selectedPartyForPayment.name,
-      type: paymentForm.type,
+      type: isCashier ? 'PAYMENT_IN' : paymentForm.type,
       amount: paymentForm.amount,
       paymentMode: paymentForm.paymentMode,
       referenceNumber: paymentForm.referenceNumber,
@@ -94,19 +125,21 @@ export const PartiesView: React.FC = () => {
   return (
     <div className="page-container">
       {/* Top Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 16 }}>
         <div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
-            Parties & Contact Ledger
+            {isCashier ? 'Customer Directory & Due Collection' : 'Parties & Contact Ledger'}
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-            Track customer receivables, supplier payables, and record cash/bank payments.
+            {isCashier 
+              ? 'Lookup customer balances and collect pending due amounts' 
+              : 'Track customer receivables, supplier payables, and branch-wise party balances.'}
           </p>
         </div>
 
         <button className="btn btn-primary" onClick={() => setIsAddPartyOpen(true)}>
           <Plus size={16} />
-          <span>+ Add New Party</span>
+          <span>{isCashier ? 'Add New Customer' : 'Add New Party'}</span>
         </button>
       </div>
 
@@ -117,7 +150,7 @@ export const PartiesView: React.FC = () => {
             <Search size={18} style={{ position: 'absolute', left: 12, top: 10, color: 'var(--neutral-400)' }} />
             <input
               type="text"
-              placeholder="Search by contact name, phone, GSTIN..."
+              placeholder={isCashier ? 'Search customer name or phone...' : 'Search by contact name, phone, GSTIN...'}
               className="form-input"
               style={{ paddingLeft: 38, width: '100%' }}
               value={searchQuery}
@@ -125,39 +158,61 @@ export const PartiesView: React.FC = () => {
             />
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            {(['ALL', 'CUSTOMER', 'SUPPLIER'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setFilterType(t)}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 'var(--radius-full)',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  border: '1px solid',
-                  borderColor: filterType === t ? 'var(--primary-500)' : 'var(--neutral-200)',
-                  backgroundColor: filterType === t ? 'var(--primary-50)' : '#ffffff',
-                  color: filterType === t ? 'var(--primary-700)' : 'var(--neutral-600)',
-                  cursor: 'pointer',
-                }}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <MapPin size={15} color="var(--primary-600)" />
+              <select
+                className="form-select"
+                style={{ padding: '5px 10px', fontSize: '0.82rem', width: 'auto' }}
+                value={selectedLocationId}
+                onChange={(e) => setSelectedLocationId(e.target.value)}
               >
-                {t === 'ALL' ? 'All Parties' : t === 'CUSTOMER' ? 'Customers' : 'Suppliers'}
-              </button>
-            ))}
+                <option value="ALL">🌐 All Branch Locations</option>
+                {locations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>
+                    📍 {loc.name} ({loc.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {!isCashier && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                {(['ALL', 'CUSTOMER', 'SUPPLIER'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setFilterType(t)}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 'var(--radius-full)',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      border: '1px solid',
+                      borderColor: filterType === t ? 'var(--primary-500)' : 'var(--neutral-200)',
+                      backgroundColor: filterType === t ? 'var(--primary-50)' : '#ffffff',
+                      color: filterType === t ? 'var(--primary-700)' : 'var(--neutral-600)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {t === 'ALL' ? 'All' : t === 'CUSTOMER' ? 'Customers' : 'Suppliers'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Parties Table */}
-      <div className="card" style={{ marginBottom: 28 }}>
+      <div className="card" style={{ marginBottom: 24 }}>
         <div className="table-responsive">
           <table className="table">
             <thead>
               <tr>
-                <th>Party Name</th>
+                <th>Party / Contact Name</th>
                 <th>Type</th>
-                <th>Contact Info</th>
+                <th>Phone & Email</th>
+                <th>Branch Assignment</th>
                 <th>GSTIN</th>
                 <th>Current Balance</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
@@ -168,28 +223,44 @@ export const PartiesView: React.FC = () => {
                 const isReceivable = party.currentBalance > 0;
                 const isPayable = party.currentBalance < 0;
 
+                const assignedLocNames = (party.locationIds || []).map(id => {
+                  const f = locations.find(l => l.id === id);
+                  return f ? f.name : id;
+                });
+
                 return (
                   <tr key={party.id}>
                     <td>
                       <div style={{ fontWeight: 700, color: 'var(--neutral-900)' }}>{party.name}</div>
+                      {party.address && <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)' }}>{party.address}</div>}
                     </td>
                     <td>
                       <span
+                        className="badge"
                         style={{
                           backgroundColor: party.type === 'CUSTOMER' ? 'var(--primary-50)' : 'var(--warning-50)',
                           color: party.type === 'CUSTOMER' ? 'var(--primary-700)' : 'var(--warning-700)',
-                          padding: '3px 8px',
-                          borderRadius: 4,
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
                         }}
                       >
                         {party.type}
                       </span>
                     </td>
                     <td>
-                      <div style={{ fontSize: '0.82rem', color: 'var(--neutral-700)' }}>{party.phone || '—'}</div>
+                      <div style={{ fontSize: '0.85rem' }}>{party.phone || '—'}</div>
                       {party.email && <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>{party.email}</div>}
+                    </td>
+                    <td>
+                      {assignedLocNames.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {assignedLocNames.map((name, i) => (
+                            <span key={i} style={{ fontSize: '0.72rem', padding: '2px 6px', background: 'var(--neutral-100)', borderRadius: 10, color: 'var(--neutral-700)' }}>
+                              📍 {name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--neutral-500)' }}>🌐 All Branches (Global)</span>
+                      )}
                     </td>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
                       {party.gstin || 'Unregistered'}
@@ -344,6 +415,17 @@ export const PartiesView: React.FC = () => {
                 </div>
 
                 <div className="form-group">
+                  <label className="form-label">Address / Location</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Street address, city"
+                    value={newParty.address}
+                    onChange={(e) => setNewParty({ ...newParty, address: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group">
                   <label className="form-label">GSTIN (Optional)</label>
                   <input
                     type="text"
@@ -352,6 +434,26 @@ export const PartiesView: React.FC = () => {
                     value={newParty.gstin}
                     onChange={(e) => setNewParty({ ...newParty, gstin: e.target.value })}
                   />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" style={{ fontWeight: 600 }}>Branch Location Assignment</label>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', marginBottom: 6 }}>
+                    Select which store branches this party is registered at (leave unchecked for Global / All Branches).
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, background: 'var(--neutral-50)', borderRadius: 6, border: '1px solid var(--neutral-200)' }}>
+                    {locations.map((loc) => (
+                      <label key={loc.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={partySelectedLocIds.includes(loc.id)}
+                          onChange={() => handleTogglePartyLoc(loc.id)}
+                        />
+                        <span>{loc.name}</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontFamily: 'var(--font-mono)' }}>({loc.code})</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
 

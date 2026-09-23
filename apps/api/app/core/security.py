@@ -1,13 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 import jwt
-from passlib.context import CryptContext
+import bcrypt
 from pydantic import BaseModel
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt", "argon2"], deprecated="auto")
 security_bearer = HTTPBearer(auto_error=False)
 
 class TokenPayload(BaseModel):
@@ -17,12 +16,18 @@ class TokenPayload(BaseModel):
     permissions: List[str] = []
     default_business_id: Optional[str] = None
     authorized_business_ids: List[str] = []
+    assigned_location_ids: List[str] = []
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return bcrypt.checkpw(plain_password.encode('utf-8')[:72], hashed_password.encode('utf-8'))
+    except Exception:
+        return False
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode('utf-8')[:72], salt).decode('utf-8')
+
 
 def create_access_token(payload: TokenPayload, expires_delta: Optional[timedelta] = None) -> str:
     expire = datetime.now(timezone.utc) + (

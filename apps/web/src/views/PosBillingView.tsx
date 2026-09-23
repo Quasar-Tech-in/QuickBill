@@ -9,7 +9,8 @@ import {
   Plus, 
   Minus,
   Sparkles,
-  Printer
+  Printer,
+  Package
 } from 'lucide-react';
 import { Item, Party, CartItem, Invoice } from '../types';
 import { store } from '../services/store';
@@ -19,6 +20,7 @@ interface PosBillingViewProps {
 }
 
 export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated }) => {
+  const activeLocation = store.getActiveLocation();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -27,8 +29,9 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const [paidAmountInput, setPaidAmountInput] = useState<string>('');
   const [notes, setNotes] = useState('');
 
-  const items = store.getItems();
-  const parties = store.getParties().filter(p => p.type === 'CUSTOMER');
+  // Only listed items for this active branch
+  const items = store.getItems(activeLocation.id, false);
+  const parties = store.getParties(activeLocation.id).filter(p => p.type === 'CUSTOMER');
 
   // Categories list
   const categories = ['ALL', ...Array.from(new Set(items.map(i => i.category)))];
@@ -38,13 +41,23 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     const matchesSearch = 
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.publicItemId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.sku && item.sku.toLowerCase().includes(searchQuery.toLowerCase()));
+      (item.sku && item.sku.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (item.barcode && item.barcode.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesCategory = selectedCategory === 'ALL' || item.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
   // Add Item to Cart
   const handleAddToCart = (item: Item) => {
+    let itemDiscountPercent = 0;
+    if (item.hasDiscount && item.discountValue && item.discountValue > 0) {
+      if (item.discountType === 'PERCENT') {
+        itemDiscountPercent = item.discountValue;
+      } else if (item.mrp && item.mrp > 0) {
+        itemDiscountPercent = Number(((item.discountValue / item.mrp) * 100).toFixed(1));
+      }
+    }
+
     setCart((prevCart) => {
       const existingIdx = prevCart.findIndex(c => c.item.id === item.id);
       if (existingIdx >= 0) {
@@ -64,7 +77,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
             item,
             quantity: 1,
             unitPrice: item.salePrice,
-            discountPercent: 0,
+            discountPercent: itemDiscountPercent,
             taxRate: item.taxRate,
             lineTotal: item.salePrice,
           },
@@ -167,7 +180,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     <div className="page-container" style={{ paddingBottom: 16 }}>
       <div className="pos-layout">
         {/* Left Column: Product Catalog & Search */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%', minHeight: 0, overflow: 'hidden' }}>
           {/* Search Bar & Category Filter */}
           <div className="card" style={{ padding: 16 }}>
             <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
@@ -214,24 +227,60 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           <div className="item-catalog-grid">
             {filteredItems.map((item) => (
               <div key={item.id} className="pos-item-card" onClick={() => handleAddToCart(item)}>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
-                      {item.publicItemId}
-                    </span>
-                    <span style={{ fontSize: '0.7rem', backgroundColor: 'var(--neutral-100)', padding: '2px 6px', borderRadius: 4, color: 'var(--neutral-600)' }}>
-                      GST {item.taxRate}%
-                    </span>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <div style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 8,
+                    backgroundColor: 'var(--neutral-100)',
+                    border: '1px solid var(--neutral-200)',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>
+                    {item.imageUrl || (item.images && item.images.length > 0 && item.images[0].url) ? (
+                      <img
+                        src={item.imageUrl || item.images![0].url}
+                        alt={item.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <Package size={20} color="var(--neutral-400)" />
+                    )}
                   </div>
-                  <p style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--neutral-900)', lineHeight: 1.3 }}>
-                    {item.name}
-                  </p>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 2 }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--neutral-400)' }}>
+                        {item.publicItemId}
+                      </span>
+                      <span style={{ fontSize: '0.68rem', backgroundColor: 'var(--neutral-100)', padding: '1px 5px', borderRadius: 4, color: 'var(--neutral-600)' }}>
+                        GST {item.taxRate}%
+                      </span>
+                    </div>
+                    <p style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--neutral-900)', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                      {item.name}
+                    </p>
+                  </div>
                 </div>
 
-                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--primary-600)' }}>
-                    ₹{item.salePrice.toFixed(2)}
-                  </span>
+                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                  <div>
+                    <span style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--primary-600)' }}>
+                      ₹{item.salePrice.toFixed(2)}
+                    </span>
+                    {item.hasDiscount && item.discountValue && item.discountValue > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
+                        <del style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
+                          ₹{(item.mrp || item.salePrice).toFixed(2)}
+                        </del>
+                        <span style={{ fontSize: '0.65rem', padding: '1px 4px', borderRadius: 3, background: 'var(--success-50)', color: 'var(--success-700)', fontWeight: 700 }}>
+                          {item.discountType === 'PERCENT' ? `${item.discountValue}% OFF` : `₹${item.discountValue} OFF`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                   <span style={{ fontSize: '0.75rem', color: item.currentStock <= item.minStockAlert ? 'var(--danger-500)' : 'var(--neutral-400)', fontWeight: 600 }}>
                     Stock: {item.currentStock} {item.unit}
                   </span>

@@ -8,25 +8,25 @@ class ItemBase(BaseSchema):
     name: str = Field(..., min_length=1, max_length=200)
     sku: Optional[str] = Field(None, max_length=100)
     unit: str = Field(default="pcs", max_length=20)
-    purchase_price: Decimal = Field(default=Decimal("0.00"), ge=0)
-    sale_price: Decimal = Field(..., ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
-    category_id: Optional[str] = None
-    min_stock_alert: int = Field(default=5, ge=0)
+    purchase_price: Decimal = Field(default=Decimal("0.00"), ge=0, alias="purchasePrice")
+    sale_price: Decimal = Field(..., ge=0, alias="salePrice")
+    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100, alias="taxRate")
+    category_id: Optional[str] = Field(None, alias="categoryId")
+    min_stock_alert: int = Field(default=5, ge=0, alias="minStockAlert")
 
 class ItemCreate(ItemBase):
-    opening_stock: int = Field(default=0, ge=0)
+    opening_stock: int = Field(default=0, ge=0, alias="openingStock")
 
 class ItemUpdate(BaseSchema):
     name: Optional[str] = None
     sku: Optional[str] = None
     unit: Optional[str] = None
-    purchase_price: Optional[Decimal] = None
-    sale_price: Optional[Decimal] = None
-    tax_rate: Optional[Decimal] = None
-    category_id: Optional[str] = None
-    min_stock_alert: Optional[int] = None
-    is_active: Optional[bool] = None
+    purchase_price: Optional[Decimal] = Field(None, alias="purchasePrice")
+    sale_price: Optional[Decimal] = Field(None, alias="salePrice")
+    tax_rate: Optional[Decimal] = Field(None, alias="taxRate")
+    category_id: Optional[str] = Field(None, alias="categoryId")
+    min_stock_alert: Optional[int] = Field(None, alias="minStockAlert")
+    is_active: Optional[bool] = Field(None, alias="isActive")
 
 class ItemResponse(ItemBase):
     id: str = Field(..., alias="_id")
@@ -37,3 +37,4 @@ class ItemResponse(ItemBase):
     is_active: bool = Field(default=True, alias="isActive")
     created_at: datetime = Field(..., alias="createdAt")
     updated_at: Optional[datetime] = Field(None, alias="updatedAt")
+

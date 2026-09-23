@@ -3,11 +3,7 @@ import {
   FileText, 
   Search, 
   Printer, 
-  Eye, 
-  Filter, 
-  Calendar, 
-  CheckCircle2, 
-  Clock 
+  MapPin
 } from 'lucide-react';
 import { Invoice } from '../types';
 import { store } from '../services/store';
@@ -18,31 +14,36 @@ interface TransactionsViewProps {
 }
 
 export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoice }) => {
-  const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices());
+  const locations = store.getAllLocations();
+  const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
+  const [invoices] = useState<Invoice[]>(store.getInvoices());
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID'>('ALL');
 
   const filteredInvoices = invoices.filter((inv) => {
+    if (selectedLocationId !== 'ALL' && inv.locationId !== selectedLocationId) {
+      return false;
+    }
     const matchesSearch = 
       inv.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      inv.partyName.toLowerCase().includes(searchQuery.toLowerCase());
+      inv.partyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (inv.locationName && inv.locationName.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesStatus = statusFilter === 'ALL' || inv.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
   const totalSalesAmount = filteredInvoices.reduce((sum, i) => sum + i.grandTotal, 0);
-  const totalBalanceDue = filteredInvoices.reduce((sum, i) => sum + i.balanceAmount, 0);
 
   return (
     <div className="page-container">
       {/* Top Title */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 16 }}>
         <div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
             Invoices & Billing History
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-            Audit generated bills, print tax receipts, and track payment settlements.
+            Audit generated bills across branch locations, print tax receipts, and track settlements.
           </p>
         </div>
 
@@ -63,7 +64,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
             <Search size={18} style={{ position: 'absolute', left: 12, top: 10, color: 'var(--neutral-400)' }} />
             <input
               type="text"
-              placeholder="Search invoice number, customer name..."
+              placeholder="Search invoice number, customer name, branch..."
               className="form-input"
               style={{ paddingLeft: 38, width: '100%' }}
               value={searchQuery}
@@ -71,26 +72,45 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
             />
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            {(['ALL', 'PAID', 'PARTIAL', 'UNPAID'] as const).map((status) => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 'var(--radius-full)',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  border: '1px solid',
-                  borderColor: statusFilter === status ? 'var(--primary-500)' : 'var(--neutral-200)',
-                  backgroundColor: statusFilter === status ? 'var(--primary-50)' : '#ffffff',
-                  color: statusFilter === status ? 'var(--primary-700)' : 'var(--neutral-600)',
-                  cursor: 'pointer',
-                }}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <MapPin size={15} color="var(--primary-600)" />
+              <select
+                className="form-select"
+                style={{ padding: '5px 10px', fontSize: '0.82rem', width: 'auto' }}
+                value={selectedLocationId}
+                onChange={(e) => setSelectedLocationId(e.target.value)}
               >
-                {status}
-              </button>
-            ))}
+                <option value="ALL">🌐 All Branches</option>
+                {locations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>
+                    📍 {loc.name} ({loc.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: 6 }}>
+              {(['ALL', 'PAID', 'PARTIAL', 'UNPAID'] as const).map((status) => (
+                <button
+                  key={status}
+                  onClick={() => setStatusFilter(status)}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: 'var(--radius-full)',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    border: '1px solid',
+                    borderColor: statusFilter === status ? 'var(--primary-500)' : 'var(--neutral-200)',
+                    backgroundColor: statusFilter === status ? 'var(--primary-50)' : '#ffffff',
+                    color: statusFilter === status ? 'var(--primary-700)' : 'var(--neutral-600)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -103,6 +123,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
               <tr>
                 <th>Invoice #</th>
                 <th>Date</th>
+                <th>Branch Location</th>
                 <th>Customer / Party</th>
                 <th>Payment Mode</th>
                 <th>Subtotal</th>
@@ -116,7 +137,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
             <tbody>
               {filteredInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', padding: 28, color: 'var(--neutral-400)' }}>
+                  <td colSpan={11} style={{ textAlign: 'center', padding: 28, color: 'var(--neutral-400)' }}>
                     No invoices match your search.
                   </td>
                 </tr>
@@ -127,6 +148,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
                       {inv.invoiceNumber}
                     </td>
                     <td>{inv.date}</td>
+                    <td>
+                      <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 10, background: 'var(--neutral-100)', color: 'var(--neutral-700)' }}>
+                        📍 {inv.locationName || 'Main Store'}
+                      </span>
+                    </td>
                     <td style={{ fontWeight: 600 }}>{inv.partyName}</td>
                     <td>
                       <span style={{ fontSize: '0.75rem', fontWeight: 600, backgroundColor: 'var(--neutral-100)', padding: '3px 8px', borderRadius: 4 }}>
