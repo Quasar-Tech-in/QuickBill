@@ -882,6 +882,32 @@ class StoreService {
     return newParty;
   }
 
+  updateParty(partyId: string, updates: Partial<Party>): Party | undefined {
+    const activeId = this.currentTenant.id;
+    const p = this.parties.find(
+      x => (x.businessId || DEFAULT_TENANTS[0].id) === activeId && x.id === partyId
+    );
+    if (p) {
+      Object.assign(p, updates);
+      this.saveToStorage();
+      return p;
+    }
+    return undefined;
+  }
+
+  findPartyByPhone(phone: string, locationId?: string): Party | undefined {
+    if (!phone) return undefined;
+    const cleanQuery = phone.replace(/[\s\-\+]/g, '').replace(/^91/, '').replace(/^0/, '');
+    if (cleanQuery.length < 5) return undefined;
+
+    const partyList = this.getParties(locationId);
+    return partyList.find(p => {
+      if (!p.phone) return false;
+      const cleanPartyPhone = p.phone.replace(/[\s\-\+]/g, '').replace(/^91/, '').replace(/^0/, '');
+      return cleanPartyPhone === cleanQuery || cleanPartyPhone.endsWith(cleanQuery) || cleanQuery.endsWith(cleanPartyPhone);
+    });
+  }
+
   updatePartyBalance(partyId: string, delta: number) {
     const activeId = this.currentTenant.id;
     const p = this.parties.find(

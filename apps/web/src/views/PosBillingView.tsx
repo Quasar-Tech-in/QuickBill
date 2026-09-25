@@ -154,18 +154,15 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     return matchesSearch && matchesCategory;
   });
 
-  // Handle Customer Selection Dropdown in Checkout Modal
-  const handleSelectParty = (partyId: string) => {
-    setSelectedPartyId(partyId);
-    if (!partyId) {
-      setCustomerName('Walk-in Retail Customer');
-      setCustomerPhone('');
-      return;
-    }
-    const found = parties.find(p => p.id === partyId);
-    if (found) {
-      setCustomerName(found.name);
-      setCustomerPhone(found.phone || '');
+  // Handle Customer Phone Input & Live Lookup
+  const handlePhoneChange = (newPhone: string) => {
+    setCustomerPhone(newPhone);
+    const matched = store.findPartyByPhone(newPhone, activeLocation.id);
+    if (matched) {
+      setSelectedPartyId(matched.id);
+      setCustomerName(matched.name);
+    } else {
+      setSelectedPartyId('');
     }
   };
 
@@ -380,8 +377,51 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const handleConfirmGenerateBill = async () => {
     if (cart.length === 0) return;
 
-    const finalCustomerName = customerName.trim() || 'Walk-in Retail Customer';
-    const finalCustomerPhone = customerPhone.trim() || undefined;
+    const trimmedPhone = customerPhone.trim();
+    const trimmedName = customerName.trim();
+
+    let partyId = selectedPartyId || undefined;
+    let finalCustomerName = trimmedName;
+
+    // 1. Existing customer party linked
+    if (partyId) {
+      const existingParty = parties.find(p => p.id === partyId);
+      if (existingParty && trimmedName && trimmedName !== existingParty.name) {
+        // User edited the name -> Update party record in store
+        store.updateParty(partyId, { name: trimmedName });
+        finalCustomerName = trimmedName;
+      } else if (existingParty) {
+        finalCustomerName = existingParty.name;
+      }
+    } else if (trimmedPhone) {
+      // 2. Lookup if phone matches an existing customer not yet linked
+      const matched = store.findPartyByPhone(trimmedPhone, activeLocation.id);
+      if (matched) {
+        partyId = matched.id;
+        if (trimmedName && trimmedName !== matched.name) {
+          store.updateParty(matched.id, { name: trimmedName });
+          finalCustomerName = trimmedName;
+        } else {
+          finalCustomerName = matched.name;
+        }
+      } else if (trimmedName && trimmedName.toLowerCase() !== 'walk-in retail customer') {
+        // 3. New Customer -> Auto-register in store.parties
+        const newParty = store.addParty({
+          name: trimmedName,
+          phone: trimmedPhone,
+          type: 'CUSTOMER',
+          locationIds: [activeLocation.id],
+        });
+        partyId = newParty.id;
+        finalCustomerName = newParty.name;
+      }
+    }
+
+    if (!finalCustomerName) {
+      finalCustomerName = 'Walk-in Retail Customer';
+    }
+
+    const finalCustomerPhone = trimmedPhone || undefined;
 
     const invoiceLines = cart.map(c => {
       const discountedLine = c.unitPrice * c.quantity * discountFactor;
@@ -403,7 +443,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
     const created = await store.createInvoice({
       date: new Date().toISOString().split('T')[0],
-      partyId: selectedPartyId || undefined,
+      partyId: partyId || undefined,
       partyName: finalCustomerName,
       partyPhone: finalCustomerPhone,
       consumerName: finalCustomerName,
@@ -438,6 +478,9 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     setNotes('');
     setShowDiscount(false);
     setOrderDiscountValue('0');
+    setCustomerPhone('');
+    setCustomerName('Walk-in Retail Customer');
+    setSelectedPartyId('');
     setIsCheckoutModalOpen(false);
 
     // Refresh items and stocks immediately
@@ -1194,10 +1237,9 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
       {/* Post-Item Selection: Consumer Information & Bill Generation Confirmation Modal */}
       {isCheckoutModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsCheckoutModalOpen(false)}>
+        <div className="modal-overlay">
           <div 
             className="modal-content" 
-            onClick={(e) => e.stopPropagation()} 
             style={{ maxWidth: 540, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: 'var(--radius-lg)', overflow: 'hidden', backgroundColor: '#ffffff' }}
           >
             {/* Modal Header */}
@@ -1237,72 +1279,96 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
             <div className="card-body" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', flex: 1 }}>
               
               {/* 1. Consumer / Customer Information Section */}
-              <div style={{ backgroundColor: 'var(--neutral-50)', padding: 12, borderRadius: 8, border: '1px solid var(--neutral-200)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{ backgroundColor: 'var(--neutral-50)', padding: 14, borderRadius: 8, border: '1px solid var(--neutral-200)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <User size={14} color="var(--primary-600)" />
+                    <User size={15} color="var(--primary-600)" />
                     <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--neutral-800)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                      Consumer Details
+                      Customer / Party Information
                     </span>
                   </div>
-                  {selectedParty && selectedParty.currentBalance !== 0 && (
-                    <span style={{ fontSize: '0.72rem', color: selectedParty.currentBalance > 0 ? 'var(--danger-700)' : 'var(--success-700)', fontWeight: 700 }}>
-                      Outstanding: ₹{selectedParty.currentBalance.toFixed(2)}
+                  {selectedParty ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: '0.72rem', background: 'var(--success-100)', color: 'var(--success-700)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                        ✓ Existing Customer
+                      </span>
+                      {selectedParty.currentBalance !== 0 && (
+                        <span style={{ fontSize: '0.72rem', color: selectedParty.currentBalance > 0 ? 'var(--danger-700)' : 'var(--success-700)', fontWeight: 700 }}>
+                          Bal: ₹{selectedParty.currentBalance.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  ) : customerPhone.trim().length >= 5 ? (
+                    <span style={{ fontSize: '0.72rem', background: 'var(--primary-100)', color: 'var(--primary-700)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                      🆕 New Customer (will auto-save)
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)', fontWeight: 500 }}>
+                      Walk-in Retail Customer
                     </span>
                   )}
                 </div>
 
-                {/* Pick from existing or type custom */}
-                <div style={{ marginBottom: 8 }}>
-                  <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--neutral-500)', marginBottom: 3, fontWeight: 600 }}>
-                    Select Registered Customer (Optional)
-                  </label>
-                  <select 
-                    className="form-select"
-                    value={selectedPartyId} 
-                    onChange={(e) => handleSelectParty(e.target.value)}
-                    style={{ fontSize: '0.82rem', padding: '6px 10px', width: '100%', boxSizing: 'border-box' }}
-                  >
-                    <option value="">Walk-in Retail Customer (Default)</option>
-                    {parties.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} {p.phone ? `(${p.phone})` : ''} {p.currentBalance > 0 ? `- Bal ₹${p.currentBalance}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Consumer Name & Phone Inputs */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 8 }}>
+                {/* Phone Number (FIRST) & Customer Name (SECOND) Inputs */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 10 }}>
+                  {/* 1. Phone Number Input (First) */}
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--neutral-500)', marginBottom: 3, fontWeight: 600 }}>
-                      Consumer / Bill Name
+                    <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--neutral-600)', marginBottom: 3, fontWeight: 700 }}>
+                      Mobile / Phone No. <span style={{ color: 'var(--primary-600)', fontWeight: 500 }}>(Lookup)</span>
                     </label>
-                    <div style={{ position: 'relative' }}>
-                      <User size={13} style={{ position: 'absolute', left: 8, top: 8, color: 'var(--neutral-400)' }} />
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <div style={{ position: 'absolute', left: 10, display: 'flex', alignItems: 'center', pointerEvents: 'none', color: selectedParty ? 'var(--success-600)' : 'var(--neutral-400)' }}>
+                        <Phone size={15} />
+                      </div>
                       <input
-                        type="text"
-                        placeholder="Consumer Name"
+                        type="tel"
+                        placeholder="e.g. 9876543210"
                         className="form-input"
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        style={{ fontSize: '0.82rem', paddingLeft: 26, paddingTop: 5, paddingBottom: 5, width: '100%', boxSizing: 'border-box' }}
+                        value={customerPhone}
+                        onChange={(e) => handlePhoneChange(e.target.value)}
+                        style={{ 
+                          fontSize: '0.84rem', 
+                          lineHeight: 1.4,
+                          paddingLeft: 32, 
+                          paddingTop: 8, 
+                          paddingBottom: 8, 
+                          height: 38,
+                          width: '100%', 
+                          boxSizing: 'border-box',
+                          fontWeight: 600,
+                          borderColor: selectedParty ? 'var(--success-500)' : undefined,
+                          backgroundColor: selectedParty ? '#f0fdf4' : '#ffffff'
+                        }}
                       />
                     </div>
                   </div>
+
+                  {/* 2. Customer / Bill Name Input (Second) */}
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--neutral-500)', marginBottom: 3, fontWeight: 600 }}>
-                      Mobile / Phone No.
+                    <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--neutral-600)', marginBottom: 3, fontWeight: 700 }}>
+                      Customer / Bill Name
                     </label>
-                    <div style={{ position: 'relative' }}>
-                      <Phone size={13} style={{ position: 'absolute', left: 8, top: 8, color: 'var(--neutral-400)' }} />
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <div style={{ position: 'absolute', left: 10, display: 'flex', alignItems: 'center', pointerEvents: 'none', color: 'var(--neutral-400)' }}>
+                        <User size={15} />
+                      </div>
                       <input
-                        type="tel"
-                        placeholder="Phone Number"
+                        type="text"
+                        placeholder="Customer Name (e.g. Rahul Sharma)"
                         className="form-input"
-                        value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value)}
-                        style={{ fontSize: '0.82rem', paddingLeft: 26, paddingTop: 5, paddingBottom: 5, width: '100%', boxSizing: 'border-box' }}
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        style={{ 
+                          fontSize: '0.84rem', 
+                          lineHeight: 1.4,
+                          paddingLeft: 32, 
+                          paddingTop: 8, 
+                          paddingBottom: 8, 
+                          height: 38,
+                          width: '100%', 
+                          boxSizing: 'border-box', 
+                          fontWeight: 600 
+                        }}
                       />
                     </div>
                   </div>
@@ -1587,7 +1653,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
               </div>
             </div>
 
-            {/* Modal Actions Footer - Sticky & High Visibility */}
+            {/* Modal Actions Footer - Sticky & Balanced Visibility */}
             <div 
               style={{
                 padding: '14px 20px',
@@ -1596,27 +1662,81 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'flex-end',
-                gap: 12,
+                gap: 10,
                 flexShrink: 0,
-                boxShadow: '0 -2px 10px rgba(0,0,0,0.04)'
+                boxShadow: '0 -2px 10px rgba(0,0,0,0.03)'
               }}
             >
               <button 
                 type="button" 
-                className="btn btn-secondary" 
                 onClick={() => setIsCheckoutModalOpen(false)}
-                style={{ fontSize: '0.88rem', padding: '9px 18px', fontWeight: 600 }}
+                style={{ 
+                  height: 38,
+                  fontSize: '0.86rem', 
+                  padding: '0 16px', 
+                  fontWeight: 600,
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--neutral-300)',
+                  backgroundColor: '#ffffff',
+                  color: 'var(--neutral-700)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  cursor: 'pointer',
+                  boxShadow: 'var(--shadow-sm)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--neutral-100)';
+                  e.currentTarget.style.borderColor = 'var(--neutral-400)';
+                  e.currentTarget.style.color = 'var(--neutral-900)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#ffffff';
+                  e.currentTarget.style.borderColor = 'var(--neutral-300)';
+                  e.currentTarget.style.color = 'var(--neutral-700)';
+                }}
               >
-                Cancel / Edit Cart
+                <X size={15} />
+                <span>Cancel</span>
               </button>
+
               <button 
                 type="button" 
-                className="btn btn-primary" 
                 onClick={handleConfirmGenerateBill}
-                style={{ fontSize: '0.92rem', fontWeight: 800, padding: '9px 22px', display: 'flex', alignItems: 'center', gap: 6, boxShadow: 'var(--shadow-md)' }}
+                style={{ 
+                  height: 38,
+                  fontSize: '0.88rem', 
+                  fontWeight: 700, 
+                  padding: '0 22px', 
+                  display: 'inline-flex', 
+                  alignItems: 'center', 
+                  gap: 7,
+                  borderRadius: 'var(--radius-md)',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(79, 70, 229, 0.3)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 4px 14px rgba(79, 70, 229, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'none';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(79, 70, 229, 0.3)';
+                }}
+                onMouseDown={(e) => {
+                  e.currentTarget.style.transform = 'scale(0.98)';
+                }}
+                onMouseUp={(e) => {
+                  e.currentTarget.style.transform = 'none';
+                }}
               >
-                <CheckCircle size={17} />
-                <span>Confirm & Generate Bill (₹{grandTotal.toFixed(2)})</span>
+                <CheckCircle size={16} />
+                <span>Confirm & Generate Bill</span>
               </button>
             </div>
           </div>
