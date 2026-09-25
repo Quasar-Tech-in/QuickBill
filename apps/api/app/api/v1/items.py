@@ -78,8 +78,9 @@ async def create_item(
         "salePrice": float(payload.sale_price),
         "taxRate": float(payload.tax_rate),
         "categoryId": payload.category_id,
-        "currentStock": payload.opening_stock,
-        "minStockAlert": payload.min_stock_alert,
+        "currentStock": float(payload.opening_stock),
+        "minStockAlert": float(payload.min_stock_alert),
+        "allowParts": bool(payload.allow_parts),
         "qrPayload": f"ITEM:{public_id}",
         "isActive": True,
         "createdAt": now,
@@ -142,9 +143,12 @@ async def update_item(
     if "tax_rate" in update_data:
         update_data["taxRate"] = float(update_data.pop("tax_rate"))
     if "min_stock_alert" in update_data:
-        update_data["minStockAlert"] = update_data.pop("min_stock_alert")
+        update_data["minStockAlert"] = float(update_data.pop("min_stock_alert"))
+    if "allow_parts" in update_data:
+        update_data["allowParts"] = bool(update_data.pop("allow_parts"))
     if "category_id" in update_data:
         update_data["categoryId"] = update_data.pop("category_id")
+
     
     update_data["updatedAt"] = datetime.now(timezone.utc)
 

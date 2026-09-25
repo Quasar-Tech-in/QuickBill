@@ -92,6 +92,7 @@ export interface Item {
   // Product image gallery with ordered indexing
   images?: ItemImage[];
   imageUrl?: string;
+  allowParts?: boolean; // Sell in parts / allow fractional quantity (e.g. 1.506 kg)
 }
 
 export interface Party {
@@ -118,6 +119,7 @@ export interface CartItem {
   discountValue?: number;
   taxRate: number;
   lineTotal: number;
+  allowParts?: boolean;
 }
 
 export interface InvoiceItem {

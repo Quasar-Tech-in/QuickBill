@@ -45,6 +45,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   // Cart State (Synchronized with store.posCart)
   const [cart, setCart] = useState<CartItem[]>(store.getPosCart());
+  // Map of raw typed input string per item to allow typing "0.", "0.0", "0.01" without React resetting mid-keystroke
+  const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({});
 
   // Subscribe to store posCart updates (e.g. when cleared upon location switch)
   useEffect(() => {
@@ -183,12 +185,20 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       }
     }
 
+    setQtyInputMap((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
+
     updateCart((prevCart) => {
       const existingIdx = prevCart.findIndex(c => c.item.id === item.id);
       if (existingIdx >= 0) {
         const nextCart = [...prevCart];
-        const newQty = nextCart[existingIdx].quantity + 1;
-        const lineTotal = newQty * item.salePrice;
+        const newQty = item.allowParts
+          ? Number((nextCart[existingIdx].quantity + 1).toFixed(3))
+          : nextCart[existingIdx].quantity + 1;
+        const lineTotal = Number((newQty * item.salePrice).toFixed(2));
         nextCart[existingIdx] = {
           ...nextCart[existingIdx],
           quantity: newQty,
@@ -204,7 +214,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
             unitPrice: item.salePrice,
             discountPercent: itemDiscountPercent,
             taxRate: item.taxRate,
-            lineTotal: item.salePrice,
+            lineTotal: Number((1 * item.salePrice).toFixed(2)),
+            allowParts: item.allowParts,
           },
         ];
       }
@@ -213,16 +224,23 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   // Adjust Qty by step
   const handleUpdateQty = (itemId: string, delta: number) => {
+    setQtyInputMap((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
     updateCart((prevCart) => {
       return prevCart
         .map((c) => {
           if (c.item.id === itemId) {
-            const nextQty = c.quantity + delta;
+            const nextQty = c.item.allowParts
+              ? Number((c.quantity + delta).toFixed(3))
+              : (c.quantity + delta);
             if (nextQty <= 0) return null;
             return {
               ...c,
               quantity: nextQty,
-              lineTotal: nextQty * c.unitPrice,
+              lineTotal: Number((nextQty * c.unitPrice).toFixed(2)),
             };
           }
           return c;
@@ -231,29 +249,44 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     });
   };
 
-  // Set Qty directly (manual input)
+  // Set Qty directly (manual input with exact typing preservation for 0.01 etc.)
   const handleSetQty = (itemId: string, rawVal: string) => {
-    if (rawVal === '') {
-      updateCart((prevCart) =>
-        prevCart.map((c) =>
-          c.item.id === itemId
-            ? { ...c, quantity: 1, lineTotal: 1 * c.unitPrice }
-            : c
-        )
-      );
+    // Only allow digits and at most one decimal point
+    if (rawVal !== '' && !/^\d*\.?\d*$/.test(rawVal)) {
       return;
     }
-    const val = parseInt(rawVal, 10);
-    if (isNaN(val) || val <= 0) return;
+
+    setQtyInputMap((prev) => ({ ...prev, [itemId]: rawVal }));
+
+    if (rawVal === '' || rawVal === '.' || rawVal.endsWith('.')) {
+      if (rawVal === '') {
+        updateCart((prevCart) =>
+          prevCart.map((c) =>
+            c.item.id === itemId
+              ? { ...c, quantity: 0, lineTotal: 0 }
+              : c
+          )
+        );
+      }
+      return;
+    }
+
+    const targetItem = cart.find(c => c.item.id === itemId)?.item;
+    const isAllowParts = !!targetItem?.allowParts;
+    const val = isAllowParts ? parseFloat(rawVal) : parseInt(rawVal, 10);
+    if (isNaN(val) || val < 0) return;
+
     updateCart((prevCart) =>
       prevCart.map((c) => {
         if (c.item.id === itemId) {
           const maxAvailable = c.item.currentStock > 0 ? c.item.currentStock : 99999;
-          const newQty = Math.max(1, Math.min(val, maxAvailable));
+          const newQty = c.item.allowParts
+            ? Math.min(val, maxAvailable)
+            : Math.max(1, Math.min(val, maxAvailable));
           return {
             ...c,
             quantity: newQty,
-            lineTotal: newQty * c.unitPrice,
+            lineTotal: Number((newQty * c.unitPrice).toFixed(2)),
           };
         }
         return c;
@@ -261,8 +294,36 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     );
   };
 
+  // Handle onBlur for manual quantity input
+  const handleBlurQty = (itemId: string) => {
+    const rawVal = qtyInputMap[itemId];
+    setQtyInputMap((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+
+    if (rawVal !== undefined) {
+      const val = parseFloat(rawVal);
+      if (isNaN(val) || val <= 0) {
+        updateCart((prevCart) =>
+          prevCart.map((c) =>
+            c.item.id === itemId
+              ? { ...c, quantity: 1, lineTotal: 1 * c.unitPrice }
+              : c
+          )
+        );
+      }
+    }
+  };
+
   // Remove Item
   const handleRemoveFromCart = (itemId: string) => {
+    setQtyInputMap((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
     updateCart(prev => prev.filter(c => c.item.id !== itemId));
   };
 
@@ -815,8 +876,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                         </div>
                       </div>
 
-                      {/* Category Tag (Single Line) */}
-                      <div style={{ height: 18, overflow: 'hidden' }}>
+                      {/* Category & Parts Tag (Single Line) */}
+                      <div style={{ height: 18, overflow: 'hidden', display: 'flex', gap: 4, alignItems: 'center' }}>
                         <span style={{
                           fontSize: '0.66rem',
                           color: 'var(--neutral-500)',
@@ -826,13 +887,27 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                           borderRadius: 4,
                           fontWeight: 500,
                           display: 'inline-block',
-                          maxWidth: '100%',
+                          maxWidth: '70%',
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                         }}>
                           {item.category}
                         </span>
+                        {item.allowParts && (
+                          <span style={{
+                            fontSize: '0.62rem',
+                            color: 'var(--primary-700)',
+                            backgroundColor: 'var(--primary-50)',
+                            border: '1px solid var(--primary-200)',
+                            padding: '1px 4px',
+                            borderRadius: 4,
+                            fontWeight: 700,
+                            whiteSpace: 'nowrap',
+                          }}>
+                            ⚖️ Loose / Parts
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -909,14 +984,17 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <ShoppingBag size={17} color="var(--primary-500)" />
               <span className="card-title" style={{ fontSize: '0.92rem' }}>
-                Cart ({cart.reduce((s, c) => s + c.quantity, 0)} items)
+                Cart ({cart.reduce((s, c) => s + (c.quantity || 0), 0).toLocaleString(undefined, { maximumFractionDigits: 3 })} {cart.length === 1 ? 'item' : 'items'})
               </span>
             </div>
             {cart.length > 0 && (
               <button 
                 className="btn btn-secondary btn-sm" 
                 style={{ fontSize: '0.72rem', padding: '3px 8px' }}
-                onClick={() => updateCart([])}
+                onClick={() => {
+                  updateCart([]);
+                  setQtyInputMap({});
+                }}
               >
                 Clear Cart
               </button>
@@ -948,17 +1026,49 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                   >
                     {/* Full Item Name & Unit Price */}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-900)', margin: 0, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35 }}>
-                        {line.item.name}
-                      </p>
-                      <p style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', margin: '3px 0 0 0' }}>
-                        ₹{line.unitPrice.toFixed(2)} / unit
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                        <p style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-900)', margin: 0, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35 }}>
+                          {line.item.name}
+                        </p>
+                        {line.item.allowParts && (
+                          <span style={{ fontSize: '0.62rem', padding: '1px 4px', borderRadius: 3, backgroundColor: 'var(--primary-50)', color: 'var(--primary-700)', fontWeight: 700, border: '1px solid var(--primary-200)' }}>
+                            ⚖️ {line.item.unit}
+                          </span>
+                        )}
+                      </div>
+                      <p style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                        ₹{line.unitPrice.toFixed(2)} / {line.item.unit || 'unit'}
                         {line.discountPercent > 0 && (
                           <span style={{ color: 'var(--success-700)', fontWeight: 700, marginLeft: 4 }}>
                             ({line.discountPercent}% off)
                           </span>
                         )}
                       </p>
+                      {line.item.allowParts && (
+                        <div style={{ display: 'flex', gap: 3, marginTop: 4, alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.65rem', color: 'var(--neutral-400)', fontWeight: 600 }}>+Quick:</span>
+                          {['0.25', '0.5', '1'].map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => handleUpdateQty(line.item.id, Number(preset))}
+                              style={{
+                                fontSize: '0.64rem',
+                                padding: '1px 5px',
+                                borderRadius: 3,
+                                backgroundColor: '#f1f5f9',
+                                border: '1px solid #cbd5e1',
+                                color: '#334155',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                              }}
+                              title={`Add +${preset} ${line.item.unit}`}
+                            >
+                              +{preset}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Perfectly Centered Manual Editable Quantity Stepper */}
@@ -975,10 +1085,10 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                     >
                       <button 
                         type="button"
-                        onClick={() => handleUpdateQty(line.item.id, -1)} 
+                        onClick={() => handleUpdateQty(line.item.id, line.item.allowParts ? -0.5 : -1)} 
                         aria-label="Decrease quantity"
                         style={{
-                          width: 26,
+                          width: 24,
                           height: 28,
                           display: 'flex',
                           alignItems: 'center',
@@ -989,24 +1099,27 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                           cursor: 'pointer',
                           padding: 0
                         }}
+                        title={line.item.allowParts ? "Reduce by 0.5" : "Reduce by 1"}
                       >
                         <Minus size={12} />
                       </button>
                       <input 
-                        type="number"
-                        min="1"
-                        max={line.item.currentStock > 0 ? line.item.currentStock : undefined}
-                        value={line.quantity}
+                        type="text"
+                        inputMode="decimal"
+                        value={qtyInputMap[line.item.id] !== undefined ? qtyInputMap[line.item.id] : String(line.quantity)}
                         onChange={(e) => handleSetQty(line.item.id, e.target.value)}
+                        onBlur={() => handleBlurQty(line.item.id)}
                         className="cart-qty-input"
+                        style={{ width: line.item.allowParts ? 58 : 40, fontSize: '0.82rem' }}
                         aria-label="Quantity"
+                        placeholder="0"
                       />
                       <button 
                         type="button"
-                        onClick={() => handleUpdateQty(line.item.id, 1)} 
+                        onClick={() => handleUpdateQty(line.item.id, line.item.allowParts ? 0.5 : 1)} 
                         aria-label="Increase quantity"
                         style={{
-                          width: 26,
+                          width: 24,
                           height: 28,
                           display: 'flex',
                           alignItems: 'center',
@@ -1017,13 +1130,14 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                           cursor: 'pointer',
                           padding: 0
                         }}
+                        title={line.item.allowParts ? "Add 0.5" : "Add 1"}
                       >
                         <Plus size={12} />
                       </button>
                     </div>
 
                     {/* Line Total */}
-                    <div style={{ width: 68, textAlign: 'right', fontWeight: 800, fontSize: '0.86rem', color: 'var(--neutral-900)', flexShrink: 0 }}>
+                    <div style={{ width: 72, textAlign: 'right', fontWeight: 800, fontSize: '0.86rem', color: 'var(--neutral-900)', flexShrink: 0 }}>
                       ₹{line.lineTotal.toFixed(2)}
                     </div>
 

@@ -695,6 +695,7 @@ class StoreService {
           locations: d.locations,
           images: d.images,
           imageUrl: d.imageUrl,
+          allowParts: !!d.allowParts,
         }));
         if (liveItems.length > 0) {
           this.items = liveItems;
@@ -774,12 +775,12 @@ class StoreService {
     if (item.locations && item.locations.length > 0) {
       const branch = item.locations.find(l => l.locationId === targetLocId);
       if (branch) {
-        branch.currentStock = Math.max(0, branch.currentStock + delta);
+        branch.currentStock = Number(Math.max(0, branch.currentStock + delta).toFixed(3));
       }
       // Recompute aggregate master stock
-      item.currentStock = item.locations.reduce((sum, l) => sum + (l.currentStock || 0), 0);
+      item.currentStock = Number(item.locations.reduce((sum, l) => sum + (l.currentStock || 0), 0).toFixed(3));
     } else {
-      item.currentStock = Math.max(0, item.currentStock + delta);
+      item.currentStock = Number(Math.max(0, item.currentStock + delta).toFixed(3));
     }
 
     this.saveToStorage();

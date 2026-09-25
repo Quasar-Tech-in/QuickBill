@@ -91,6 +91,7 @@ export const InventoryView: React.FC = () => {
   const [formCategory, setFormCategory] = useState('Grocery');
   const [formTaxRate, setFormTaxRate] = useState<number>(5);
   const [formUnit, setFormUnit] = useState('pcs');
+  const [formAllowParts, setFormAllowParts] = useState(false);
   const [formDescription, setFormDescription] = useState('');
 
   // Location-specific overrides state in form
@@ -272,6 +273,7 @@ export const InventoryView: React.FC = () => {
     setFormCategory(categoriesList[0]?.name || 'Grocery');
     setFormTaxRate(5);
     setFormUnit('pcs');
+    setFormAllowParts(false);
     setFormDescription('');
     setFormImages([]);
     setPendingDeletedImageUrls([]);
@@ -307,6 +309,7 @@ export const InventoryView: React.FC = () => {
     setFormCategory(raw.category);
     setFormTaxRate(raw.taxRate);
     setFormUnit(raw.unit);
+    setFormAllowParts(!!raw.allowParts);
     setFormDescription(raw.description || '');
     setPendingDeletedImageUrls([]);
     setUploadStatusMsg('');
@@ -443,6 +446,7 @@ export const InventoryView: React.FC = () => {
           category: formCategory.trim(),
           taxRate: formTaxRate,
           unit: formUnit,
+          allowParts: formAllowParts,
           description: formDescription.trim() || undefined,
           mrp: masterMrp,
           salePrice: masterSalePrice,
@@ -461,6 +465,7 @@ export const InventoryView: React.FC = () => {
           category: formCategory.trim(),
           taxRate: formTaxRate,
           unit: formUnit,
+          allowParts: formAllowParts,
           description: formDescription.trim() || undefined,
           mrp: masterMrp,
           salePrice: masterSalePrice,
@@ -877,7 +882,14 @@ export const InventoryView: React.FC = () => {
                           )}
                         </div>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.88rem' }}>{item.name}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.88rem' }}>{item.name}</span>
+                            {raw.allowParts && (
+                              <span style={{ fontSize: '0.65rem', padding: '1px 5px', borderRadius: 4, backgroundColor: 'var(--primary-50)', color: 'var(--primary-700)', fontWeight: 700, border: '1px solid var(--primary-200)', whiteSpace: 'nowrap' }}>
+                                ⚖️ Parts Allowed
+                              </span>
+                            )}
+                          </div>
                           <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
                             {item.sku && <span style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', fontFamily: 'var(--font-mono)' }}>SKU: {item.sku}</span>}
                             {item.barcode && <span style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', fontFamily: 'var(--font-mono)' }}>BAR: {item.barcode}</span>}
@@ -1120,6 +1132,40 @@ export const InventoryView: React.FC = () => {
                         ]}
                       />
                     </div>
+                  </div>
+
+                  {/* Sell in Parts / Fractional Quantities Switch */}
+                  <div style={{
+                    marginTop: 14,
+                    padding: '12px 14px',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: formAllowParts ? 'var(--primary-50)' : '#ffffff',
+                    border: `1.5px solid ${formAllowParts ? 'var(--primary-400)' : 'var(--neutral-200)'}`,
+                    transition: 'all 0.2s ease',
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', margin: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={formAllowParts}
+                        onChange={(e) => setFormAllowParts(e.target.checked)}
+                        style={{ marginTop: 3, width: 17, height: 17, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: formAllowParts ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                            Sell in Parts / Fractional Quantities (e.g. 1.506 kg, 0.750 ltr, 2.5 meters)
+                          </span>
+                          {formAllowParts && (
+                            <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, backgroundColor: 'var(--primary-600)', color: '#ffffff', fontWeight: 800 }}>
+                              ✓ Fractional POS Enabled
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ fontSize: '0.75rem', color: formAllowParts ? 'var(--primary-700)' : 'var(--neutral-500)', margin: '3px 0 0 0' }}>
+                          Allow cashiers to enter partial decimal quantities (e.g. 1.506) during POS billing. The POS will automatically multiply the exact fractional quantity by the unit cost and compute line totals & GST.
+                        </p>
+                      </div>
+                    </label>
                   </div>
                 </div>
 
@@ -1488,9 +1534,10 @@ export const InventoryView: React.FC = () => {
                                   </label>
                                   <input
                                     type="number"
+                                    step={formAllowParts ? "0.001" : "1"}
                                     min="0"
                                     className="form-input"
-                                    placeholder="10"
+                                    placeholder={formAllowParts ? "10.000" : "10"}
                                     value={currentLocData.currentStock}
                                     onChange={(e) => {
                                       setLocationOverrides({
@@ -1512,9 +1559,10 @@ export const InventoryView: React.FC = () => {
                                   </label>
                                   <input
                                     type="number"
+                                    step={formAllowParts ? "0.001" : "1"}
                                     min="0"
                                     className="form-input"
-                                    placeholder="5"
+                                    placeholder={formAllowParts ? "5.000" : "5"}
                                     value={currentLocData.minStockAlert}
                                     onChange={(e) => {
                                       setLocationOverrides({
@@ -1735,7 +1783,8 @@ export const InventoryView: React.FC = () => {
                   <label className="form-label" style={{ fontWeight: 600 }}>Quantity ({selectedItemForAdjust.unit}) *</label>
                   <input
                     type="number"
-                    min="1"
+                    step={selectedItemForAdjust.allowParts ? "0.001" : "1"}
+                    min={selectedItemForAdjust.allowParts ? "0.001" : "1"}
                     required
                     className="form-input"
                     value={adjustDelta}

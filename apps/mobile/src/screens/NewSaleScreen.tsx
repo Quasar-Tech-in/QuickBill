@@ -9,23 +9,25 @@ interface CartItem {
   price: number;
   qty: number;
   taxRate: number;
+  allowParts?: boolean;
+  unit?: string;
 }
 
-const PRODUCT_CATALOG: Record<string, { name: string; price: number; taxRate: number }> = {
-  'ITM-1001': { name: 'Basmati Rice (1kg Pack)', price: 120.0, taxRate: 5.0 },
-  'ITM-1002': { name: 'Refined Sunflower Oil (1L)', price: 145.0, taxRate: 5.0 },
-  'ITM-1003': { name: 'Wireless Optical Mouse', price: 499.0, taxRate: 18.0 },
-  'ITM-1004': { name: 'USB-C Fast Charging Cable', price: 249.0, taxRate: 18.0 },
-  'ITM-1005': { name: 'Dairy Milk Silk Chocolate', price: 90.0, taxRate: 12.0 },
-  'ITM-1006': { name: 'Organic Green Tea (25 Bags)', price: 185.0, taxRate: 5.0 },
+const PRODUCT_CATALOG: Record<string, { name: string; price: number; taxRate: number; allowParts?: boolean; unit?: string }> = {
+  'ITM-1001': { name: 'Basmati Rice (Loose/Pack)', price: 120.0, taxRate: 5.0, allowParts: true, unit: 'kg' },
+  'ITM-1002': { name: 'Refined Sunflower Oil (1L)', price: 145.0, taxRate: 5.0, allowParts: true, unit: 'ltr' },
+  'ITM-1003': { name: 'Wireless Optical Mouse', price: 499.0, taxRate: 18.0, allowParts: false, unit: 'pcs' },
+  'ITM-1004': { name: 'USB-C Fast Charging Cable', price: 249.0, taxRate: 18.0, allowParts: false, unit: 'pcs' },
+  'ITM-1005': { name: 'Dairy Milk Silk Chocolate', price: 90.0, taxRate: 12.0, allowParts: false, unit: 'pcs' },
+  'ITM-1006': { name: 'Organic Green Tea (25 Bags)', price: 185.0, taxRate: 5.0, allowParts: false, unit: 'box' },
 };
 
 export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
   const [customerName, setCustomerName] = useState('Aarav Sharma');
   const [customerPhone, setCustomerPhone] = useState('+91 98765 43210');
   const [cart, setCart] = useState<CartItem[]>([
-    { id: 'ITM-1001', name: 'Basmati Rice (1kg Pack)', price: 120.0, qty: 2, taxRate: 5.0 },
-    { id: 'ITM-1005', name: 'Dairy Milk Silk Chocolate', price: 90.0, qty: 3, taxRate: 12.0 }
+    { id: 'ITM-1001', name: 'Basmati Rice (Loose/Pack)', price: 120.0, qty: 1.506, taxRate: 5.0, allowParts: true, unit: 'kg' },
+    { id: 'ITM-1005', name: 'Dairy Milk Silk Chocolate', price: 90.0, qty: 3, taxRate: 12.0, allowParts: false, unit: 'pcs' }
   ]);
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('UPI');
@@ -42,15 +44,18 @@ export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete
       name: `Scanned Item (${cleanCode})`,
       price: 150.0,
       taxRate: 5.0,
+      allowParts: false,
+      unit: 'pcs',
     };
 
     setCart((prevCart) => {
       const existingIdx = prevCart.findIndex(c => c.id === cleanCode || c.name === matchedProduct.name);
       if (existingIdx >= 0) {
         const nextCart = [...prevCart];
+        const step = nextCart[existingIdx].allowParts ? 1.0 : 1;
         nextCart[existingIdx] = {
           ...nextCart[existingIdx],
-          qty: nextCart[existingIdx].qty + 1,
+          qty: Number((nextCart[existingIdx].qty + step).toFixed(3)),
         };
         return nextCart;
       } else {
@@ -62,10 +67,20 @@ export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete
             price: matchedProduct.price,
             qty: 1,
             taxRate: matchedProduct.taxRate,
+            allowParts: matchedProduct.allowParts,
+            unit: matchedProduct.unit,
           },
         ];
       }
     });
+  };
+
+  const handleUpdateItemQty = (idx: number, newQty: number) => {
+    if (newQty <= 0) {
+      setCart(cart.filter((_, i) => i !== idx));
+    } else {
+      setCart(cart.map((c, i) => i === idx ? { ...c, qty: Number(newQty.toFixed(3)) } : c));
+    }
   };
 
   const calculateSubtotal = () => cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
@@ -109,7 +124,7 @@ export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete
         {/* Cart Items Section */}
         <View style={styles.card}>
           <View style={styles.cartHeader}>
-            <Text style={styles.sectionHeader}>Billing Cart ({cart.reduce((s, c) => s + c.qty, 0)} items)</Text>
+            <Text style={styles.sectionHeader}>Billing Cart ({cart.reduce((s, c) => s + c.qty, 0).toFixed(cart.some(c => c.allowParts) ? 2 : 0)} items)</Text>
             
             {/* Open Hardware Camera Scanner */}
             <TouchableOpacity 
@@ -126,33 +141,82 @@ export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete
             </View>
           ) : (
             cart.map((item, idx) => (
-              <View key={idx} style={styles.cartItemRow}>
-                <View style={{ flex: 2 }}>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemMeta}>₹ {item.price.toFixed(2)} • GST {item.taxRate}%</Text>
+              <View key={idx} style={[styles.cartItemRow, { flexDirection: 'column', alignItems: 'stretch' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <Text style={styles.itemName}>{item.name}</Text>
+                      {item.allowParts && (
+                        <View style={{ backgroundColor: colors.primary[50], paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 10, color: colors.primary[700], fontWeight: '700' }}>⚖️ {item.unit || 'parts'}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.itemMeta}>₹ {item.price.toFixed(2)} / {item.unit || 'unit'} • GST {item.taxRate}%</Text>
+                  </View>
+
+                  <View style={styles.qtyControls}>
+                    <TouchableOpacity
+                      style={styles.qtyBtn}
+                      onPress={() => handleUpdateItemQty(idx, item.qty - (item.allowParts ? 0.5 : 1))}
+                    >
+                      <Text style={styles.qtyBtnText}>-</Text>
+                    </TouchableOpacity>
+                    
+                    <TextInput
+                      style={{
+                        minWidth: 44,
+                        paddingVertical: 2,
+                        paddingHorizontal: 4,
+                        textAlign: 'center',
+                        fontSize: 14,
+                        fontWeight: '700',
+                        color: colors.neutral[900],
+                        borderWidth: 1,
+                        borderColor: colors.neutral[200],
+                        borderRadius: 4,
+                        marginHorizontal: 4,
+                      }}
+                      keyboardType="decimal-pad"
+                      value={String(item.qty)}
+                      onChangeText={(val) => {
+                        const parsed = parseFloat(val);
+                        if (!isNaN(parsed)) {
+                          handleUpdateItemQty(idx, parsed);
+                        }
+                      }}
+                    />
+
+                    <TouchableOpacity
+                      style={styles.qtyBtn}
+                      onPress={() => handleUpdateItemQty(idx, item.qty + (item.allowParts ? 0.5 : 1))}
+                    >
+                      <Text style={styles.qtyBtnText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.itemTotal}>₹ {(item.price * item.qty).toFixed(2)}</Text>
                 </View>
-                <View style={styles.qtyControls}>
-                  <TouchableOpacity
-                    style={styles.qtyBtn}
-                    onPress={() => {
-                      if (item.qty === 1) {
-                        setCart(cart.filter((_, i) => i !== idx));
-                      } else {
-                        setCart(cart.map((c, i) => i === idx ? { ...c, qty: c.qty - 1 } : c));
-                      }
-                    }}
-                  >
-                    <Text style={styles.qtyBtnText}>-</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.qtyText}>{item.qty}</Text>
-                  <TouchableOpacity
-                    style={styles.qtyBtn}
-                    onPress={() => setCart(cart.map((c, i) => i === idx ? { ...c, qty: c.qty + 1 } : c))}
-                  >
-                    <Text style={styles.qtyBtnText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.itemTotal}>₹ {(item.price * item.qty).toFixed(2)}</Text>
+
+                {item.allowParts && (
+                  <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 11, color: colors.neutral[400], fontWeight: '600' }}>+Quick:</Text>
+                    {[0.25, 0.5, 1.0].map((preset) => (
+                      <TouchableOpacity
+                        key={preset}
+                        style={{
+                          backgroundColor: colors.neutral[100],
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          borderRadius: 4,
+                        }}
+                        onPress={() => handleUpdateItemQty(idx, item.qty + preset)}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: colors.neutral[700] }}>+{preset}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
               </View>
             ))
           )}
