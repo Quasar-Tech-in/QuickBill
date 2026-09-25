@@ -14,9 +14,6 @@ class Settings(BaseSettings):
     MONGODB_URI: str = "mongodb://admin:secretpassword@localhost:27017/quickbill_db?authSource=admin"
     DATABASE_NAME: str = "quickbill_db"
     
-    # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
-    
     # JWT Security
     JWT_SECRET: str = "development_jwt_secret_key_32_characters_minimum"
     JWT_ALGORITHM: str = "HS256"

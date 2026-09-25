@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from app.core.database import get_database
+from app.core.database import get_tenant_db
 from app.core.security import get_current_business_id
 from app.schemas.common import PaginatedResponse
 from app.schemas.party import PartyCreate, PartyResponse
@@ -16,9 +16,9 @@ async def list_parties(
     page_size: int = Query(20, ge=1, le=100),
     party_type: Optional[str] = Query(None, alias="type"),
     search: Optional[str] = None,
-    business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
+    business_id: str = Depends(get_current_business_id)
 ):
+    db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "parties")
     query = {}
     if party_type:
@@ -53,9 +53,9 @@ async def list_parties(
 @router.post("", response_model=PartyResponse, status_code=status.HTTP_201_CREATED)
 async def create_party(
     payload: PartyCreate,
-    business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
+    business_id: str = Depends(get_current_business_id)
 ):
+    db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "parties")
     now = datetime.now(timezone.utc)
     doc = {
@@ -83,9 +83,9 @@ async def create_party(
 @router.get("/{party_id}", response_model=PartyResponse)
 async def get_party(
     party_id: str,
-    business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
+    business_id: str = Depends(get_current_business_id)
 ):
+    db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "parties")
     doc = await repo.get_by_id(business_id, party_id)
     if not doc:
@@ -97,9 +97,9 @@ async def get_party(
 @router.delete("/{party_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_party(
     party_id: str,
-    business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
+    business_id: str = Depends(get_current_business_id)
 ):
+    db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "parties")
     existing = await repo.get_by_id(business_id, party_id)
     if not existing:

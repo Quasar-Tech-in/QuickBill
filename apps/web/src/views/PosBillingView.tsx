@@ -108,6 +108,11 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   useEffect(() => {
     refreshData();
+    // Fetch live customers and parties from backend MongoDB
+    store.fetchParties().then(fetched => {
+      setParties(fetched.filter(p => p.type === 'CUSTOMER'));
+    }).catch(() => {});
+
     const interval = setInterval(() => {
       const currentLocId = store.getActiveLocation().id;
       if (currentLocId !== selectedLocationId) {
@@ -154,13 +159,37 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     return matchesSearch && matchesCategory;
   });
 
-  // Handle Customer Phone Input & Live Lookup
-  const handlePhoneChange = (newPhone: string) => {
-    setCustomerPhone(newPhone);
-    const matched = store.findPartyByPhone(newPhone, activeLocation.id);
-    if (matched) {
-      setSelectedPartyId(matched.id);
-      setCustomerName(matched.name);
+  // Format Indian Phone with space (e.g., 91730 58119) & preserve user digits
+  const cleanAndFormatIndianPhone = (raw: string): { digits: string; formatted: string } => {
+    let digits = raw.replace(/\D/g, '');
+    // Only strip 91/0 if user pasted more than 10 digits (e.g. 12 digits like +919173058119)
+    if (digits.length > 10 && digits.startsWith('91')) {
+      digits = digits.slice(2);
+    } else if (digits.length > 10 && digits.startsWith('0')) {
+      digits = digits.slice(1);
+    }
+    digits = digits.slice(0, 10);
+    let formatted = digits;
+    if (digits.length > 5) {
+      formatted = `${digits.slice(0, 5)} ${digits.slice(5)}`;
+    }
+    return { digits, formatted };
+  };
+
+  // Handle Customer Phone Input & Live DB Lookup ONLY when exactly 10 digits are entered
+  const handlePhoneChange = async (rawInput: string) => {
+    const { digits, formatted } = cleanAndFormatIndianPhone(rawInput);
+    setCustomerPhone(formatted);
+    // Only query backend if exactly 10 digits are entered
+    if (digits.length === 10) {
+      const matched = await store.lookupPartyByPhone(digits, activeLocation.id);
+      if (matched) {
+        setSelectedPartyId(matched.id);
+        setCustomerName(matched.name);
+        setParties(store.getParties(activeLocation.id).filter(p => p.type === 'CUSTOMER'));
+      } else {
+        setSelectedPartyId('');
+      }
     } else {
       setSelectedPartyId('');
     }
@@ -377,7 +406,10 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const handleConfirmGenerateBill = async () => {
     if (cart.length === 0) return;
 
-    const trimmedPhone = customerPhone.trim();
+    const rawDigits = customerPhone.replace(/\D/g, '');
+    const trimmedPhone = rawDigits.length === 10
+      ? `+91${rawDigits}`
+      : (rawDigits ? `+91${rawDigits}` : '');
     const trimmedName = customerName.trim();
 
     let partyId = selectedPartyId || undefined;
@@ -387,15 +419,15 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     if (partyId) {
       const existingParty = parties.find(p => p.id === partyId);
       if (existingParty && trimmedName && trimmedName !== existingParty.name) {
-        // User edited the name -> Update party record in store
+        // User edited the name -> Update party record in store & MongoDB
         store.updateParty(partyId, { name: trimmedName });
         finalCustomerName = trimmedName;
       } else if (existingParty) {
         finalCustomerName = existingParty.name;
       }
-    } else if (trimmedPhone) {
-      // 2. Lookup if phone matches an existing customer not yet linked
-      const matched = store.findPartyByPhone(trimmedPhone, activeLocation.id);
+    } else if (rawDigits) {
+      // 2. Lookup if phone matches an existing customer in DB
+      const matched = await store.lookupPartyByPhone(rawDigits, activeLocation.id);
       if (matched) {
         partyId = matched.id;
         if (trimmedName && trimmedName !== matched.name) {
@@ -405,8 +437,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           finalCustomerName = matched.name;
         }
       } else if (trimmedName && trimmedName.toLowerCase() !== 'walk-in retail customer') {
-        // 3. New Customer -> Auto-register in store.parties
-        const newParty = store.addParty({
+        // 3. New Customer -> Auto-register in dedicated MongoDB customers table
+        const newParty = await store.createCustomer({
           name: trimmedName,
           phone: trimmedPhone,
           type: 'CUSTOMER',
@@ -1311,35 +1343,77 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
                 {/* Phone Number (FIRST) & Customer Name (SECOND) Inputs */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 10 }}>
-                  {/* 1. Phone Number Input (First) */}
+                  {/* 1. Phone Number Input (First) with Default +91 Country Code Badge */}
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--neutral-600)', marginBottom: 3, fontWeight: 700 }}>
-                      Mobile / Phone No. <span style={{ color: 'var(--primary-600)', fontWeight: 500 }}>(Lookup)</span>
+                      Mobile / Phone No. <span style={{ color: 'var(--primary-600)', fontWeight: 500 }}>(10 Digits)</span>
                     </label>
-                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                      <div style={{ position: 'absolute', left: 10, display: 'flex', alignItems: 'center', pointerEvents: 'none', color: selectedParty ? 'var(--success-600)' : 'var(--neutral-400)' }}>
-                        <Phone size={15} />
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      border: `1.5px solid ${selectedParty ? 'var(--success-500)' : 'var(--neutral-300)'}`,
+                      borderRadius: 'var(--radius-sm, 6px)',
+                      backgroundColor: selectedParty ? '#f0fdf4' : '#ffffff',
+                      height: 38,
+                      overflow: 'hidden',
+                      boxSizing: 'border-box'
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '0 8px',
+                        backgroundColor: selectedParty ? '#dcfce7' : 'var(--neutral-100, #f1f5f9)',
+                        borderRight: `1px solid ${selectedParty ? 'var(--success-300, #86efac)' : 'var(--neutral-300)'}`,
+                        height: '100%',
+                        color: selectedParty ? 'var(--success-800)' : 'var(--neutral-700)',
+                        fontSize: '0.8rem',
+                        fontWeight: 800,
+                        userSelect: 'none',
+                        flexShrink: 0
+                      }}>
+                        <Phone size={13} color={selectedParty ? 'var(--success-600)' : 'var(--neutral-500)'} />
+                        <span>+91</span>
                       </div>
                       <input
                         type="tel"
-                        placeholder="e.g. 9876543210"
-                        className="form-input"
+                        placeholder="98765 43210"
                         value={customerPhone}
                         onChange={(e) => handlePhoneChange(e.target.value)}
-                        style={{ 
-                          fontSize: '0.84rem', 
-                          lineHeight: 1.4,
-                          paddingLeft: 32, 
-                          paddingTop: 8, 
-                          paddingBottom: 8, 
-                          height: 38,
-                          width: '100%', 
-                          boxSizing: 'border-box',
+                        maxLength={11} // 10 digits + 1 space e.g. "98765 43210"
+                        style={{
+                          border: 'none',
+                          outline: 'none',
+                          boxShadow: 'none',
+                          padding: '0 8px',
+                          fontSize: '0.86rem',
                           fontWeight: 600,
-                          borderColor: selectedParty ? 'var(--success-500)' : undefined,
-                          backgroundColor: selectedParty ? '#f0fdf4' : '#ffffff'
+                          letterSpacing: '0.03em',
+                          backgroundColor: 'transparent',
+                          width: '100%',
+                          height: '100%',
+                          color: 'var(--neutral-900)'
                         }}
                       />
+                      {customerPhone && (
+                        <button
+                          type="button"
+                          onClick={() => handlePhoneChange('')}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            color: 'var(--neutral-400)',
+                            cursor: 'pointer',
+                            padding: '0 8px',
+                            fontSize: '0.75rem',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          title="Clear phone number"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
                   </div>
 

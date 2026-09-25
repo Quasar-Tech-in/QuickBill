@@ -72,14 +72,21 @@ export const PartiesView: React.FC = () => {
     return matchesSearch && matchesType;
   });
 
-  const handleCreateParty = (e: React.FormEvent) => {
+  const handleCreateParty = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newParty.name.trim()) return;
 
-    store.addParty({
+    const payload = {
       ...newParty,
       locationIds: partySelectedLocIds.length > 0 ? partySelectedLocIds : undefined,
-    });
+    };
+
+    if (newParty.type === 'CUSTOMER') {
+      await store.createCustomer(payload);
+    } else {
+      store.addParty(payload);
+    }
+
     refreshData();
     setIsAddPartyOpen(false);
     setNewParty({

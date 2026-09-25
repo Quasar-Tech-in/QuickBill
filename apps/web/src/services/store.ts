@@ -144,6 +144,7 @@ class StoreService {
       if (isOnline) {
         this.fetchItems().catch(() => {});
         this.fetchInvoices().catch(() => {});
+        this.fetchParties().catch(() => {});
       }
     });
   }
@@ -858,7 +859,7 @@ class StoreService {
     return true;
   }
 
-  // --- Strict Tenant-Isolated Parties & Ledger ---
+  // --- Strict Tenant-Isolated Parties & Dedicated Customers (CRM & DB Integration) ---
   getParties(locationId?: string): Party[] {
     const activeId = this.currentTenant.id;
     const tenantParties = this.parties.filter(p => (p.businessId || DEFAULT_TENANTS[0].id) === activeId);
@@ -867,6 +868,62 @@ class StoreService {
     return tenantParties.filter(p => 
       !p.locationIds || p.locationIds.length === 0 || p.locationIds.includes(locationId) || p.locationId === locationId
     );
+  }
+
+  async fetchParties(locationId?: string): Promise<Party[]> {
+    try {
+      const [custRes, partyRes] = await Promise.allSettled([
+        apiClient.get('/customers', { params: { page_size: 100 } }),
+        apiClient.get('/parties', { params: { page_size: 100 } })
+      ]);
+
+      const fetchedList: Party[] = [];
+
+      if (custRes.status === 'fulfilled' && custRes.value.data?.data) {
+        custRes.value.data.data.forEach((c: any) => {
+          fetchedList.push({
+            id: c.id || c._id,
+            businessId: c.businessId || this.currentTenant.id,
+            name: c.name,
+            type: 'CUSTOMER',
+            phone: c.phone || undefined,
+            email: c.email || undefined,
+            address: c.address || undefined,
+            gstin: c.gstin || undefined,
+            currentBalance: Number(c.currentBalance || 0),
+            locationIds: c.locationIds || []
+          });
+        });
+      }
+
+      if (partyRes.status === 'fulfilled' && partyRes.value.data?.data) {
+        partyRes.value.data.data.forEach((p: any) => {
+          const pId = p.id || p._id;
+          if (!fetchedList.some(x => x.id === pId)) {
+            fetchedList.push({
+              id: pId,
+              businessId: p.businessId || this.currentTenant.id,
+              name: p.name,
+              type: Array.isArray(p.type) ? (p.type.includes('supplier') ? 'SUPPLIER' : 'CUSTOMER') : (p.type || 'CUSTOMER'),
+              phone: p.phone || undefined,
+              email: p.email || undefined,
+              address: p.billingAddress?.street || p.address || undefined,
+              gstin: p.taxId || p.gstin || undefined,
+              currentBalance: Number(p.currentReceivable || p.currentBalance || 0),
+              locationIds: p.locationIds || []
+            });
+          }
+        });
+      }
+
+      if (fetchedList.length > 0) {
+        this.parties = fetchedList;
+        this.saveToStorage();
+      }
+    } catch (err) {
+      console.warn('Could not fetch parties/customers from backend API:', err);
+    }
+    return this.getParties(locationId);
   }
 
   addParty(party: Omit<Party, 'id' | 'currentBalance' | 'businessId'>): Party {
@@ -879,7 +936,85 @@ class StoreService {
     };
     this.parties.unshift(newParty);
     this.saveToStorage();
+
+    // If online, sync to backend in background
+    if (party.type === 'CUSTOMER') {
+      apiClient.post('/customers', {
+        name: party.name,
+        phone: party.phone,
+        email: party.email,
+        address: party.address,
+        gstin: party.gstin,
+        locationIds: party.locationIds || [],
+        openingBalance: 0
+      }).then(res => {
+        if (res.data?.id || res.data?._id) {
+          newParty.id = res.data.id || res.data._id;
+          this.saveToStorage();
+        }
+      }).catch(() => {});
+    } else {
+      apiClient.post('/parties', {
+        name: party.name,
+        type: ['supplier'],
+        phone: party.phone,
+        email: party.email,
+        billingAddress: party.address ? { street: party.address } : undefined,
+        taxId: party.gstin,
+        openingBalance: 0,
+        locationIds: party.locationIds || []
+      }).then(res => {
+        if (res.data?.id || res.data?._id) {
+          newParty.id = res.data.id || res.data._id;
+          this.saveToStorage();
+        }
+      }).catch(() => {});
+    }
+
     return newParty;
+  }
+
+  async createCustomer(customerData: Omit<Party, 'id' | 'currentBalance' | 'businessId'>): Promise<Party> {
+    const activeId = this.currentTenant.id;
+    try {
+      const res = await apiClient.post('/customers', {
+        name: customerData.name,
+        phone: customerData.phone,
+        email: customerData.email,
+        address: customerData.address,
+        gstin: customerData.gstin,
+        locationIds: customerData.locationIds || [],
+        openingBalance: 0
+      });
+      if (res.data) {
+        const createdId = res.data.id || res.data._id;
+        const created: Party = {
+          id: createdId,
+          businessId: res.data.businessId || activeId,
+          name: res.data.name,
+          type: 'CUSTOMER',
+          phone: res.data.phone,
+          email: res.data.email,
+          address: res.data.address,
+          gstin: res.data.gstin,
+          currentBalance: Number(res.data.currentBalance || 0),
+          locationIds: res.data.locationIds || []
+        };
+        
+        // Replace or add in local parties state
+        const existingIdx = this.parties.findIndex(p => p.id === createdId || (created.phone && p.phone === created.phone));
+        if (existingIdx >= 0) {
+          this.parties[existingIdx] = created;
+        } else {
+          this.parties.unshift(created);
+        }
+        this.saveToStorage();
+        return created;
+      }
+    } catch (err) {
+      console.warn('API create customer failed, falling back to local storage:', err);
+    }
+    return this.addParty(customerData);
   }
 
   updateParty(partyId: string, updates: Partial<Party>): Party | undefined {
@@ -890,6 +1025,10 @@ class StoreService {
     if (p) {
       Object.assign(p, updates);
       this.saveToStorage();
+      // Asynchronously sync with backend if online
+      if (!partyId.startsWith('party_')) {
+        apiClient.put(`/customers/${partyId}`, updates).catch(() => {});
+      }
       return p;
     }
     return undefined;
@@ -897,15 +1036,58 @@ class StoreService {
 
   findPartyByPhone(phone: string, locationId?: string): Party | undefined {
     if (!phone) return undefined;
-    const cleanQuery = phone.replace(/[\s\-\+]/g, '').replace(/^91/, '').replace(/^0/, '');
-    if (cleanQuery.length < 5) return undefined;
+    const digitsOnly = phone.replace(/\D/g, '');
+    const cleanDigits = (digitsOnly.length > 10 && digitsOnly.startsWith('91')) ? digitsOnly.slice(2) : digitsOnly;
+    const tenDigits = cleanDigits.slice(-10);
+    if (!tenDigits || tenDigits.length < 4) return undefined;
 
     const partyList = this.getParties(locationId);
     return partyList.find(p => {
       if (!p.phone) return false;
-      const cleanPartyPhone = p.phone.replace(/[\s\-\+]/g, '').replace(/^91/, '').replace(/^0/, '');
-      return cleanPartyPhone === cleanQuery || cleanPartyPhone.endsWith(cleanQuery) || cleanQuery.endsWith(cleanPartyPhone);
+      const pDigits = p.phone.replace(/\D/g, '');
+      const pClean = (pDigits.length > 10 && pDigits.startsWith('91')) ? pDigits.slice(2) : pDigits;
+      const pTen = pClean.slice(-10);
+      return pTen === tenDigits || pClean.includes(tenDigits) || tenDigits.includes(pTen);
     });
+  }
+
+  async lookupPartyByPhone(phone: string, locationId?: string): Promise<Party | undefined> {
+    if (!phone) return undefined;
+    const local = this.findPartyByPhone(phone, locationId);
+    if (local) return local;
+
+    const digitsOnly = phone.replace(/\D/g, '');
+    const cleanDigits = (digitsOnly.length > 10 && digitsOnly.startsWith('91')) ? digitsOnly.slice(2) : digitsOnly;
+    const tenDigits = cleanDigits.slice(-10);
+    if (!tenDigits || tenDigits.length !== 10) return undefined;
+
+    try {
+      const res = await apiClient.get('/customers/lookup/by-phone', { params: { phone: `+91${tenDigits}` } });
+      if (res.data) {
+        const remoteParty: Party = {
+          id: res.data.id || res.data._id,
+          businessId: res.data.businessId || this.currentTenant.id,
+          name: res.data.name,
+          type: 'CUSTOMER',
+          phone: res.data.phone,
+          email: res.data.email,
+          address: res.data.address,
+          gstin: res.data.gstin,
+          currentBalance: Number(res.data.currentBalance || 0),
+          locationIds: res.data.locationIds || []
+        };
+        // Merge into local parties list
+        if (!this.parties.some(p => p.id === remoteParty.id)) {
+          this.parties.unshift(remoteParty);
+          this.saveToStorage();
+        }
+        return remoteParty;
+      }
+    } catch (err) {
+      console.warn('API lookup by phone error:', err);
+    }
+
+    return this.findPartyByPhone(phone, locationId);
   }
 
   updatePartyBalance(partyId: string, delta: number) {

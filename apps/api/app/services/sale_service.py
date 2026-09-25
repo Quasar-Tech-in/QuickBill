@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import re
 from typing import Dict, Any, List
 from bson import ObjectId
 from fastapi import HTTPException, status
@@ -101,24 +102,87 @@ class SaleService:
         count = await self.db.invoices.count_documents(b_query)
         invoice_number = f"INV-{datetime.now().year}-{count + 1:06d}"
 
-        # 4. Resolve party snapshots
-        party_name_snapshot = request.party_name_input
-        party_phone_snapshot = request.party_phone_input
+        # 4. Resolve party snapshots & ensure customer persistence in MongoDB
+        now = datetime.now(timezone.utc)
+        party_name_snapshot = request.party_name_input or request.consumer_name or "Walk-in Retail Customer"
+        party_phone_snapshot = request.party_phone_input or request.consumer_phone or None
         party_oid = None
 
         if request.party_id:
             p_oid = ObjectId(request.party_id) if ObjectId.is_valid(request.party_id) else None
             if p_oid:
-                party_doc = await self.db.parties.find_one({"_id": p_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
-                if party_doc:
+                # Check customers collection first, fallback to parties
+                cust_doc = await self.db.customers.find_one({"_id": p_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
+                if cust_doc:
                     party_oid = p_oid
-                    party_name_snapshot = party_doc["name"]
-                    party_phone_snapshot = party_doc.get("phone")
+                    party_name_snapshot = cust_doc.get("name", party_name_snapshot)
+                    party_phone_snapshot = cust_doc.get("phone", party_phone_snapshot)
+                else:
+                    party_doc = await self.db.parties.find_one({"_id": p_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
+                    if party_doc:
+                        party_oid = p_oid
+                        party_name_snapshot = party_doc.get("name", party_name_snapshot)
+                        party_phone_snapshot = party_doc.get("phone", party_phone_snapshot)
+
+        # If party_oid is not yet resolved, try resolving by phone or auto-creating in customers collection
+        digits_only = re.sub(r"\D", "", party_phone_snapshot or "")
+        if len(digits_only) > 10 and digits_only.startswith("91"):
+            clean_digits = digits_only[2:]
+        elif len(digits_only) > 10 and digits_only.startswith("0"):
+            clean_digits = digits_only[1:]
+        else:
+            clean_digits = digits_only
+
+        ten_digit_phone = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
+        formatted_phone = f"+91{ten_digit_phone}" if len(ten_digit_phone) == 10 else party_phone_snapshot
+
+        if ten_digit_phone and len(ten_digit_phone) >= 4:
+            if not party_oid:
+                existing_cust = await self.db.customers.find_one({
+                    "businessId": b_oid,
+                    "phone": {"$regex": ten_digit_phone, "$options": "i"}
+                })
+                if existing_cust:
+                    party_oid = existing_cust["_id"]
+                    party_phone_snapshot = existing_cust.get("phone", formatted_phone)
+                    if party_name_snapshot and party_name_snapshot.lower() != "walk-in retail customer" and party_name_snapshot != existing_cust.get("name"):
+                        await self.db.customers.update_one({"_id": party_oid}, {"$set": {"name": party_name_snapshot, "updatedAt": now}})
+                    else:
+                        party_name_snapshot = existing_cust.get("name", party_name_snapshot)
+                else:
+                    existing_party = await self.db.parties.find_one({
+                        "businessId": b_oid,
+                        "phone": {"$regex": ten_digit_phone, "$options": "i"}
+                    })
+                    if existing_party:
+                        party_oid = existing_party["_id"]
+                        party_name_snapshot = existing_party.get("name", party_name_snapshot)
+                        party_phone_snapshot = existing_party.get("phone", formatted_phone)
+                    else:
+                        valid_cust_name = party_name_snapshot if (party_name_snapshot and party_name_snapshot.lower() != "walk-in retail customer") else f"Customer {ten_digit_phone[-4:]}"
+                        new_cust_doc = {
+                            "businessId": b_oid,
+                            "name": valid_cust_name,
+                            "phone": formatted_phone,
+                            "tags": ["Regular"],
+                            "marketingConsent": True,
+                            "locationIds": [request.location_id] if request.location_id else [],
+                            "openingBalance": 0.0,
+                            "currentBalance": 0.0,
+                            "totalSpent": 0.0,
+                            "totalVisits": 0,
+                            "lastPurchaseDate": now,
+                            "createdAt": now,
+                            "updatedAt": now
+                        }
+                        res_cust = await self.db.customers.insert_one(new_cust_doc)
+                        party_oid = res_cust.inserted_id
+                        party_name_snapshot = valid_cust_name
+                        party_phone_snapshot = formatted_phone
 
         payment_status = "PAID" if totals.balance_due == Decimal("0.00") else ("PARTIAL" if totals.paid_amount > 0 else "UNPAID")
 
         # 5. Construct invoice document
-        now = datetime.now(timezone.utc)
         invoice_doc = {
             "businessId": b_oid,
             "invoiceNumber": invoice_number,
@@ -218,12 +282,37 @@ class SaleService:
             }
             await self.db.payments.insert_one(payment_doc)
 
-        # Update customer receivable balance if credit exists
-        if party_oid and totals.balance_due > Decimal("0.00"):
-            await self.db.parties.update_one(
-                {"_id": party_oid, "businessId": b_oid},
-                {"$inc": {"currentReceivable": float(totals.balance_due)}}
+        # Update customer analytics & receivable balances
+        customer_update = {
+            "$inc": {
+                "totalSpent": float(totals.grand_total),
+                "totalVisits": 1
+            },
+            "$set": {
+                "lastPurchaseDate": now,
+                "updatedAt": now
+            }
+        }
+        if totals.balance_due > Decimal("0.00"):
+            customer_update["$inc"]["currentBalance"] = float(totals.balance_due)
+
+        if party_oid:
+            await self.db.customers.update_one(
+                {"_id": party_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
+                customer_update
             )
+            if totals.balance_due > Decimal("0.00"):
+                await self.db.parties.update_one(
+                    {"_id": party_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
+                    {"$inc": {"currentReceivable": float(totals.balance_due)}}
+                )
+        elif party_phone_snapshot:
+            clean_p = party_phone_snapshot.strip().replace(" ", "").replace("-", "").replace("+91", "")
+            if len(clean_p) >= 4:
+                await self.db.customers.update_one(
+                    {"businessId": b_oid, "phone": {"$regex": clean_p, "$options": "i"}},
+                    customer_update
+                )
 
         invoice_doc["_id"] = str(invoice_id)
         invoice_doc["businessId"] = str(b_oid)

@@ -110,6 +110,26 @@ export interface Party {
   locationName?: string;
 }
 
+export interface Customer {
+  id: string;
+  businessId?: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  gstin?: string;
+  openingBalance: number;
+  currentBalance: number;
+  totalSpent: number;
+  totalVisits: number;
+  lastPurchaseDate?: string;
+  tags?: string[];
+  marketingConsent?: boolean;
+  locationIds?: string[];
+  notes?: string;
+  createdAt: string;
+}
+
 export interface CartItem {
   item: Item;
   quantity: number;

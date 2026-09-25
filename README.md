@@ -137,15 +137,14 @@ This repository includes specialized Antigravity build skills located in `.agent
 
 ---
 
-### Step 1: Start Infrastructure (MongoDB & Redis)
+### Step 1: Start Infrastructure (MongoDB)
 
-Start the local database and cache services using Docker Compose:
+Start the local database service using Docker Compose:
 ```bash
-docker compose up -d mongodb redis
+docker compose up -d mongodb
 ```
 
 - MongoDB running on `localhost:27017`
-- Redis running on `localhost:6379`
 
 ---
 

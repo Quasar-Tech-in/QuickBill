@@ -609,8 +609,7 @@ export const SettingsView: React.FC = () => {
 MONGODB_URI=mongodb://admin:secretpassword@localhost:27017/quickbill_db?authSource=admin
 
 # Dedicated Tenant Store Database
-DATABASE_NAME=quickbill_main_db
-REDIS_URL=redis://localhost:6379/0`}
+DATABASE_NAME=quickbill_main_db`}
               </pre>
             </div>
           </div>

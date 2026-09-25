@@ -70,10 +70,12 @@ async def test_cross_tenant_item_isolation(superadmin_token):
             "X-Business-ID": TENANT_B_ID
         }
 
+        import uuid
+        test_sku = f"SKU-A-{uuid.uuid4().hex[:6]}"
         # 1. Create item in Store A
         create_res = await ac.post("/api/v1/items", json={
             "name": "Store A Premium Item",
-            "sku": "SKU-A-999",
+            "sku": test_sku,
             "unit": "pcs",
             "purchase_price": "50.00",
             "sale_price": "100.00",
@@ -132,4 +134,48 @@ async def test_cross_tenant_party_isolation(superadmin_token):
         # Store B CANNOT access (must be 404)
         res_b = await ac.get(f"/api/v1/parties/{party_id}", headers=headers_tenant_b)
         assert res_b.status_code == 404
+
+@pytest.mark.asyncio
+async def test_customers_crm_and_marketing_isolation(superadmin_token):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        headers_tenant_a = {
+            "Authorization": f"Bearer {superadmin_token}",
+            "X-Business-ID": TENANT_A_ID
+        }
+        headers_tenant_b = {
+            "Authorization": f"Bearer {superadmin_token}",
+            "X-Business-ID": TENANT_B_ID
+        }
+
+        # 1. Create dedicated customer in Store A
+        import uuid
+        phone_a = f"98{uuid.uuid4().int % 100000000:08d}"
+        cust_res = await ac.post("/api/v1/customers", json={
+            "name": "Campaign Target VIP Customer",
+            "phone": phone_a,
+            "email": "vip.marketing@example.com",
+            "tags": ["VIP", "FestivalCampaign"],
+            "marketingConsent": True,
+            "openingBalance": "0.00"
+        }, headers=headers_tenant_a)
+
+        assert cust_res.status_code == 201
+        cust_a = cust_res.json()
+        cust_id = cust_a["_id"]
+
+        # 2. Store A phone lookup works
+        lookup_res_a = await ac.get(f"/api/v1/customers/lookup/by-phone?phone={phone_a}", headers=headers_tenant_a)
+        assert lookup_res_a.status_code == 200
+        assert lookup_res_a.json()["name"] == "Campaign Target VIP Customer"
+
+        # 3. Store B cannot lookup Store A's customer
+        lookup_res_b = await ac.get(f"/api/v1/customers/lookup/by-phone?phone={phone_a}", headers=headers_tenant_b)
+        assert lookup_res_b.status_code == 200
+        assert lookup_res_b.json() is None
+
+        # 4. Store A marketing export includes the customer
+        export_res_a = await ac.get("/api/v1/customers/export/marketing", headers=headers_tenant_a)
+        assert export_res_a.status_code == 200
+        exports = export_res_a.json()
+        assert any(c["id"] == cust_id for c in exports)
 
