@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.database import get_tenant_db
 from app.core.security import get_current_business_id
 from app.schemas.common import PaginatedResponse
-from app.schemas.party import PartyCreate, PartyResponse
+from app.schemas.party import PartyCreate, PartyUpdate, PartyResponse
 from app.repositories.base_repository import BaseTenantRepository
 
 router = APIRouter(prefix="/parties", tags=["Parties (Customers & Suppliers)"])
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/parties", tags=["Parties (Customers & Suppliers)"])
 @router.get("", response_model=PaginatedResponse[PartyResponse])
 async def list_parties(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=200),
     party_type: Optional[str] = Query(None, alias="type"),
     search: Optional[str] = None,
     business_id: str = Depends(get_current_business_id)
@@ -94,6 +94,47 @@ async def get_party(
     doc["businessId"] = str(doc["businessId"])
     return PartyResponse(**doc)
 
+@router.put("/{party_id}", response_model=PartyResponse)
+async def update_party(
+    party_id: str,
+    payload: PartyUpdate,
+    business_id: str = Depends(get_current_business_id)
+):
+    db = await get_tenant_db(business_id)
+    repo = BaseTenantRepository(db, "parties")
+    existing = await repo.get_by_id(business_id, party_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Party contact not found in current store")
+
+    update_fields = {}
+    if payload.name is not None:
+        update_fields["name"] = payload.name
+    if payload.phone is not None:
+        update_fields["phone"] = payload.phone
+    if payload.email is not None:
+        update_fields["email"] = payload.email
+    if payload.type is not None:
+        update_fields["type"] = payload.type
+    if payload.tax_id is not None:
+        update_fields["taxId"] = payload.tax_id
+    if payload.billing_address is not None:
+        update_fields["billingAddress"] = payload.billing_address
+    if payload.shipping_address is not None:
+        update_fields["shippingAddress"] = payload.shipping_address
+    if payload.credit_limit is not None:
+        update_fields["creditLimit"] = float(payload.credit_limit)
+    if payload.notes is not None:
+        update_fields["notes"] = payload.notes
+
+    if update_fields:
+        update_fields["updatedAt"] = datetime.now(timezone.utc)
+        await repo.update_by_id(business_id, party_id, update_fields)
+
+    updated_doc = await repo.get_by_id(business_id, party_id)
+    updated_doc["_id"] = str(updated_doc["_id"])
+    updated_doc["businessId"] = str(updated_doc["businessId"])
+    return PartyResponse(**updated_doc)
+
 @router.delete("/{party_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_party(
     party_id: str,
@@ -106,4 +147,3 @@ async def delete_party(
         raise HTTPException(status_code=404, detail="Party contact not found in current store")
     await repo.delete_by_id(business_id, party_id)
     return None
-

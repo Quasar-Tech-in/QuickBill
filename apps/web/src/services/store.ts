@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, Expense, ExpenseCategory, LedgerEntry } from '../types';
 import { INITIAL_ITEMS, INITIAL_PARTIES, INITIAL_INVOICES, INITIAL_PAYMENTS } from './mockData';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
@@ -11,6 +11,19 @@ export const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+export const DEFAULT_EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  { id: 'exp-cat-1', name: 'Electricity Bill', isCustom: false },
+  { id: 'exp-cat-2', name: 'Staff Salary & Wages', isCustom: false },
+  { id: 'exp-cat-3', name: 'Shop / Store Rent', isCustom: false },
+  { id: 'exp-cat-4', name: 'Maintenance & Repairs', isCustom: false },
+  { id: 'exp-cat-5', name: 'Tea & Refreshments', isCustom: false },
+  { id: 'exp-cat-6', name: 'Printing & Stationery', isCustom: false },
+  { id: 'exp-cat-7', name: 'Internet & Telephone', isCustom: false },
+  { id: 'exp-cat-8', name: 'Municipal / Trade Tax', isCustom: false },
+  { id: 'exp-cat-9', name: 'Packaging & Materials', isCustom: false },
+  { id: 'exp-cat-10', name: 'Logistics / Delivery', isCustom: false },
+];
 
 export const DEFAULT_CATEGORIES: ItemCategory[] = [
   { id: 'cat-01', businessId: '65f2a1b9a000000000000001', name: 'Grocery', description: 'Packaged foods, staples, pulses & grains', createdAt: '2026-01-15T10:00:00Z' },
@@ -127,6 +140,8 @@ class StoreService {
   private parties: Party[] = [];
   private invoices: Invoice[] = [];
   private payments: Payment[] = [];
+  private expenses: Expense[] = [];
+  private expenseCategories: ExpenseCategory[] = [];
   private tenants: Tenant[] = [];
   private locations: StoreLocation[] = [];
   private users: User[] = [];
@@ -145,6 +160,7 @@ class StoreService {
         this.fetchItems().catch(() => {});
         this.fetchInvoices().catch(() => {});
         this.fetchParties().catch(() => {});
+        this.fetchExpenses().catch(() => {});
       }
     });
   }
@@ -166,6 +182,8 @@ class StoreService {
       const savedItems = localStorage.getItem('qb_items');
       const savedParties = localStorage.getItem('qb_parties');
       const savedPayments = localStorage.getItem('qb_payments');
+      const savedExpenses = localStorage.getItem('qb_expenses');
+      const savedExpCats = localStorage.getItem('qb_expense_categories');
       const savedTenants = localStorage.getItem('qb_tenants');
       const savedLocations = localStorage.getItem('qb_locations');
       const savedUsers = localStorage.getItem('qb_users');
@@ -193,6 +211,8 @@ class StoreService {
       });
       this.parties = savedParties ? JSON.parse(savedParties) : INITIAL_PARTIES;
       this.payments = savedPayments ? JSON.parse(savedPayments) : INITIAL_PAYMENTS;
+      this.expenses = savedExpenses ? JSON.parse(savedExpenses) : [];
+      this.expenseCategories = savedExpCats ? JSON.parse(savedExpCats) : DEFAULT_EXPENSE_CATEGORIES;
       this.tenants = savedTenants ? JSON.parse(savedTenants) : DEFAULT_TENANTS;
       this.locations = savedLocations ? JSON.parse(savedLocations) : DEFAULT_LOCATIONS;
       this.users = savedUsers ? JSON.parse(savedUsers) : DEFAULT_USERS;
@@ -216,6 +236,7 @@ class StoreService {
       this.items.forEach(i => { i.businessId = this.currentTenant.id; });
       this.parties.forEach(p => { p.businessId = this.currentTenant.id; });
       this.payments.forEach(pay => { pay.businessId = this.currentTenant.id; });
+      this.expenses.forEach(exp => { exp.businessId = this.currentTenant.id; });
       this.categories.forEach(c => { c.businessId = this.currentTenant.id; });
 
     } catch {
@@ -223,6 +244,8 @@ class StoreService {
       this.parties = INITIAL_PARTIES;
       this.invoices = [];
       this.payments = INITIAL_PAYMENTS;
+      this.expenses = [];
+      this.expenseCategories = DEFAULT_EXPENSE_CATEGORIES;
       this.tenants = DEFAULT_TENANTS;
       this.locations = DEFAULT_LOCATIONS;
       this.users = DEFAULT_USERS;
@@ -237,6 +260,8 @@ class StoreService {
     localStorage.setItem('qb_items', JSON.stringify(this.items));
     localStorage.setItem('qb_parties', JSON.stringify(this.parties));
     localStorage.setItem('qb_payments', JSON.stringify(this.payments));
+    localStorage.setItem('qb_expenses', JSON.stringify(this.expenses));
+    localStorage.setItem('qb_expense_categories', JSON.stringify(this.expenseCategories));
     localStorage.setItem('qb_tenants', JSON.stringify(this.tenants));
     localStorage.setItem('qb_locations', JSON.stringify(this.locations));
     localStorage.setItem('qb_users', JSON.stringify(this.users));
@@ -863,7 +888,7 @@ class StoreService {
   getParties(locationId?: string): Party[] {
     const activeId = this.currentTenant.id;
     const tenantParties = this.parties.filter(p => (p.businessId || DEFAULT_TENANTS[0].id) === activeId);
-    if (!locationId) return tenantParties;
+    if (!locationId || locationId === 'ALL') return tenantParties;
 
     return tenantParties.filter(p => 
       !p.locationIds || p.locationIds.length === 0 || p.locationIds.includes(locationId) || p.locationId === locationId
@@ -1017,7 +1042,7 @@ class StoreService {
     return this.addParty(customerData);
   }
 
-  updateParty(partyId: string, updates: Partial<Party>): Party | undefined {
+  async updateParty(partyId: string, updates: Partial<Party>): Promise<Party | undefined> {
     const activeId = this.currentTenant.id;
     const p = this.parties.find(
       x => (x.businessId || DEFAULT_TENANTS[0].id) === activeId && x.id === partyId
@@ -1025,13 +1050,56 @@ class StoreService {
     if (p) {
       Object.assign(p, updates);
       this.saveToStorage();
+      
       // Asynchronously sync with backend if online
       if (!partyId.startsWith('party_')) {
-        apiClient.put(`/customers/${partyId}`, updates).catch(() => {});
+        try {
+          if (p.type === 'CUSTOMER') {
+            await apiClient.put(`/customers/${partyId}`, {
+              name: updates.name,
+              phone: updates.phone,
+              email: updates.email,
+              address: updates.address,
+              gstin: updates.gstin,
+              locationIds: updates.locationIds,
+            });
+          } else {
+            await apiClient.put(`/parties/${partyId}`, {
+              name: updates.name,
+              phone: updates.phone,
+              email: updates.email,
+              billingAddress: updates.address ? { street: updates.address } : undefined,
+              taxId: updates.gstin,
+            });
+          }
+        } catch (e) {
+          console.warn('Could not sync party update to backend API:', e);
+        }
       }
       return p;
     }
     return undefined;
+  }
+
+  async deleteParty(partyId: string, partyType: 'CUSTOMER' | 'SUPPLIER' = 'CUSTOMER'): Promise<boolean> {
+    const activeId = this.currentTenant.id;
+    this.parties = this.parties.filter(
+      p => !((p.businessId || DEFAULT_TENANTS[0].id) === activeId && p.id === partyId)
+    );
+    this.saveToStorage();
+
+    if (!partyId.startsWith('party_')) {
+      try {
+        if (partyType === 'CUSTOMER') {
+          await apiClient.delete(`/customers/${partyId}`);
+        } else {
+          await apiClient.delete(`/parties/${partyId}`);
+        }
+      } catch (err) {
+        console.warn('Could not delete party from backend API:', err);
+      }
+    }
+    return true;
   }
 
   findPartyByPhone(phone: string, locationId?: string): Party | undefined {
@@ -1101,48 +1169,253 @@ class StoreService {
     }
   }
 
+  // --- Strict Tenant & Location-Isolated Operating Expenses & Categories ---
+  getExpenseCategories(): ExpenseCategory[] {
+    return this.expenseCategories;
+  }
+
+  addExpenseCategory(name: string): ExpenseCategory {
+    const cleanName = name.trim();
+    const existing = this.expenseCategories.find(c => c.name.toLowerCase() === cleanName.toLowerCase());
+    if (existing) return existing;
+
+    const newCat: ExpenseCategory = {
+      id: `exp_cat_${Date.now()}`,
+      name: cleanName,
+      isCustom: true,
+    };
+    this.expenseCategories.push(newCat);
+    this.saveToStorage();
+    return newCat;
+  }
+
+  deleteExpenseCategory(id: string): boolean {
+    const prevLen = this.expenseCategories.length;
+    this.expenseCategories = this.expenseCategories.filter(c => c.id !== id);
+    this.saveToStorage();
+    return this.expenseCategories.length < prevLen;
+  }
+
+  getExpenses(locationId?: string): Expense[] {
+    const activeId = this.currentTenant.id;
+    const list = this.expenses.filter(e => (e.businessId || DEFAULT_TENANTS[0].id) === activeId);
+    if (!locationId || locationId === 'ALL') return list;
+    return list.filter(e => !e.locationId || e.locationId === locationId);
+  }
+
+  async fetchExpenses(locationId?: string): Promise<Expense[]> {
+    try {
+      const params: any = { page: 1, page_size: 100 };
+      if (locationId && locationId !== 'ALL') {
+        params.locationId = locationId;
+      }
+      const res = await apiClient.get('/expenses', { params });
+      if (res.data?.data && Array.isArray(res.data.data)) {
+        const liveExpenses: Expense[] = res.data.data.map((d: any) => ({
+          id: d._id || d.id,
+          businessId: d.businessId || this.currentTenant.id,
+          category: d.category,
+          amount: Number(d.amount || 0),
+          payee: d.payee || undefined,
+          paymentMode: d.paymentMode || 'CASH',
+          referenceNumber: d.referenceNumber || undefined,
+          description: d.description || undefined,
+          locationId: d.locationId || undefined,
+          locationName: d.locationName || undefined,
+          expenseDate: d.expenseDate ? new Date(d.expenseDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          createdAt: d.createdAt,
+        }));
+        this.expenses = liveExpenses;
+        this.saveToStorage();
+        return this.getExpenses(locationId);
+      }
+    } catch (err) {
+      console.warn('Could not fetch live expenses from /expenses API:', err);
+    }
+    return this.getExpenses(locationId);
+  }
+
+  async addExpense(expenseData: Omit<Expense, 'id' | 'businessId'>): Promise<Expense> {
+    const activeId = this.currentTenant.id;
+    const activeLoc = this.getActiveLocation();
+    
+    const newExp: Expense = {
+      ...expenseData,
+      id: `exp_${Date.now()}`,
+      businessId: activeId,
+      locationId: expenseData.locationId || activeLoc.id,
+      locationName: expenseData.locationName || activeLoc.name,
+      expenseDate: expenseData.expenseDate || new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString(),
+    };
+
+    // Attempt backend sync
+    try {
+      const res = await apiClient.post('/expenses', {
+        category: newExp.category,
+        amount: newExp.amount,
+        payee: newExp.payee,
+        paymentMode: newExp.paymentMode,
+        referenceNumber: newExp.referenceNumber,
+        description: newExp.description,
+        locationId: newExp.locationId,
+        locationName: newExp.locationName,
+        expenseDate: newExp.expenseDate ? new Date(newExp.expenseDate).toISOString() : new Date().toISOString(),
+      });
+      if (res.data?.id || res.data?._id) {
+        newExp.id = res.data.id || res.data._id;
+      }
+    } catch (err) {
+      console.warn('Could not sync expense creation to backend, persisted locally:', err);
+    }
+
+    this.expenses.unshift(newExp);
+    this.saveToStorage();
+    return newExp;
+  }
+
+  async updateExpense(id: string, updates: Partial<Expense>): Promise<Expense | null> {
+    const activeId = this.currentTenant.id;
+    const idx = this.expenses.findIndex(
+      e => (e.businessId || DEFAULT_TENANTS[0].id) === activeId && e.id === id
+    );
+    if (idx === -1) return null;
+
+    this.expenses[idx] = { ...this.expenses[idx], ...updates };
+    this.saveToStorage();
+
+    if (!id.startsWith('exp_')) {
+      try {
+        await apiClient.put(`/expenses/${id}`, {
+          category: updates.category,
+          amount: updates.amount,
+          payee: updates.payee,
+          paymentMode: updates.paymentMode,
+          referenceNumber: updates.referenceNumber,
+          description: updates.description,
+          locationId: updates.locationId,
+          locationName: updates.locationName,
+          expenseDate: updates.expenseDate ? new Date(updates.expenseDate).toISOString() : undefined,
+        });
+      } catch (err) {
+        console.warn('Could not sync expense update to backend:', err);
+      }
+    }
+    return this.expenses[idx];
+  }
+
+  async deleteExpense(id: string): Promise<boolean> {
+    const activeId = this.currentTenant.id;
+    const prevLen = this.expenses.length;
+    this.expenses = this.expenses.filter(
+      e => !((e.businessId || DEFAULT_TENANTS[0].id) === activeId && e.id === id)
+    );
+    this.saveToStorage();
+
+    if (!id.startsWith('exp_')) {
+      try {
+        await apiClient.delete(`/expenses/${id}`);
+      } catch (err) {
+        console.warn('Could not sync expense deletion to backend:', err);
+      }
+    }
+    return this.expenses.length < prevLen;
+  }
+
+  // --- Unified Financial Ledger Stream ---
+  getLedgerEntries(locationId?: string): LedgerEntry[] {
+    const payments = this.getPayments();
+    const expenses = this.getExpenses(locationId);
+
+    const entries: LedgerEntry[] = [];
+
+    payments.forEach(p => {
+      entries.push({
+        id: p.id,
+        date: p.date,
+        type: p.type,
+        title: p.type === 'PAYMENT_IN' ? 'Customer Receipt' : 'Supplier Payout',
+        partyOrPayee: p.partyName,
+        category: p.type === 'PAYMENT_IN' ? 'Receivable Inflow' : 'Payable Outflow',
+        paymentMode: p.paymentMode,
+        referenceNumber: p.referenceNumber,
+        notes: p.notes,
+        amount: p.amount,
+      });
+    });
+
+    expenses.forEach(e => {
+      entries.push({
+        id: e.id,
+        date: e.expenseDate,
+        type: 'EXPENSE',
+        title: e.category,
+        partyOrPayee: e.payee || 'Direct Expense',
+        category: e.category,
+        paymentMode: e.paymentMode,
+        referenceNumber: e.referenceNumber,
+        notes: e.description,
+        amount: e.amount,
+        locationName: e.locationName,
+      });
+    });
+
+    // Sort by date descending
+    entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return entries;
+  }
+
+
   // --- Strict Tenant & Location-Isolated Invoices (Live Database Integration) ---
   private mapSaleDocToInvoice(doc: any): Invoice {
+    const rawBalance = doc.balanceDue !== undefined ? doc.balanceDue : (doc.balance_due !== undefined ? doc.balance_due : 0);
+    const rawPaid = doc.paidAmount !== undefined ? doc.paidAmount : (doc.paid_amount !== undefined ? doc.paid_amount : 0);
+    const rawGrand = doc.grandTotal !== undefined ? doc.grandTotal : (doc.grand_total !== undefined ? doc.grand_total : 0);
+    const rawSubtotal = doc.subtotal !== undefined ? doc.subtotal : 0;
+    const rawTax = doc.taxTotal !== undefined ? doc.taxTotal : (doc.tax_total !== undefined ? doc.tax_total : 0);
+    const rawDiscount = doc.discountTotal !== undefined ? doc.discountTotal : (doc.discount_total !== undefined ? doc.discount_total : 0);
+    const rawRoundOff = doc.roundOff !== undefined ? doc.roundOff : (doc.round_off !== undefined ? doc.round_off : 0);
+
     return {
       id: doc.id || doc._id || `inv_${Date.now()}`,
-      businessId: doc.businessId || this.currentTenant.id,
-      locationId: doc.locationId || undefined,
-      locationName: doc.locationName || 'Main Store',
-      locationCode: doc.locationCode || undefined,
-      locationAddress: doc.locationAddress || undefined,
-      locationPhone: doc.locationPhone || undefined,
-      invoiceNumber: doc.invoiceNumber || 'INV-TEMP',
-      date: doc.createdAt ? new Date(doc.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      partyId: doc.partyId || undefined,
-      partyName: doc.partyNameSnapshot || doc.consumerName || 'Walk-in Customer',
-      partyPhone: doc.partyPhoneSnapshot || doc.consumerPhone || undefined,
-      consumerName: doc.consumerName || doc.partyNameSnapshot || 'Walk-in Customer',
-      consumerPhone: doc.consumerPhone || doc.partyPhoneSnapshot || undefined,
-      billedById: doc.billedById || undefined,
-      billedByName: doc.billedByName || undefined,
-      billedByRole: doc.billedByRole || undefined,
+      businessId: doc.businessId || doc.business_id || this.currentTenant.id,
+      locationId: doc.locationId || doc.location_id || undefined,
+      locationName: doc.locationName || doc.location_name || 'Main Store',
+      locationCode: doc.locationCode || doc.location_code || undefined,
+      locationAddress: doc.locationAddress || doc.location_address || undefined,
+      locationPhone: doc.locationPhone || doc.location_phone || undefined,
+      invoiceNumber: doc.invoiceNumber || doc.invoice_number || 'INV-TEMP',
+      date: doc.createdAt ? new Date(doc.createdAt).toISOString().split('T')[0] : (doc.created_at ? new Date(doc.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+      partyId: doc.partyId || doc.party_id || undefined,
+      partyName: doc.partyNameSnapshot || doc.party_name_snapshot || doc.consumerName || doc.consumer_name || 'Walk-in Customer',
+      partyPhone: doc.partyPhoneSnapshot || doc.party_phone_snapshot || doc.consumerPhone || doc.consumer_phone || undefined,
+      consumerName: doc.consumerName || doc.consumer_name || doc.partyNameSnapshot || doc.party_name_snapshot || 'Walk-in Customer',
+      consumerPhone: doc.consumerPhone || doc.consumer_phone || doc.partyPhoneSnapshot || doc.party_phone_snapshot || undefined,
+      billedById: doc.billedById || doc.billed_by_id || undefined,
+      billedByName: doc.billedByName || doc.billed_by_name || undefined,
+      billedByRole: doc.billedByRole || doc.billed_by_role || undefined,
       type: 'SALE',
       items: (doc.items || []).map((it: any) => ({
         itemId: it.itemId || it.item_id,
-        name: it.nameSnapshot || it.name || 'Item',
+        name: it.nameSnapshot || it.name_snapshot || it.name || 'Item',
         quantity: Number(it.quantity || 1),
-        unitPrice: Number(it.unitPrice || 0),
+        unitPrice: Number(it.unitPrice !== undefined ? it.unitPrice : (it.unit_price || 0)),
         discountPercent: Number(it.discount || 0),
-        taxRate: Number(it.taxRate || 0),
-        taxAmount: Number(it.taxAmount || 0),
-        total: Number(it.lineTotal || (Number(it.unitPrice || 0) * Number(it.quantity || 1))),
+        taxRate: Number(it.taxRate !== undefined ? it.taxRate : (it.tax_rate || 0)),
+        taxAmount: Number(it.taxAmount !== undefined ? it.taxAmount : (it.tax_amount || 0)),
+        total: Number(it.lineTotal !== undefined ? it.lineTotal : (it.line_total !== undefined ? it.line_total : (Number(it.unitPrice || it.unit_price || 0) * Number(it.quantity || 1)))),
       })),
-      subtotal: Number(doc.subtotal || 0),
-      taxTotal: Number(doc.taxTotal || 0),
-      discountTotal: Number(doc.discountTotal || 0),
-      discountType: doc.discountType || undefined,
-      discountValue: doc.discountValue !== undefined ? Number(doc.discountValue) : undefined,
-      roundOff: Number(doc.roundOff || 0),
-      grandTotal: Number(doc.grandTotal || 0),
-      paidAmount: Number(doc.paidAmount || 0),
-      balanceAmount: Number(doc.balanceDue || 0),
-      paymentMode: (doc.paymentMode as any) || 'CASH',
-      status: (doc.paymentStatus as any) || (doc.balanceDue <= 0 ? 'PAID' : 'PARTIAL'),
+      subtotal: Number(rawSubtotal),
+      taxTotal: Number(rawTax),
+      discountTotal: Number(rawDiscount),
+      discountType: doc.discountType || doc.discount_type || undefined,
+      discountValue: doc.discountValue !== undefined ? Number(doc.discountValue) : (doc.discount_value !== undefined ? Number(doc.discount_value) : undefined),
+      roundOff: Number(rawRoundOff),
+      grandTotal: Number(rawGrand),
+      paidAmount: Number(rawPaid),
+      balanceAmount: Number(rawBalance),
+      paymentMode: (doc.paymentMode || doc.payment_mode || 'CASH') as any,
+      status: (doc.paymentStatus || doc.payment_status || (Number(rawBalance) <= 0 ? 'PAID' : (Number(rawPaid) > 0 ? 'PARTIAL' : 'UNPAID'))) as any,
       notes: doc.notes || undefined,
     };
   }
@@ -1196,13 +1469,13 @@ class StoreService {
         item_id: it.itemId,
         quantity: it.quantity,
         unit_price: it.unitPrice,
-        discount: it.discountPercent ? (it.unitPrice * (it.discountPercent / 100)) : 0,
+        discount: it.discountPercent ? ((it.unitPrice * it.quantity) * (it.discountPercent / 100)) : 0,
         tax_rate: it.taxRate,
       })),
-      invoiceDiscount: invoiceData.discountTotal || 0,
+      invoiceDiscount: Number(invoiceData.discountTotal || 0),
       discountType: invoiceData.discountType,
-      discountValue: invoiceData.discountValue,
-      paidAmount: invoiceData.paidAmount,
+      discountValue: invoiceData.discountValue !== undefined ? Number(invoiceData.discountValue) : undefined,
+      paidAmount: Number(invoiceData.paidAmount !== undefined ? invoiceData.paidAmount : (invoiceData.paymentMode === 'CREDIT' ? 0 : invoiceData.grandTotal)),
       paymentMode: invoiceData.paymentMode || 'CASH',
       notes: invoiceData.notes,
       enableRoundOff: invoiceData.roundOff !== 0,

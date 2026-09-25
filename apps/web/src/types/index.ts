@@ -242,3 +242,39 @@ export interface PlatformStats {
   totalInvoices: number;
   databaseClustersCount: number;
 }
+
+export interface Expense {
+  id: string;
+  businessId?: string;
+  category: string;
+  amount: number;
+  payee?: string;
+  paymentMode: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE';
+  referenceNumber?: string;
+  description?: string;
+  locationId?: string;
+  locationName?: string;
+  expenseDate: string;
+  createdAt?: string;
+}
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  isCustom?: boolean;
+}
+
+export interface LedgerEntry {
+  id: string;
+  date: string;
+  type: 'PAYMENT_IN' | 'PAYMENT_OUT' | 'EXPENSE';
+  title: string;
+  partyOrPayee: string;
+  category?: string;
+  paymentMode: string;
+  referenceNumber?: string;
+  notes?: string;
+  amount: number;
+  locationName?: string;
+}
+

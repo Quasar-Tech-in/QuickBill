@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
-from fastapi import APIRouter, Depends, Query, status
-from app.core.database import get_database
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from app.core.database import get_tenant_db
 from app.core.security import get_current_business_id
 from app.schemas.common import PaginatedResponse
-from app.schemas.expense import ExpenseCreate, ExpenseResponse
+from app.schemas.expense import ExpenseCreate, ExpenseUpdate, ExpenseResponse
 from app.repositories.base_repository import BaseTenantRepository
 
 router = APIRouter(prefix="/expenses", tags=["Expenses"])
@@ -13,15 +13,18 @@ router = APIRouter(prefix="/expenses", tags=["Expenses"])
 @router.get("", response_model=PaginatedResponse[ExpenseResponse])
 async def list_expenses(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=200),
     category: Optional[str] = None,
-    business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
+    location_id: Optional[str] = Query(None, alias="locationId"),
+    business_id: str = Depends(get_current_business_id)
 ):
+    db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "expenses")
     query = {}
     if category:
         query["category"] = category
+    if location_id:
+        query["locationId"] = location_id
 
     docs, total = await repo.list_paginated(
         business_id=business_id,
@@ -47,9 +50,9 @@ async def list_expenses(
 @router.post("", response_model=ExpenseResponse, status_code=status.HTTP_201_CREATED)
 async def create_expense(
     payload: ExpenseCreate,
-    business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
+    business_id: str = Depends(get_current_business_id)
 ):
+    db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "expenses")
     now = datetime.now(timezone.utc)
     doc = {
@@ -58,7 +61,10 @@ async def create_expense(
         "amount": float(payload.amount),
         "payee": payload.payee,
         "paymentMode": payload.payment_mode,
+        "referenceNumber": payload.reference_number,
         "description": payload.description,
+        "locationId": payload.location_id,
+        "locationName": payload.location_name,
         "expenseDate": payload.expense_date or now,
         "createdAt": now
     }
@@ -67,3 +73,57 @@ async def create_expense(
     doc["_id"] = doc_id
     doc["businessId"] = business_id
     return ExpenseResponse(**doc)
+
+@router.put("/{expense_id}", response_model=ExpenseResponse)
+async def update_expense(
+    expense_id: str,
+    payload: ExpenseUpdate,
+    business_id: str = Depends(get_current_business_id)
+):
+    db = await get_tenant_db(business_id)
+    repo = BaseTenantRepository(db, "expenses")
+    existing = await repo.get_by_id(business_id, expense_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Expense record not found in current store")
+
+    update_fields = {}
+    if payload.category is not None:
+        update_fields["category"] = payload.category
+    if payload.amount is not None:
+        update_fields["amount"] = float(payload.amount)
+    if payload.payee is not None:
+        update_fields["payee"] = payload.payee
+    if payload.payment_mode is not None:
+        update_fields["paymentMode"] = payload.payment_mode
+    if payload.reference_number is not None:
+        update_fields["referenceNumber"] = payload.reference_number
+    if payload.description is not None:
+        update_fields["description"] = payload.description
+    if payload.location_id is not None:
+        update_fields["locationId"] = payload.location_id
+    if payload.location_name is not None:
+        update_fields["locationName"] = payload.location_name
+    if payload.expense_date is not None:
+        update_fields["expenseDate"] = payload.expense_date
+
+    if update_fields:
+        update_fields["updatedAt"] = datetime.now(timezone.utc)
+        await repo.update_by_id(business_id, expense_id, update_fields)
+
+    updated_doc = await repo.get_by_id(business_id, expense_id)
+    updated_doc["_id"] = str(updated_doc["_id"])
+    updated_doc["businessId"] = str(updated_doc["businessId"])
+    return ExpenseResponse(**updated_doc)
+
+@router.delete("/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_expense(
+    expense_id: str,
+    business_id: str = Depends(get_current_business_id)
+):
+    db = await get_tenant_db(business_id)
+    repo = BaseTenantRepository(db, "expenses")
+    existing = await repo.get_by_id(business_id, expense_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Expense record not found in current store")
+    await repo.delete_by_id(business_id, expense_id)
+    return None

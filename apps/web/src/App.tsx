@@ -14,6 +14,7 @@ import { DashboardView } from './views/DashboardView';
 import { PosBillingView } from './views/PosBillingView';
 import { InventoryView } from './views/InventoryView';
 import { PartiesView } from './views/PartiesView';
+import { LedgerView } from './views/LedgerView';
 import { TransactionsView } from './views/TransactionsView';
 import { ReportsView } from './views/ReportsView';
 import { SettingsView } from './views/SettingsView';
@@ -37,7 +38,8 @@ const getRouteTitle = (pathname: string): string => {
   if (pathname.startsWith('/dashboard')) return 'Executive Dashboard';
   if (pathname.startsWith('/pos')) return 'POS Counter & Billing';
   if (pathname.startsWith('/inventory')) return 'Item Catalog & Inventory';
-  if (pathname.startsWith('/parties')) return 'Parties & Contact Ledger';
+  if (pathname.startsWith('/parties')) return 'Parties & Contact Directory';
+  if (pathname.startsWith('/ledger')) return 'Financial Ledger & Operating Expenses';
   if (pathname.startsWith('/invoices') || pathname.startsWith('/transactions')) return 'Invoices & Bills';
   if (pathname.startsWith('/reports')) return 'Financial Reports & Analytics';
   if (pathname.startsWith('/superadmin')) return 'Super Admin Multi-Tenant Governance';
@@ -72,7 +74,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     const path = location.pathname;
 
     if (role === 'CASHIER') {
-      const allowedCashierPaths = ['/pos', '/invoices', '/transactions', '/parties'];
+      const allowedCashierPaths = ['/pos', '/invoices', '/transactions', '/parties', '/ledger'];
       const isAllowed = allowedCashierPaths.some(p => path === p || path.startsWith(p + '/'));
       if (!isAllowed) {
         navigate('/pos', { replace: true });
@@ -224,6 +226,7 @@ export const App: React.FC = () => {
             />
             <Route path="/inventory" element={<InventoryView />} />
             <Route path="/parties" element={<PartiesView />} />
+            <Route path="/ledger" element={<LedgerView />} />
             <Route 
               path="/invoices" 
               element={

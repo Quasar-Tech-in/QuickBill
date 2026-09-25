@@ -9,7 +9,7 @@ from app.services.sale_service import SaleService
 
 router = APIRouter(prefix="/sales", tags=["Sales & Billing"])
 
-@router.get("", response_model=PaginatedResponse[SaleResponse])
+@router.get("", response_model=PaginatedResponse[SaleResponse], response_model_by_alias=True)
 async def list_sales(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -44,7 +44,7 @@ async def list_sales(
         total_pages=(total + page_size - 1) // page_size if page_size else 1
     )
 
-@router.post("", response_model=SaleResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=SaleResponse, status_code=status.HTTP_201_CREATED, response_model_by_alias=True)
 async def create_sale(
     payload: SaleCreateRequest,
     user: TokenPayload = Depends(get_current_user),
@@ -59,7 +59,7 @@ async def create_sale(
     )
     return SaleResponse(**doc)
 
-@router.get("/{sale_id}", response_model=SaleResponse)
+@router.get("/{sale_id}", response_model=SaleResponse, response_model_by_alias=True)
 async def get_sale(
     sale_id: str,
     business_id: str = Depends(get_current_business_id),

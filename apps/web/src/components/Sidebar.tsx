@@ -5,6 +5,7 @@ import {
   ReceiptText, 
   Package, 
   Users, 
+  BookOpen, 
   FileText, 
   BarChart3, 
   Settings, 
@@ -55,8 +56,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
     { 
       id: 'parties', 
       path: '/parties',
-      label: userRole === 'CASHIER' ? 'Customer Ledger' : 'Parties & Ledger', 
+      label: userRole === 'CASHIER' ? 'Customer Directory' : 'Parties & CRM', 
       icon: Users, 
+      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
+    },
+    { 
+      id: 'ledger', 
+      path: '/ledger',
+      label: 'Ledger & Expenses', 
+      icon: BookOpen, 
       roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
     },
     { 

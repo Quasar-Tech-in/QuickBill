@@ -67,7 +67,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   // Checkout Modal State (Post Item Selection)
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState<boolean>(false);
   const [selectedPartyId, setSelectedPartyId] = useState<string>('');
-  const [customerName, setCustomerName] = useState<string>('Walk-in Retail Customer');
+  const [customerName, setCustomerName] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>('');
 
   // Discount State (Inside Checkout Modal)
@@ -185,6 +185,14 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const handlePhoneChange = async (rawInput: string) => {
     const { digits, formatted } = cleanAndFormatIndianPhone(rawInput);
     setCustomerPhone(formatted);
+
+    // If phone number is empty / cleared, reset name and party selection to blank
+    if (digits.length === 0) {
+      setSelectedPartyId('');
+      setCustomerName('');
+      return;
+    }
+
     // Only query backend if exactly 10 digits are entered
     if (digits.length === 10) {
       const matched = await store.lookupPartyByPhone(digits, activeLocation.id);
@@ -193,10 +201,14 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         setCustomerName(matched.name);
         setParties(store.getParties(activeLocation.id).filter(p => p.type === 'CUSTOMER'));
       } else {
+        // Customer not found in DB (response is null) -> reset to default Customer <last 4 digits>
         setSelectedPartyId('');
+        setCustomerName(`Customer ${digits.slice(-4)}`);
       }
     } else {
+      // Whenever number is revised to less than 10 digits, reset previously matched customer name and partyId
       setSelectedPartyId('');
+      setCustomerName('');
     }
   };
 
@@ -441,10 +453,11 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         } else {
           finalCustomerName = matched.name;
         }
-      } else if (trimmedName && trimmedName.toLowerCase() !== 'walk-in retail customer') {
+      } else {
         // 3. New Customer -> Auto-register in dedicated MongoDB customers table
+        const defaultOrTypedName = trimmedName || `Customer ${rawDigits.slice(-4)}`;
         const newParty = await store.createCustomer({
-          name: trimmedName,
+          name: defaultOrTypedName,
           phone: trimmedPhone,
           type: 'CUSTOMER',
           locationIds: [activeLocation.id],
@@ -475,8 +488,14 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       };
     });
 
+    const finalPaidAmount = paymentMode === 'CREDIT' 
+      ? (paidAmountInput !== '' ? Math.max(0, Number(paidAmountInput) || 0) : 0)
+      : (paidAmountInput !== '' ? Math.max(0, Number(paidAmountInput) || 0) : grandTotal);
+
+    const finalBalanceDue = Math.max(0, grandTotal - finalPaidAmount);
+
     const status: 'PAID' | 'PARTIAL' | 'UNPAID' = 
-      effectivePaid >= grandTotal ? 'PAID' : (effectivePaid > 0 ? 'PARTIAL' : 'UNPAID');
+      finalPaidAmount >= grandTotal ? 'PAID' : (finalPaidAmount > 0 ? 'PARTIAL' : 'UNPAID');
 
     const created = await store.createInvoice({
       date: new Date().toISOString().split('T')[0],
@@ -502,8 +521,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       discountValue: parsedDiscountVal,
       roundOff,
       grandTotal,
-      paidAmount: effectivePaid,
-      balanceAmount: balance,
+      paidAmount: finalPaidAmount,
+      balanceAmount: finalBalanceDue,
       paymentMode,
       status,
       notes,
@@ -516,7 +535,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     setShowDiscount(false);
     setOrderDiscountValue('0');
     setCustomerPhone('');
-    setCustomerName('Walk-in Retail Customer');
+    setCustomerName('');
     setSelectedPartyId('');
     setIsCheckoutModalOpen(false);
 
