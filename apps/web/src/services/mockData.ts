@@ -19,6 +19,16 @@ export const INITIAL_ITEMS: Item[] = [
     purchasePrice: 95.0,
     currentStock: 310,
     minStockAlert: 10,
+    imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=400&auto=format&fit=crop&q=80',
+    images: [
+      {
+        id: 'img_rice_1',
+        url: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=400&auto=format&fit=crop&q=80',
+        order: 0,
+        isPrimary: true,
+        name: 'Basmati Rice Premium Pack',
+      },
+    ],
     locations: [
       {
         locationId: LOC_FLAGSHIP_ID,
@@ -63,6 +73,16 @@ export const INITIAL_ITEMS: Item[] = [
     purchasePrice: 120.0,
     currentStock: 128,
     minStockAlert: 15,
+    imageUrl: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400&auto=format&fit=crop&q=80',
+    images: [
+      {
+        id: 'img_oil_1',
+        url: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400&auto=format&fit=crop&q=80',
+        order: 0,
+        isPrimary: true,
+        name: 'Pure Sunflower Oil',
+      },
+    ],
     locations: [
       {
         locationId: LOC_FLAGSHIP_ID,
@@ -107,6 +127,16 @@ export const INITIAL_ITEMS: Item[] = [
     purchasePrice: 320.0,
     currentStock: 94,
     minStockAlert: 5,
+    imageUrl: 'https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=400&auto=format&fit=crop&q=80',
+    images: [
+      {
+        id: 'img_mouse_1',
+        url: 'https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=400&auto=format&fit=crop&q=80',
+        order: 0,
+        isPrimary: true,
+        name: 'Ergonomic Wireless Optical Mouse',
+      },
+    ],
     locations: [
       {
         locationId: LOC_FLAGSHIP_ID,
@@ -151,6 +181,16 @@ export const INITIAL_ITEMS: Item[] = [
     purchasePrice: 110.0,
     currentStock: 153,
     minStockAlert: 10,
+    imageUrl: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&auto=format&fit=crop&q=80',
+    images: [
+      {
+        id: 'img_cable_1',
+        url: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&auto=format&fit=crop&q=80',
+        order: 0,
+        isPrimary: true,
+        name: 'USB-C Fast Charging Braided Cable',
+      },
+    ],
     locations: [
       {
         locationId: LOC_FLAGSHIP_ID,
@@ -195,6 +235,16 @@ export const INITIAL_ITEMS: Item[] = [
     purchasePrice: 72.0,
     currentStock: 250,
     minStockAlert: 12,
+    imageUrl: 'https://images.unsplash.com/photo-1548907040-4baa42d10919?w=400&auto=format&fit=crop&q=80',
+    images: [
+      {
+        id: 'img_choc_1',
+        url: 'https://images.unsplash.com/photo-1548907040-4baa42d10919?w=400&auto=format&fit=crop&q=80',
+        order: 0,
+        isPrimary: true,
+        name: 'Smooth Milk Chocolate Bar',
+      },
+    ],
     locations: [
       {
         locationId: LOC_FLAGSHIP_ID,
@@ -239,6 +289,16 @@ export const INITIAL_ITEMS: Item[] = [
     purchasePrice: 135.0,
     currentStock: 89,
     minStockAlert: 8,
+    imageUrl: 'https://images.unsplash.com/photo-1564890369478-c89ca6d9cde9?w=400&auto=format&fit=crop&q=80',
+    images: [
+      {
+        id: 'img_tea_1',
+        url: 'https://images.unsplash.com/photo-1564890369478-c89ca6d9cde9?w=400&auto=format&fit=crop&q=80',
+        order: 0,
+        isPrimary: true,
+        name: 'Organic Green Tea Box',
+      },
+    ],
     locations: [
       {
         locationId: LOC_FLAGSHIP_ID,
@@ -283,6 +343,16 @@ export const INITIAL_ITEMS: Item[] = [
     purchasePrice: 2200.0,
     currentStock: 52,
     minStockAlert: 4,
+    imageUrl: 'https://images.unsplash.com/photo-1504148455328-c376907d081c?w=400&auto=format&fit=crop&q=80',
+    images: [
+      {
+        id: 'img_drill_1',
+        url: 'https://images.unsplash.com/photo-1504148455328-c376907d081c?w=400&auto=format&fit=crop&q=80',
+        order: 0,
+        isPrimary: true,
+        name: '650W Power Impact Drill',
+      },
+    ],
     locations: [
       {
         locationId: LOC_FLAGSHIP_ID,

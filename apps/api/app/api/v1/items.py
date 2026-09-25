@@ -9,10 +9,9 @@ from datetime import datetime, timezone
 from typing import Optional, List
 from pydantic import BaseModel
 from bson import ObjectId
-from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from app.core.config import settings
-from app.core.database import get_database
+from app.core.database import get_tenant_db
 from app.core.security import get_current_business_id
 from app.schemas.common import PaginatedResponse
 from app.schemas.item import ItemCreate, ItemUpdate, ItemResponse
@@ -24,11 +23,11 @@ router = APIRouter(prefix="/items", tags=["Items"])
 @router.get("", response_model=PaginatedResponse[ItemResponse])
 async def list_items(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=200),
     search: Optional[str] = None,
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
     query = {"isActive": True}
     if search:
@@ -63,8 +62,8 @@ async def list_items(
 async def create_item(
     payload: ItemCreate,
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
     public_id = f"itm_{secrets.token_hex(6)}"
     now = datetime.now(timezone.utc)
@@ -96,8 +95,8 @@ async def create_item(
 async def lookup_item_by_qr(
     public_item_id: str,
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
     item = await repo.find_by_public_id(business_id, public_item_id)
     if not item:
@@ -113,8 +112,8 @@ async def lookup_item_by_qr(
 async def get_item(
     item_id: str,
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
     item = await repo.get_by_id(business_id, item_id)
     if not item:
@@ -128,8 +127,8 @@ async def update_item(
     item_id: str,
     payload: ItemUpdate,
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
     existing = await repo.get_by_id(business_id, item_id)
     if not existing:
@@ -162,8 +161,8 @@ async def update_item(
 async def delete_item(
     item_id: str,
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
     # Soft delete / deactivation within tenant context
     existing = await repo.get_by_id(business_id, item_id)

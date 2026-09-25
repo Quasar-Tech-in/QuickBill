@@ -1,7 +1,7 @@
 from typing import Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from app.core.database import get_database
+from app.core.database import get_tenant_db
 from app.core.security import get_current_user, get_current_business_id, TokenPayload
 from app.schemas.common import PaginatedResponse
 from app.schemas.sale import SaleCreateRequest, SaleResponse
@@ -12,14 +12,20 @@ router = APIRouter(prefix="/sales", tags=["Sales & Billing"])
 @router.get("", response_model=PaginatedResponse[SaleResponse])
 async def list_sales(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=200),
+    location_id: Optional[str] = Query(None),
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
     skip = (page - 1) * page_size
-    total = await db.invoices.count_documents({"businessId": b_oid})
-    cursor = db.invoices.find({"businessId": b_oid}).sort("createdAt", -1).skip(skip).limit(page_size)
+    
+    query: dict = {"$or": [{"businessId": b_oid}, {"businessId": business_id}]}
+    if location_id and location_id != "ALL":
+        query["locationId"] = location_id
+
+    total = await db.invoices.count_documents(query)
+    cursor = db.invoices.find(query).sort("createdAt", -1).skip(skip).limit(page_size)
     docs = await cursor.to_list(length=page_size)
 
     sales = []
@@ -43,8 +49,8 @@ async def create_sale(
     payload: SaleCreateRequest,
     user: TokenPayload = Depends(get_current_user),
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     service = SaleService(db)
     doc = await service.create_sale(
         business_id=business_id,
@@ -57,8 +63,8 @@ async def create_sale(
 async def get_sale(
     sale_id: str,
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     s_oid = ObjectId(sale_id) if ObjectId.is_valid(sale_id) else None
     b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else None
     if not s_oid:

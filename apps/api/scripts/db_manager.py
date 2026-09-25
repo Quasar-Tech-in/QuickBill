@@ -246,6 +246,7 @@ async def cleanup_and_init_db():
         {
             "_id": ObjectId("65f2a1b9a000000000000101"),
             "businessId": TENANT_1_ID,
+            "id": "item_1_1",
             "publicItemId": "ITM-1001",
             "name": "Basmati Rice (1kg Pack)",
             "sku": "RICE-001",
@@ -294,11 +295,61 @@ async def cleanup_and_init_db():
         {
             "_id": ObjectId("65f2a1b9a000000000000102"),
             "businessId": TENANT_1_ID,
+            "id": "item_1_2",
             "publicItemId": "ITM-1002",
+            "name": "Refined Sunflower Oil (1L)",
+            "sku": "OIL-002",
+            "barcode": "8901234567891",
+            "category": "Grocery",
+            "salePrice": 145.0,
+            "purchasePrice": 120.0,
+            "taxRate": 5.0,
+            "unit": "ltr",
+            "currentStock": 128,
+            "minStockAlert": 15,
+            "locations": [
+                {
+                    "locationId": str(LOC_1_ID),
+                    "locationName": "Main Flagship Counter",
+                    "salePrice": 145.0,
+                    "purchasePrice": 120.0,
+                    "currentStock": 8,
+                    "minStockAlert": 15,
+                    "isListed": True
+                },
+                {
+                    "locationId": str(LOC_2_ID),
+                    "locationName": "Downtown Express Branch",
+                    "salePrice": 150.0,
+                    "purchasePrice": 120.0,
+                    "currentStock": 20,
+                    "minStockAlert": 10,
+                    "isListed": True
+                },
+                {
+                    "locationId": str(LOC_3_ID),
+                    "locationName": "Central Supply Warehouse",
+                    "salePrice": 140.0,
+                    "purchasePrice": 115.0,
+                    "currentStock": 100,
+                    "minStockAlert": 25,
+                    "isListed": False
+                }
+            ],
+            "qrPayload": "ITEM:ITM-1002",
+            "isActive": True,
+            "createdAt": now,
+            "updatedAt": now
+        },
+        {
+            "_id": ObjectId("65f2a1b9a000000000000103"),
+            "businessId": TENANT_1_ID,
+            "id": "item_1_3",
+            "publicItemId": "ITM-1003",
             "name": "Wireless Optical Mouse",
             "sku": "ACC-003",
             "barcode": "8901234567892",
-            "category": "Electronics",
+            "category": "Electronics & Gadgets",
             "salePrice": 499.0,
             "purchasePrice": 320.0,
             "taxRate": 18.0,
@@ -334,67 +385,413 @@ async def cleanup_and_init_db():
                     "isListed": False
                 }
             ],
-            "qrPayload": "ITEM:ITM-1002",
+            "qrPayload": "ITEM:ITM-1003",
             "isActive": True,
             "createdAt": now,
             "updatedAt": now
         },
         {
-            "_id": ObjectId("65f2a1b9a000000000000103"),
+            "_id": ObjectId("65f2a1b9a000000000000104"),
             "businessId": TENANT_1_ID,
-            "publicItemId": "ITM-1003",
-            "name": "Sunflower Cooking Oil (5L)",
-            "sku": "OIL-005",
-            "barcode": "8901234567891",
-            "category": "Grocery",
-            "salePrice": 650.0,
-            "purchasePrice": 520.0,
-            "taxRate": 5.0,
-            "unit": "ltr",
-            "currentStock": 30,
-            "minStockAlert": 6,
+            "id": "item_1_4",
+            "publicItemId": "ITM-1004",
+            "name": "Bluetooth Neckband Earphones",
+            "sku": "AUD-004",
+            "barcode": "8901234567893",
+            "category": "Electronics & Gadgets",
+            "salePrice": 249.0,
+            "purchasePrice": 160.0,
+            "taxRate": 18.0,
+            "unit": "pcs",
+            "currentStock": 42,
+            "minStockAlert": 5,
             "locations": [
                 {
                     "locationId": str(LOC_1_ID),
                     "locationName": "Main Flagship Counter",
-                    "salePrice": 650.0,
-                    "purchasePrice": 520.0,
-                    "currentStock": 10,
+                    "salePrice": 249.0,
+                    "purchasePrice": 160.0,
+                    "currentStock": 12,
+                    "minStockAlert": 5,
+                    "isListed": True
+                },
+                {
+                    "locationId": str(LOC_2_ID),
+                    "locationName": "Downtown Express Branch",
+                    "salePrice": 269.0,
+                    "purchasePrice": 160.0,
+                    "currentStock": 5,
+                    "minStockAlert": 3,
+                    "isListed": True
+                },
+                {
+                    "locationId": str(LOC_3_ID),
+                    "locationName": "Central Supply Warehouse",
+                    "salePrice": 235.0,
+                    "purchasePrice": 150.0,
+                    "currentStock": 25,
+                    "minStockAlert": 10,
+                    "isListed": False
+                }
+            ],
+            "qrPayload": "ITEM:ITM-1004",
+            "isActive": True,
+            "createdAt": now,
+            "updatedAt": now
+        },
+        {
+            "_id": ObjectId("65f2a1b9a000000000000105"),
+            "businessId": TENANT_1_ID,
+            "id": "item_1_5",
+            "publicItemId": "ITM-1005",
+            "name": "Dairy Milk Silk Chocolate (150g)",
+            "sku": "SNK-005",
+            "barcode": "8901234567894",
+            "category": "Snacks & Sweets",
+            "salePrice": 90.0,
+            "purchasePrice": 72.0,
+            "taxRate": 12.0,
+            "unit": "pcs",
+            "currentStock": 250,
+            "minStockAlert": 20,
+            "locations": [
+                {
+                    "locationId": str(LOC_1_ID),
+                    "locationName": "Main Flagship Counter",
+                    "salePrice": 90.0,
+                    "purchasePrice": 72.0,
+                    "currentStock": 50,
+                    "minStockAlert": 12,
+                    "isListed": True
+                },
+                {
+                    "locationId": str(LOC_2_ID),
+                    "locationName": "Downtown Express Branch",
+                    "salePrice": 95.0,
+                    "purchasePrice": 72.0,
+                    "currentStock": 40,
+                    "minStockAlert": 10,
+                    "isListed": True
+                },
+                {
+                    "locationId": str(LOC_3_ID),
+                    "locationName": "Central Supply Warehouse",
+                    "salePrice": 85.0,
+                    "purchasePrice": 68.0,
+                    "currentStock": 160,
+                    "minStockAlert": 40,
+                    "isListed": False
+                }
+            ],
+            "qrPayload": "ITEM:ITM-1005",
+            "isActive": True,
+            "createdAt": now,
+            "updatedAt": now
+        },
+        {
+            "_id": ObjectId("65f2a1b9a000000000000106"),
+            "businessId": TENANT_1_ID,
+            "id": "item_1_6",
+            "publicItemId": "ITM-1006",
+            "name": "Organic Green Tea (25 Bags)",
+            "sku": "BEV-006",
+            "barcode": "8901234567895",
+            "category": "Beverages",
+            "salePrice": 185.0,
+            "purchasePrice": 135.0,
+            "taxRate": 5.0,
+            "unit": "box",
+            "currentStock": 89,
+            "minStockAlert": 8,
+            "locations": [
+                {
+                    "locationId": str(LOC_1_ID),
+                    "locationName": "Main Flagship Counter",
+                    "salePrice": 185.0,
+                    "purchasePrice": 135.0,
+                    "currentStock": 19,
+                    "minStockAlert": 8,
+                    "isListed": True
+                },
+                {
+                    "locationId": str(LOC_2_ID),
+                    "locationName": "Downtown Express Branch",
+                    "salePrice": 195.0,
+                    "purchasePrice": 135.0,
+                    "currentStock": 20,
+                    "minStockAlert": 5,
+                    "isListed": True
+                },
+                {
+                    "locationId": str(LOC_3_ID),
+                    "locationName": "Central Supply Warehouse",
+                    "salePrice": 175.0,
+                    "purchasePrice": 125.0,
+                    "currentStock": 50,
+                    "minStockAlert": 15,
+                    "isListed": False
+                }
+            ],
+            "qrPayload": "ITEM:ITM-1006",
+            "isActive": True,
+            "createdAt": now,
+            "updatedAt": now
+        },
+        {
+            "_id": ObjectId("65f2a1b9a000000000000107"),
+            "businessId": TENANT_1_ID,
+            "id": "item_1_7",
+            "publicItemId": "ITM-1007",
+            "name": "Industrial Heavy Duty Drill Machine 650W",
+            "sku": "PWR-DRL-650",
+            "barcode": "8901234567896",
+            "category": "Electronics & Gadgets",
+            "salePrice": 3250.0,
+            "purchasePrice": 2200.0,
+            "taxRate": 18.0,
+            "unit": "set",
+            "currentStock": 52,
+            "minStockAlert": 4,
+            "locations": [
+                {
+                    "locationId": str(LOC_1_ID),
+                    "locationName": "Main Flagship Counter",
+                    "salePrice": 3250.0,
+                    "purchasePrice": 2200.0,
+                    "currentStock": 12,
                     "minStockAlert": 3,
                     "isListed": True
                 },
                 {
                     "locationId": str(LOC_2_ID),
                     "locationName": "Downtown Express Branch",
-                    "salePrice": 675.0,
-                    "purchasePrice": 520.0,
-                    "currentStock": 5,
+                    "salePrice": 3390.0,
+                    "purchasePrice": 2200.0,
+                    "currentStock": 8,
                     "minStockAlert": 2,
                     "isListed": True
                 },
                 {
                     "locationId": str(LOC_3_ID),
                     "locationName": "Central Supply Warehouse",
-                    "salePrice": 620.0,
-                    "purchasePrice": 500.0,
-                    "currentStock": 15,
-                    "minStockAlert": 5,
+                    "salePrice": 3100.0,
+                    "purchasePrice": 2100.0,
+                    "currentStock": 32,
+                    "minStockAlert": 10,
                     "isListed": False
                 }
             ],
-            "qrPayload": "ITEM:ITM-1003",
+            "qrPayload": "ITEM:ITM-1007",
             "isActive": True,
             "createdAt": now,
             "updatedAt": now
         }
     ]
+    await client[STORE_1_DB].items.delete_many({})
     await client[STORE_1_DB].items.insert_many(store_1_items)
+    await client[STORE_1_DB].locations.delete_many({})
     await client[STORE_1_DB].locations.insert_many(locations)
-    print("Store items and locations seeded successfully into quickbill_main_db.")
 
-    # 6. Verify Root DB collections list
+    # 4. Seed Parties
+    parties = [
+        {
+            "_id": ObjectId("65f2a1b9a000000000000201"),
+            "businessId": TENANT_1_ID,
+            "name": "Aarav Sharma",
+            "type": "CUSTOMER",
+            "phone": "+91 98765 43210",
+            "email": "aarav.sharma@example.com",
+            "address": "B-42, Hauz Khas Enclave, New Delhi, 110016",
+            "gstin": "07AAAAA0000A1Z5",
+            "currentBalance": 0.0,
+            "isActive": True,
+            "createdAt": now
+        },
+        {
+            "_id": ObjectId("65f2a1b9a000000000000202"),
+            "businessId": TENANT_1_ID,
+            "name": "Downtown Coffee Lounge & Cafe",
+            "type": "CUSTOMER",
+            "phone": "+91 98112 23344",
+            "email": "procurement@downtowncafe.in",
+            "address": "Shop 12, City Walk Center, Downtown",
+            "gstin": "07BBBBB1111B2Z6",
+            "currentBalance": 450.0,
+            "isActive": True,
+            "createdAt": now
+        },
+        {
+            "_id": ObjectId("65f2a1b9a000000000000203"),
+            "businessId": TENANT_1_ID,
+            "name": "National FMCG Distributors Ltd",
+            "type": "SUPPLIER",
+            "phone": "+91 11 2345 6789",
+            "email": "sales@nationalfmcg.com",
+            "address": "Logistics Hub Phase 2, Delhi",
+            "gstin": "07CCCCC2222C3Z7",
+            "currentBalance": -12500.0,
+            "isActive": True,
+            "createdAt": now
+        }
+    ]
+    await client[STORE_1_DB].parties.delete_many({})
+    await client[STORE_1_DB].parties.insert_many(parties)
+
+    # 5. Seed Invoices with Full Customer, Location & Biller Tags
+    invoices = [
+        {
+            "_id": ObjectId("65f2a1b9a000000000000301"),
+            "businessId": TENANT_1_ID,
+            "invoiceNumber": "INV-2026-001",
+            "partyId": ObjectId("65f2a1b9a000000000000201"),
+            "partyNameSnapshot": "Aarav Sharma",
+            "partyPhoneSnapshot": "+91 98765 43210",
+            "consumerName": "Aarav Sharma",
+            "consumerPhone": "+91 98765 43210",
+            "locationId": str(LOC_1_ID),
+            "locationName": "Main Flagship Counter",
+            "locationCode": "MAIN-01",
+            "locationAddress": "Ground Floor, Metro Retail Plaza, Sector 18",
+            "locationPhone": "+91 9876543210",
+            "billedById": "65f2a1b9a000000000000012",
+            "billedByName": "Priya Verma",
+            "billedByRole": "CASHIER",
+            "status": "CONFIRMED",
+            "paymentStatus": "PAID",
+            "paymentMode": "UPI",
+            "items": [
+                {
+                    "itemId": "65f2a1b9a000000000000101",
+                    "nameSnapshot": "Basmati Rice (1kg Pack)",
+                    "skuSnapshot": "RICE-001",
+                    "quantity": 2.0,
+                    "unitPrice": 120.0,
+                    "discount": 0.0,
+                    "taxableAmount": 228.57,
+                    "taxRate": 5.0,
+                    "taxAmount": 11.43,
+                    "lineTotal": 240.0
+                },
+                {
+                    "itemId": "65f2a1b9a000000000000102",
+                    "nameSnapshot": "Wireless Optical Mouse",
+                    "skuSnapshot": "ACC-003",
+                    "quantity": 1.0,
+                    "unitPrice": 499.0,
+                    "discount": 0.0,
+                    "taxableAmount": 422.88,
+                    "taxRate": 18.0,
+                    "taxAmount": 76.12,
+                    "lineTotal": 499.0
+                }
+            ],
+            "subtotal": 651.45,
+            "taxTotal": 87.55,
+            "discountTotal": 0.0,
+            "discountType": None,
+            "discountValue": 0.0,
+            "additionalCharges": 0.0,
+            "roundOff": 0.0,
+            "grandTotal": 739.0,
+            "paidAmount": 739.0,
+            "balanceDue": 0.0,
+            "notes": "Retail POS Counter Bill",
+            "createdByUserId": "65f2a1b9a000000000000012",
+            "createdAt": now
+        },
+        {
+            "_id": ObjectId("65f2a1b9a000000000000302"),
+            "businessId": TENANT_1_ID,
+            "invoiceNumber": "INV-2026-002",
+            "partyId": ObjectId("65f2a1b9a000000000000202"),
+            "partyNameSnapshot": "Downtown Coffee Lounge & Cafe",
+            "partyPhoneSnapshot": "+91 98112 23344",
+            "consumerName": "Downtown Coffee Lounge & Cafe",
+            "consumerPhone": "+91 98112 23344",
+            "locationId": str(LOC_2_ID),
+            "locationName": "Downtown Express Branch",
+            "locationCode": "DT-02",
+            "locationAddress": "Shop 14, City Walk Center, Downtown",
+            "locationPhone": "+91 9811223344",
+            "billedById": "65f2a1b9a000000000000011",
+            "billedByName": "Rajesh Kumar",
+            "billedByRole": "STORE_MANAGER",
+            "status": "CONFIRMED",
+            "paymentStatus": "PAID",
+            "paymentMode": "CASH",
+            "items": [
+                {
+                    "itemId": "65f2a1b9a000000000000103",
+                    "nameSnapshot": "Sunflower Cooking Oil (5L)",
+                    "skuSnapshot": "OIL-005",
+                    "quantity": 2.0,
+                    "unitPrice": 675.0,
+                    "discount": 50.0,
+                    "taxableAmount": 1238.10,
+                    "taxRate": 5.0,
+                    "taxAmount": 61.90,
+                    "lineTotal": 1300.0
+                }
+            ],
+            "subtotal": 1238.10,
+            "taxTotal": 61.90,
+            "discountTotal": 50.0,
+            "discountType": "FLAT",
+            "discountValue": 50.0,
+            "additionalCharges": 0.0,
+            "roundOff": 0.0,
+            "grandTotal": 1300.0,
+            "paidAmount": 1300.0,
+            "balanceDue": 0.0,
+            "notes": "Downtown Express Bulk Supply Bill",
+            "createdByUserId": "65f2a1b9a000000000000011",
+            "createdAt": now
+        }
+    ]
+    await client[STORE_1_DB].invoices.delete_many({})
+    await client[STORE_1_DB].invoices.insert_many(invoices)
+
+    # 6. Seed Payments & Inventory Movements
+    payments = [
+        {
+            "_id": ObjectId("65f2a1b9a000000000000401"),
+            "businessId": TENANT_1_ID,
+            "paymentNumber": "PAY-2026-000001",
+            "direction": "IN",
+            "partyId": ObjectId("65f2a1b9a000000000000201"),
+            "partyNameSnapshot": "Aarav Sharma",
+            "invoiceId": ObjectId("65f2a1b9a000000000000301"),
+            "invoiceNumber": "INV-2026-001",
+            "amount": 739.0,
+            "paymentMode": "UPI",
+            "paidAt": now,
+            "createdAt": now
+        },
+        {
+            "_id": ObjectId("65f2a1b9a000000000000402"),
+            "businessId": TENANT_1_ID,
+            "paymentNumber": "PAY-2026-000002",
+            "direction": "IN",
+            "partyId": ObjectId("65f2a1b9a000000000000202"),
+            "partyNameSnapshot": "Downtown Coffee Lounge & Cafe",
+            "invoiceId": ObjectId("65f2a1b9a000000000000302"),
+            "invoiceNumber": "INV-2026-002",
+            "amount": 1300.0,
+            "paymentMode": "CASH",
+            "paidAt": now,
+            "createdAt": now
+        }
+    ]
+    await client[STORE_1_DB].payments.delete_many({})
+    await client[STORE_1_DB].payments.insert_many(payments)
+
+    print("Store items, locations, parties, invoices, and payments seeded successfully into quickbill_main_db.")
+
+    # 7. Verify Root DB collections list
     final_root_colls = await primary_db.list_collection_names()
     print(f"\nFinal Collections in Root DB ({PRIMARY_DB_NAME}): {final_root_colls}")
+    final_tenant_colls = await client[STORE_1_DB].list_collection_names()
+    print(f"Final Collections in Tenant DB ({STORE_1_DB}): {final_tenant_colls}")
 
     client.close()
     print("\nDatabase architecture cleanup and single-tenant multi-location initialization COMPLETED!")

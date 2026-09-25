@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   BarChart3, 
   Download, 
@@ -11,15 +11,20 @@ import {
   MapPin
 } from 'lucide-react';
 import { store } from '../services/store';
+import { Invoice } from '../types';
 
 export const ReportsView: React.FC = () => {
   const [reportType, setReportType] = useState<'PNL' | 'STOCK_VALUATION' | 'DAY_BOOK'>('PNL');
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
+  const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices(selectedLocationId));
 
   const locations = store.getAllLocations();
-  
-  // Query location-scoped invoices and items
-  const invoices = selectedLocationId === 'ALL' ? store.getInvoices() : store.getInvoices(selectedLocationId);
+
+  useEffect(() => {
+    store.fetchInvoices(selectedLocationId).then(data => {
+      setInvoices(data);
+    }).catch(() => {});
+  }, [selectedLocationId]);
   const items = selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true);
 
   // Financial Metrics

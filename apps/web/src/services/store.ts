@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem } from '../types';
 import { INITIAL_ITEMS, INITIAL_PARTIES, INITIAL_INVOICES, INITIAL_PAYMENTS } from './mockData';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
@@ -140,7 +140,12 @@ class StoreService {
   constructor() {
     this.loadFromStorage();
     this.setupAxiosInterceptors();
-    this.checkHealth();
+    this.checkHealth().then(isOnline => {
+      if (isOnline) {
+        this.fetchItems().catch(() => {});
+        this.fetchInvoices().catch(() => {});
+      }
+    });
   }
 
   private setupAxiosInterceptors() {
@@ -159,7 +164,6 @@ class StoreService {
     try {
       const savedItems = localStorage.getItem('qb_items');
       const savedParties = localStorage.getItem('qb_parties');
-      const savedInvoices = localStorage.getItem('qb_invoices');
       const savedPayments = localStorage.getItem('qb_payments');
       const savedTenants = localStorage.getItem('qb_tenants');
       const savedLocations = localStorage.getItem('qb_locations');
@@ -169,9 +173,24 @@ class StoreService {
       const savedSuperAdmin = localStorage.getItem('qb_super_admin_mode');
       const savedUser = localStorage.getItem('qb_auth_user');
 
+      // Purge any stale UI cached invoices
+      localStorage.removeItem('qb_invoices');
+      this.invoices = [];
+
       this.items = savedItems ? JSON.parse(savedItems) : INITIAL_ITEMS;
+      // Enrich mock items with images if missing from previous localStorage saves
+      this.items = this.items.map(item => {
+        const matchingInitial = INITIAL_ITEMS.find(init => init.id === item.id || init.publicItemId === item.publicItemId);
+        if (matchingInitial && !item.imageUrl && !item.images?.length && (matchingInitial.imageUrl || matchingInitial.images?.length)) {
+          return {
+            ...item,
+            imageUrl: matchingInitial.imageUrl,
+            images: matchingInitial.images,
+          };
+        }
+        return item;
+      });
       this.parties = savedParties ? JSON.parse(savedParties) : INITIAL_PARTIES;
-      this.invoices = savedInvoices ? JSON.parse(savedInvoices) : INITIAL_INVOICES;
       this.payments = savedPayments ? JSON.parse(savedPayments) : INITIAL_PAYMENTS;
       this.tenants = savedTenants ? JSON.parse(savedTenants) : DEFAULT_TENANTS;
       this.locations = savedLocations ? JSON.parse(savedLocations) : DEFAULT_LOCATIONS;
@@ -195,14 +214,13 @@ class StoreService {
       // Sync businessIds to single tenant
       this.items.forEach(i => { i.businessId = this.currentTenant.id; });
       this.parties.forEach(p => { p.businessId = this.currentTenant.id; });
-      this.invoices.forEach(inv => { inv.businessId = this.currentTenant.id; });
       this.payments.forEach(pay => { pay.businessId = this.currentTenant.id; });
       this.categories.forEach(c => { c.businessId = this.currentTenant.id; });
 
     } catch {
       this.items = INITIAL_ITEMS;
       this.parties = INITIAL_PARTIES;
-      this.invoices = INITIAL_INVOICES;
+      this.invoices = [];
       this.payments = INITIAL_PAYMENTS;
       this.tenants = DEFAULT_TENANTS;
       this.locations = DEFAULT_LOCATIONS;
@@ -217,7 +235,6 @@ class StoreService {
   private saveToStorage() {
     localStorage.setItem('qb_items', JSON.stringify(this.items));
     localStorage.setItem('qb_parties', JSON.stringify(this.parties));
-    localStorage.setItem('qb_invoices', JSON.stringify(this.invoices));
     localStorage.setItem('qb_payments', JSON.stringify(this.payments));
     localStorage.setItem('qb_tenants', JSON.stringify(this.tenants));
     localStorage.setItem('qb_locations', JSON.stringify(this.locations));
@@ -334,6 +351,35 @@ class StoreService {
     this.saveToStorage();
   }
 
+  // --- POS Cart Tracking & Synchronization ---
+  private posCart: CartItem[] = [];
+  private cartListeners: Array<(cart: CartItem[]) => void> = [];
+
+  getPosCart(): CartItem[] {
+    return this.posCart;
+  }
+
+  setPosCart(cart: CartItem[]): void {
+    this.posCart = cart;
+    this.cartListeners.forEach(listener => {
+      try { listener(cart); } catch (e) { console.error(e); }
+    });
+  }
+
+  clearPosCart(): void {
+    this.posCart = [];
+    this.cartListeners.forEach(listener => {
+      try { listener([]); } catch (e) { console.error(e); }
+    });
+  }
+
+  subscribePosCart(listener: (cart: CartItem[]) => void): () => void {
+    this.cartListeners.push(listener);
+    return () => {
+      this.cartListeners = this.cartListeners.filter(l => l !== listener);
+    };
+  }
+
   // --- Locations & Branches ---
   getLocations(): StoreLocation[] {
     const user = this.currentUser;
@@ -360,6 +406,7 @@ class StoreService {
     const found = this.locations.find(l => l.id === locId);
     if (found) {
       this.activeLocation = found;
+      this.clearPosCart(); // Always empty POS cart upon location change
       this.saveToStorage();
     }
     return this.getActiveLocation();
@@ -595,6 +642,11 @@ class StoreService {
           minStockAlert: locInv.minStockAlert ?? item.minStockAlert,
         });
       } else {
+        // If the item has explicit locations specified, but NOT this target location, skip when unlisted are excluded
+        if (!includeUnlisted && item.locations && item.locations.length > 0) {
+          continue;
+        }
+
         // Fall back to item master defaults
         const mrp = item.mrp ?? item.salePrice;
         let effectiveSalePrice = mrp;
@@ -615,6 +667,43 @@ class StoreService {
     }
 
     return result;
+  }
+
+  async fetchItems(locationId?: string): Promise<Item[]> {
+    try {
+      const res = await apiClient.get('/items', { params: { page: 1, page_size: 100 } });
+      if (res.data?.data && Array.isArray(res.data.data)) {
+        const liveItems: Item[] = res.data.data.map((d: any) => ({
+          id: d._id || d.id || d.publicItemId,
+          businessId: d.businessId || this.currentTenant.id,
+          publicItemId: d.publicItemId || d.sku || 'ITM-TEMP',
+          name: d.name,
+          sku: d.sku,
+          barcode: d.barcode,
+          category: d.category || 'General',
+          taxRate: Number(d.taxRate || 0),
+          unit: d.unit || 'pcs',
+          description: d.description,
+          mrp: d.mrp ? Number(d.mrp) : Number(d.salePrice || 0),
+          salePrice: Number(d.salePrice || 0),
+          purchasePrice: Number(d.purchasePrice || 0),
+          currentStock: Number(d.currentStock || 0),
+          minStockAlert: Number(d.minStockAlert || 5),
+          hasDiscount: d.hasDiscount,
+          discountType: d.discountType,
+          discountValue: d.discountValue ? Number(d.discountValue) : undefined,
+          locations: d.locations,
+          images: d.images,
+          imageUrl: d.imageUrl,
+        }));
+        if (liveItems.length > 0) {
+          this.items = liveItems;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch live items from /items API:', e);
+    }
+    return this.getItems(locationId);
   }
 
   getRawItems(): Item[] {
@@ -803,39 +892,156 @@ class StoreService {
     }
   }
 
-  // --- Strict Tenant & Location-Isolated Invoices ---
+  // --- Strict Tenant & Location-Isolated Invoices (Live Database Integration) ---
+  private mapSaleDocToInvoice(doc: any): Invoice {
+    return {
+      id: doc.id || doc._id || `inv_${Date.now()}`,
+      businessId: doc.businessId || this.currentTenant.id,
+      locationId: doc.locationId || undefined,
+      locationName: doc.locationName || 'Main Store',
+      locationCode: doc.locationCode || undefined,
+      locationAddress: doc.locationAddress || undefined,
+      locationPhone: doc.locationPhone || undefined,
+      invoiceNumber: doc.invoiceNumber || 'INV-TEMP',
+      date: doc.createdAt ? new Date(doc.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      partyId: doc.partyId || undefined,
+      partyName: doc.partyNameSnapshot || doc.consumerName || 'Walk-in Customer',
+      partyPhone: doc.partyPhoneSnapshot || doc.consumerPhone || undefined,
+      consumerName: doc.consumerName || doc.partyNameSnapshot || 'Walk-in Customer',
+      consumerPhone: doc.consumerPhone || doc.partyPhoneSnapshot || undefined,
+      billedById: doc.billedById || undefined,
+      billedByName: doc.billedByName || undefined,
+      billedByRole: doc.billedByRole || undefined,
+      type: 'SALE',
+      items: (doc.items || []).map((it: any) => ({
+        itemId: it.itemId || it.item_id,
+        name: it.nameSnapshot || it.name || 'Item',
+        quantity: Number(it.quantity || 1),
+        unitPrice: Number(it.unitPrice || 0),
+        discountPercent: Number(it.discount || 0),
+        taxRate: Number(it.taxRate || 0),
+        taxAmount: Number(it.taxAmount || 0),
+        total: Number(it.lineTotal || (Number(it.unitPrice || 0) * Number(it.quantity || 1))),
+      })),
+      subtotal: Number(doc.subtotal || 0),
+      taxTotal: Number(doc.taxTotal || 0),
+      discountTotal: Number(doc.discountTotal || 0),
+      discountType: doc.discountType || undefined,
+      discountValue: doc.discountValue !== undefined ? Number(doc.discountValue) : undefined,
+      roundOff: Number(doc.roundOff || 0),
+      grandTotal: Number(doc.grandTotal || 0),
+      paidAmount: Number(doc.paidAmount || 0),
+      balanceAmount: Number(doc.balanceDue || 0),
+      paymentMode: (doc.paymentMode as any) || 'CASH',
+      status: (doc.paymentStatus as any) || (doc.balanceDue <= 0 ? 'PAID' : 'PARTIAL'),
+      notes: doc.notes || undefined,
+    };
+  }
+
   getInvoices(locationId?: string): Invoice[] {
     const activeId = this.currentTenant.id;
     const list = this.invoices.filter(inv => (inv.businessId || DEFAULT_TENANTS[0].id) === activeId);
-    if (!locationId) return list;
+    if (!locationId || locationId === 'ALL') return list;
     return list.filter(inv => inv.locationId === locationId);
   }
 
-  createInvoice(invoiceData: Omit<Invoice, 'id' | 'invoiceNumber' | 'businessId'>): Invoice {
+  async fetchInvoices(locationId?: string): Promise<Invoice[]> {
+    try {
+      const params: any = { page: 1, page_size: 100 };
+      if (locationId && locationId !== 'ALL') {
+        params.location_id = locationId;
+      }
+      const res = await apiClient.get('/sales', { params });
+      if (res.data?.data && Array.isArray(res.data.data)) {
+        const liveInvoices = res.data.data.map((d: any) => this.mapSaleDocToInvoice(d));
+        this.invoices = liveInvoices;
+        return this.getInvoices(locationId);
+      }
+    } catch (err) {
+      console.warn('Could not fetch live invoices from backend /sales:', err);
+    }
+    return this.getInvoices(locationId);
+  }
+
+  async createInvoice(invoiceData: Omit<Invoice, 'id' | 'invoiceNumber' | 'businessId'>): Promise<Invoice> {
     const activeId = this.currentTenant.id;
     const activeLoc = this.getActiveLocation();
-    const storeInvoices = this.getInvoices();
+    const currentUser = this.getCurrentUser();
     
-    const newInvoice: Invoice = {
-      ...invoiceData,
-      id: `inv_${Date.now()}`,
-      businessId: activeId,
+    // Construct payload for authoritative backend creation in MongoDB
+    const payload = {
+      partyId: invoiceData.partyId || undefined,
+      partyNameInput: invoiceData.partyName,
+      partyPhoneInput: invoiceData.partyPhone,
+      consumerName: invoiceData.consumerName || invoiceData.partyName,
+      consumerPhone: invoiceData.consumerPhone || invoiceData.partyPhone,
       locationId: invoiceData.locationId || activeLoc.id,
       locationName: invoiceData.locationName || activeLoc.name,
-      invoiceNumber: `INV-${new Date().getFullYear()}-${String(storeInvoices.length + 1).padStart(3, '0')}`,
+      locationCode: invoiceData.locationCode || activeLoc.code,
+      locationAddress: invoiceData.locationAddress || activeLoc.address,
+      locationPhone: invoiceData.locationPhone || activeLoc.phone,
+      billedById: invoiceData.billedById || currentUser?.id || 'usr_staff',
+      billedByName: invoiceData.billedByName || currentUser?.name || 'Store Cashier',
+      billedByRole: invoiceData.billedByRole || currentUser?.role || 'CASHIER',
+      items: invoiceData.items.map(it => ({
+        item_id: it.itemId,
+        quantity: it.quantity,
+        unit_price: it.unitPrice,
+        discount: it.discountPercent ? (it.unitPrice * (it.discountPercent / 100)) : 0,
+        tax_rate: it.taxRate,
+      })),
+      invoiceDiscount: invoiceData.discountTotal || 0,
+      discountType: invoiceData.discountType,
+      discountValue: invoiceData.discountValue,
+      paidAmount: invoiceData.paidAmount,
+      paymentMode: invoiceData.paymentMode || 'CASH',
+      notes: invoiceData.notes,
+      enableRoundOff: invoiceData.roundOff !== 0,
     };
 
-    newInvoice.items.forEach(line => {
-      this.adjustStock(line.itemId, -line.quantity);
-    });
+    let createdInvoice: Invoice;
 
-    if (newInvoice.partyId && newInvoice.balanceAmount > 0) {
-      this.updatePartyBalance(newInvoice.partyId, newInvoice.balanceAmount);
+    try {
+      const res = await apiClient.post('/sales', payload);
+      if (res.data) {
+        createdInvoice = this.mapSaleDocToInvoice(res.data);
+      } else {
+        throw new Error('No data returned from backend');
+      }
+    } catch (err) {
+      console.warn('Direct backend invoice creation failed, applying fallback:', err);
+      const storeInvoices = this.getInvoices();
+      createdInvoice = {
+        ...invoiceData,
+        id: `inv_${Date.now()}`,
+        businessId: activeId,
+        locationId: invoiceData.locationId || activeLoc.id,
+        locationName: invoiceData.locationName || activeLoc.name,
+        locationCode: invoiceData.locationCode || activeLoc.code,
+        locationAddress: invoiceData.locationAddress || activeLoc.address,
+        locationPhone: invoiceData.locationPhone || activeLoc.phone,
+        billedById: invoiceData.billedById || currentUser?.id || 'usr_staff',
+        billedByName: invoiceData.billedByName || currentUser?.name || 'Store Cashier',
+        billedByRole: invoiceData.billedByRole || currentUser?.role || 'CASHIER',
+        consumerName: invoiceData.consumerName || invoiceData.partyName,
+        consumerPhone: invoiceData.consumerPhone || invoiceData.partyPhone,
+        invoiceNumber: `INV-${new Date().getFullYear()}-${String(storeInvoices.length + 1).padStart(3, '0')}`,
+      };
     }
 
-    this.invoices.unshift(newInvoice);
-    this.saveToStorage();
-    return newInvoice;
+    // Adjust local in-memory stocks & party balances
+    createdInvoice.items.forEach(line => {
+      this.adjustStock(line.itemId, -line.quantity, createdInvoice.locationId);
+    });
+
+    if (createdInvoice.partyId && createdInvoice.balanceAmount > 0) {
+      this.updatePartyBalance(createdInvoice.partyId, createdInvoice.balanceAmount);
+    }
+
+    // Update in-memory list (MongoDB backed)
+    this.invoices = [createdInvoice, ...this.invoices.filter(inv => inv.id !== createdInvoice.id && inv.invoiceNumber !== createdInvoice.invoiceNumber)];
+
+    return createdInvoice;
   }
 
   // --- Strict Tenant-Isolated Payments ---

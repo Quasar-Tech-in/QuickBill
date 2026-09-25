@@ -114,6 +114,8 @@ export interface CartItem {
   quantity: number;
   unitPrice: number;
   discountPercent: number;
+  discountType?: 'PERCENT' | 'FLAT';
+  discountValue?: number;
   taxRate: number;
   lineTotal: number;
 }
@@ -134,15 +136,26 @@ export interface Invoice {
   businessId?: string;
   locationId?: string;
   locationName?: string;
+  locationCode?: string;
+  locationAddress?: string;
+  locationPhone?: string;
   invoiceNumber: string;
   date: string;
   partyId?: string;
   partyName: string;
+  partyPhone?: string;
+  consumerName?: string;
+  consumerPhone?: string;
+  billedById?: string;
+  billedByName?: string;
+  billedByRole?: string;
   type: 'SALE' | 'PURCHASE';
   items: InvoiceItem[];
   subtotal: number;
   taxTotal: number;
   discountTotal: number;
+  discountType?: 'PERCENT' | 'FLAT';
+  discountValue?: number;
   roundOff: number;
   grandTotal: number;
   paidAmount: number;

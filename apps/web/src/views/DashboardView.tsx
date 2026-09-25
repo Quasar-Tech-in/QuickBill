@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, 
   AlertTriangle, 
@@ -22,8 +22,16 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onViewInvoice }) => {
+  const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices());
+
+  useEffect(() => {
+    store.fetchInvoices().then(data => {
+      setInvoices(data);
+    }).catch(() => {});
+  }, []);
+
   const stats = store.getDashboardStats();
-  const recentInvoices = store.getInvoices().slice(0, 5);
+  const recentInvoices = invoices.slice(0, 5);
   const items = store.getItems();
   const lowStockItems = items.filter(i => i.currentStock <= i.minStockAlert);
 

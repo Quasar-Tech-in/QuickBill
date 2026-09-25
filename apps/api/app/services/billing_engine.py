@@ -49,20 +49,44 @@ class BillingEngine:
         enable_round_off: bool = True
     ) -> InvoiceTotals:
         calculated_items: List[LineItemCalcOutput] = []
-        subtotal = Decimal("0.00")
-        tax_total = Decimal("0.00")
         item_discount_total = Decimal("0.00")
+        gross_total = Decimal("0.00")
 
+        # 1. First pass: compute line items gross and item discount
+        item_intermediates = []
         for item in items:
             gross = quantize_currency(item.quantity * item.unit_price)
             discount = quantize_currency(min(item.discount, gross))
-            taxable = quantize_currency(gross - discount)
-            tax = quantize_currency(taxable * (item.tax_rate / Decimal("100.00")))
-            line_total = quantize_currency(taxable + tax)
+            net_line_inclusive = quantize_currency(gross - discount)
+            
+            gross_total += net_line_inclusive
+            item_discount_total += discount
+            item_intermediates.append((item, gross, discount, net_line_inclusive))
 
+        # 2. Compute proportional order/invoice discount factor
+        discount_factor = Decimal("1.00")
+        if gross_total > Decimal("0.00") and invoice_discount > Decimal("0.00"):
+            discount_factor = max(Decimal("0.00"), (gross_total - invoice_discount) / gross_total)
+
+        subtotal = Decimal("0.00")
+        tax_total = Decimal("0.00")
+
+        # 3. Second pass: inclusive tax extraction & line totals
+        for item, gross, discount, net_line_inclusive in item_intermediates:
+            effective_line = quantize_currency(net_line_inclusive * discount_factor)
+            
+            # Taxable base extracted from inclusive amount: Base = Effective / (1 + Rate/100)
+            tax_rate = item.tax_rate
+            if tax_rate > Decimal("0.00"):
+                taxable = quantize_currency(effective_line * (Decimal("100.00") / (Decimal("100.00") + tax_rate)))
+                tax = quantize_currency(effective_line - taxable)
+            else:
+                taxable = effective_line
+                tax = Decimal("0.00")
+
+            line_total = quantize_currency(taxable + tax)
             subtotal += taxable
             tax_total += tax
-            item_discount_total += discount
 
             calculated_items.append(LineItemCalcOutput(
                 item_id=item.item_id,
@@ -78,7 +102,7 @@ class BillingEngine:
                 line_total=line_total
             ))
 
-        total_before_round = subtotal + tax_total + additional_charges - invoice_discount
+        total_before_round = subtotal + tax_total + additional_charges
         
         if enable_round_off:
             grand_total = total_before_round.quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(Decimal("0.01"))

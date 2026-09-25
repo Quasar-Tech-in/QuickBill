@@ -9,7 +9,9 @@ import {
   Receipt,
   Database,
   Check,
-  MapPin
+  MapPin,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import { store } from '../services/store';
 import { Tenant, StoreLocation } from '../types';
@@ -43,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const [locations, setLocations] = useState<StoreLocation[]>(store.getLocations());
   const [activeLocation, setActiveLocationState] = useState<StoreLocation>(store.getActiveLocation());
+  const [pendingLocationChange, setPendingLocationChange] = useState<StoreLocation | null>(null);
 
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const tenantMenuRef = useRef<HTMLDivElement>(null);
@@ -79,9 +82,30 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const handleSwitchLocation = (loc: StoreLocation) => {
-    store.setActiveLocation(loc);
-    setActiveLocationState(loc);
     setIsLocationMenuOpen(false);
+    if (loc.id === activeLocation.id) return;
+
+    const currentCart = store.getPosCart();
+    if (currentCart && currentCart.length > 0) {
+      // Cart is not empty: prompt user with warning popup
+      setPendingLocationChange(loc);
+    } else {
+      // Cart is empty: switch immediately
+      store.setActiveLocation(loc);
+      setActiveLocationState(loc);
+    }
+  };
+
+  const handleConfirmLocationChange = () => {
+    if (pendingLocationChange) {
+      store.setActiveLocation(pendingLocationChange);
+      setActiveLocationState(pendingLocationChange);
+      setPendingLocationChange(null);
+    }
+  };
+
+  const handleCancelLocationChange = () => {
+    setPendingLocationChange(null);
   };
 
   const canSwitchLocation = isSuperAdmin || isStoreAdmin || locations.length > 1;
@@ -225,7 +249,7 @@ export const Header: React.FC<HeaderProps> = ({
                   borderRadius: 'var(--radius-md)',
                   boxShadow: 'var(--shadow-xl)',
                   border: '1px solid var(--neutral-200)',
-                  zIndex: 100,
+                  zIndex: 9999,
                   overflow: 'hidden'
                 }}
               >
@@ -425,6 +449,81 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
       </div>
+
+      {/* Location Switch & Empty Cart Warning Confirmation Modal */}
+      {pendingLocationChange && (
+        <div className="modal-overlay" onClick={handleCancelLocationChange} style={{ zIndex: 99999 }}>
+          <div 
+            className="modal-content" 
+            onClick={(e) => e.stopPropagation()} 
+            style={{ 
+              maxWidth: 460, 
+              width: '100%', 
+              backgroundColor: '#ffffff', 
+              borderRadius: 'var(--radius-lg, 12px)', 
+              overflow: 'hidden',
+              boxShadow: 'var(--shadow-xl)'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: 'var(--warning-50, #fffbeb)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--warning-600, #d97706)' }}>
+                  <AlertTriangle size={18} />
+                </div>
+                <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                  Change Store Location?
+                </span>
+              </div>
+              <button 
+                type="button" 
+                className="btn btn-secondary btn-icon btn-sm" 
+                onClick={handleCancelLocationChange}
+                style={{ width: 30, height: 30, borderRadius: 'var(--radius-sm)' }}
+                title="Stay on Current Location"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ backgroundColor: 'var(--warning-50, #fffbeb)', border: '1px solid var(--warning-200, #fde68a)', borderRadius: 8, padding: '12px 14px' }}>
+                <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--warning-800, #92400e)', lineHeight: 1.45 }}>
+                  You currently have <strong>{store.getPosCart().reduce((sum, item) => sum + item.quantity, 0)} item(s)</strong> in your POS billing cart.
+                </p>
+                <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: 'var(--neutral-700)', lineHeight: 1.4 }}>
+                  Switching branch from <strong>{activeLocation.name}</strong> to <strong>{pendingLocationChange.name}</strong> will <strong>empty your active cart</strong> because product pricing and stock availability are branch-specific.
+                </p>
+              </div>
+
+              <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--neutral-600)' }}>
+                Would you like to stay on <strong>{activeLocation.name}</strong> or continue and empty the cart?
+              </p>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={handleCancelLocationChange}
+                  style={{ fontSize: '0.84rem', fontWeight: 700, padding: '8px 16px' }}
+                >
+                  Stay on Current Location
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-danger" 
+                  onClick={handleConfirmLocationChange}
+                  style={{ fontSize: '0.84rem', fontWeight: 800, padding: '8px 16px' }}
+                >
+                  Continue & Empty Cart
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 };
