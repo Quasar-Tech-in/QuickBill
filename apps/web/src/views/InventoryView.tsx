@@ -201,6 +201,12 @@ export const InventoryView: React.FC = () => {
 
   useEffect(() => {
     refreshData();
+    // Live reload items from MongoDB
+    store.fetchItems(selectedLocationId).then(() => {
+      refreshData();
+    }).catch(() => {});
+    setCategoriesList(store.getCategories());
+
     const interval = setInterval(() => {
       const currentLocId = store.getActiveLocation().id;
       if (currentLocId !== selectedLocationId) {

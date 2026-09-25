@@ -24,13 +24,14 @@ import {
   CheckCircle2,
   Clock
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { MetricCard } from '../components/MetricCard';
 import { StatusBadge } from '../components/StatusBadge';
 import { store } from '../services/store';
 import { Invoice, Item, Party, StoreLocation } from '../types';
 
 interface DashboardViewProps {
-  onNavigate: (tab: string) => void;
+  onNavigate?: (tab: string) => void;
   onViewInvoice: (invoice: Invoice) => void;
 }
 
@@ -58,9 +59,12 @@ interface BranchSalesStat {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onViewInvoice }) => {
+  const navigate = useNavigate();
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
   const [timeRange, setTimeRange] = useState<TimeRange>('TODAY');
   const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices(selectedLocationId));
+  const [items, setItems] = useState<Item[]>(selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true));
+  const [parties, setParties] = useState<Party[]>(selectedLocationId === 'ALL' ? store.getParties() : store.getParties(selectedLocationId));
 
   const locations = store.getAllLocations();
 
@@ -68,10 +72,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
     store.fetchInvoices(selectedLocationId).then(data => {
       setInvoices(data);
     }).catch(() => {});
+    store.fetchItems(selectedLocationId === 'ALL' ? undefined : selectedLocationId).then(data => {
+      setItems(data);
+    }).catch(() => {});
+    store.fetchParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId).then(data => {
+      setParties(data);
+    }).catch(() => {});
   }, [selectedLocationId]);
 
-  const items = selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true);
-  const parties = selectedLocationId === 'ALL' ? store.getParties() : store.getParties(selectedLocationId);
+  const handleNav = (tab: string) => {
+    if (onNavigate) {
+      onNavigate(tab);
+    }
+    if (tab === 'transactions') {
+      navigate('/invoices');
+    } else {
+      navigate(`/${tab}`);
+    }
+  };
 
   // --- Filter Invoices by Date Range & Type ---
   const filteredSalesInvoices = useMemo(() => {
@@ -327,7 +345,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
           <button 
             className="btn btn-primary" 
             style={{ padding: '7px 16px', fontSize: '0.82rem', fontWeight: 700 }}
-            onClick={() => onNavigate('pos')}
+            onClick={() => handleNav('pos')}
           >
             <Receipt size={15} />
             <span>New POS Bill</span>
@@ -414,7 +432,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
                 </p>
               </div>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('inventory')}>
+            <button className="btn btn-secondary btn-sm" onClick={() => handleNav('inventory')}>
               View Inventory
             </button>
           </div>
@@ -526,7 +544,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
                 </p>
               </div>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('reports')}>
+            <button className="btn btn-secondary btn-sm" onClick={() => handleNav('reports')}>
               P&L Reports
             </button>
           </div>
@@ -631,7 +649,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
                 </p>
               </div>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('settings')}>
+            <button className="btn btn-secondary btn-sm" onClick={() => handleNav('settings')}>
               Manage Locations
             </button>
           </div>
@@ -699,7 +717,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
               <Receipt size={18} color="var(--primary-500)" />
               <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Recent Sales Invoices</h3>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('transactions')}>
+            <button className="btn btn-secondary btn-sm" onClick={() => handleNav('transactions')}>
               View All Invoices
             </button>
           </div>
@@ -764,7 +782,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
               <AlertTriangle size={18} color="var(--warning-500)" />
               <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Critical Stock Replenishment</h3>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('inventory')}>
+            <button className="btn btn-secondary btn-sm" onClick={() => handleNav('inventory')}>
               Adjust Stock
             </button>
           </div>
@@ -794,7 +812,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
                     <tr 
                       key={item.id}
                       className="table-row-clickable"
-                      onClick={() => onNavigate('inventory')}
+                      onClick={() => handleNav('inventory')}
                       title="Click to view & manage in inventory"
                     >
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', padding: '12px 14px', whiteSpace: 'nowrap' }}>

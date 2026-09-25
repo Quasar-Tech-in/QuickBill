@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   ReceiptText, 
@@ -7,19 +8,22 @@ import {
   FileText, 
   BarChart3, 
   Settings, 
-  Sparkles,
-  ShieldCheck,
-  LogOut
+  Sparkles, 
+  ShieldCheck, 
+  LogOut 
 } from 'lucide-react';
 import { store } from '../services/store';
 
 interface SidebarProps {
-  activeTab: string;
-  onTabChange: (tab: string) => void;
+  activeTab?: string;
+  onTabChange?: (tab: string) => void;
   onLogout?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogout }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const activeTenant = store.getActiveTenant();
   const currentUser = store.getCurrentUser();
   const userRole = currentUser?.role || 'TENANT_ADMIN';
@@ -28,12 +32,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
   const allNavItems = [
     { 
       id: 'dashboard', 
+      path: '/dashboard',
       label: 'Dashboard', 
       icon: LayoutDashboard, 
       roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
     },
     { 
       id: 'pos', 
+      path: '/pos',
       label: 'POS Billing', 
       icon: ReceiptText, 
       badge: 'Fast', 
@@ -41,30 +47,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
     },
     { 
       id: 'inventory', 
+      path: '/inventory',
       label: 'Inventory & Items', 
       icon: Package, 
       roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
     },
     { 
       id: 'parties', 
+      path: '/parties',
       label: userRole === 'CASHIER' ? 'Customer Ledger' : 'Parties & Ledger', 
       icon: Users, 
       roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
     },
     { 
       id: 'transactions', 
+      path: '/invoices',
       label: userRole === 'CASHIER' ? 'Counter Receipts' : 'Invoices & Bills', 
       icon: FileText, 
       roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
     },
     { 
       id: 'reports', 
+      path: '/reports',
       label: 'Reports & Analytics', 
       icon: BarChart3, 
       roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
     },
     { 
       id: 'superadmin', 
+      path: '/superadmin',
       label: 'Super Admin', 
       icon: ShieldCheck, 
       badge: 'Multi-Tenant', 
@@ -73,6 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
     },
     { 
       id: 'settings', 
+      path: '/settings',
       label: 'Settings & DB', 
       icon: Settings, 
       roles: ['SUPER_ADMIN', 'TENANT_ADMIN'] 
@@ -80,6 +92,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
   ];
 
   const navItems = allNavItems.filter(item => item.roles.includes(userRole));
+
+  const handleItemClick = (item: typeof allNavItems[0]) => {
+    if (onTabChange) {
+      onTabChange(item.id);
+    }
+    navigate(item.path);
+  };
 
   return (
     <aside className="sidebar">
@@ -97,11 +116,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
       <nav className="sidebar-nav">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = activeTab === item.id;
+          const isActive = 
+            location.pathname === item.path || 
+            (item.id === 'transactions' && location.pathname === '/transactions') ||
+            (activeTab && (activeTab === item.id || (activeTab === 'invoices' && item.id === 'transactions')));
+
           return (
             <button
               key={item.id}
-              onClick={() => onTabChange(item.id)}
+              onClick={() => handleItemClick(item)}
               className={`nav-link ${isActive ? 'active' : ''}`}
               style={{ width: '100%', border: 'none', background: isActive ? undefined : 'transparent', textAlign: 'left' }}
             >

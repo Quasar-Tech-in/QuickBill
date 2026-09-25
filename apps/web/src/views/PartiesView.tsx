@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   Plus, 
@@ -6,9 +6,9 @@ import {
   Phone, 
   Mail, 
   CreditCard, 
-  X,
-  FileText,
-  MapPin
+  X, 
+  FileText, 
+  MapPin 
 } from 'lucide-react';
 import { Party, Payment } from '../types';
 import { store } from '../services/store';
@@ -54,6 +54,14 @@ export const PartiesView: React.FC = () => {
     setParties(store.getParties());
     setPayments(store.getPayments());
   };
+
+  useEffect(() => {
+    refreshData();
+    // Live reload parties from backend MongoDB
+    store.fetchParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId).then(fetched => {
+      setParties(fetched);
+    }).catch(() => {});
+  }, [selectedLocationId]);
 
   const filteredParties = parties.filter(p => {
     if (isCashier && p.type !== 'CUSTOMER') return false;

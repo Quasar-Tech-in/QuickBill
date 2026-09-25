@@ -108,10 +108,15 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   useEffect(() => {
     refreshData();
+    // Live reload items and categories from backend MongoDB
+    store.fetchItems(store.getActiveLocation().id).then(() => {
+      refreshData();
+    }).catch(() => {});
     // Fetch live customers and parties from backend MongoDB
     store.fetchParties().then(fetched => {
       setParties(fetched.filter(p => p.type === 'CUSTOMER'));
     }).catch(() => {});
+    setCategoriesList(store.getCategories());
 
     const interval = setInterval(() => {
       const currentLocId = store.getActiveLocation().id;

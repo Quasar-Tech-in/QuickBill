@@ -1,4 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import { 
+  BrowserRouter, 
+  Routes, 
+  Route, 
+  Navigate, 
+  useNavigate, 
+  useLocation, 
+  Outlet 
+} from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { DashboardView } from './views/DashboardView';
@@ -15,153 +24,104 @@ import { InvoicePrintModal } from './components/InvoicePrintModal';
 import { store } from './services/store';
 import { Invoice, Tenant, User } from './types';
 
-export const App: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<User | null>(store.getCurrentUser());
-  const [authView, setAuthView] = useState<'tenant_login' | 'superadmin_login'>('tenant_login');
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
-  const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
-  const [, setTenantStateKey] = useState<number>(0);
+// Helper to determine the landing route based on user role
+const getDefaultPathForRole = (user: User | null): string => {
+  if (!user) return '/login';
+  if (user.role === 'SUPER_ADMIN') return '/superadmin';
+  if (user.role === 'CASHIER') return '/pos';
+  return '/dashboard';
+};
 
-  useEffect(() => {
-    store.checkHealth().then((online) => setIsBackendOnline(online));
-  }, []);
+// Route title resolver
+const getRouteTitle = (pathname: string): string => {
+  if (pathname.startsWith('/dashboard')) return 'Executive Dashboard';
+  if (pathname.startsWith('/pos')) return 'POS Counter & Billing';
+  if (pathname.startsWith('/inventory')) return 'Item Catalog & Inventory';
+  if (pathname.startsWith('/parties')) return 'Parties & Contact Ledger';
+  if (pathname.startsWith('/invoices') || pathname.startsWith('/transactions')) return 'Invoices & Bills';
+  if (pathname.startsWith('/reports')) return 'Financial Reports & Analytics';
+  if (pathname.startsWith('/superadmin')) return 'Super Admin Multi-Tenant Governance';
+  if (pathname.startsWith('/settings')) return 'Settings & Database Config';
+  return 'QuickBill POS';
+};
+
+// Authenticated Main Layout Component
+interface AppLayoutProps {
+  currentUser: User;
+  isBackendOnline: boolean;
+  onLogout: () => void;
+  onTenantSwitched: (tenant: Tenant) => void;
+  viewingInvoice: Invoice | null;
+  setViewingInvoice: (inv: Invoice | null) => void;
+}
+
+const AppLayout: React.FC<AppLayoutProps> = ({
+  currentUser,
+  isBackendOnline,
+  onLogout,
+  onTenantSwitched,
+  viewingInvoice,
+  setViewingInvoice
+}) => {
+  const navigate = useNavigate();
+  const location = useLocation();
 
   // Enforce role-based route access guard
   useEffect(() => {
-    if (!currentUser) return;
     const role = currentUser.role;
+    const path = location.pathname;
 
     if (role === 'CASHIER') {
-      const allowedCashierTabs = ['pos', 'transactions', 'parties'];
-      if (!allowedCashierTabs.includes(activeTab)) {
-        setActiveTab('pos');
+      const allowedCashierPaths = ['/pos', '/invoices', '/transactions', '/parties'];
+      const isAllowed = allowedCashierPaths.some(p => path === p || path.startsWith(p + '/'));
+      if (!isAllowed) {
+        navigate('/pos', { replace: true });
       }
     } else if (role === 'MANAGER') {
-      const restrictedManagerTabs = ['settings', 'superadmin'];
-      if (restrictedManagerTabs.includes(activeTab)) {
-        setActiveTab('dashboard');
+      if (path.startsWith('/settings') || path.startsWith('/superadmin')) {
+        navigate('/dashboard', { replace: true });
       }
     } else if (role === 'TENANT_ADMIN') {
-      if (activeTab === 'superadmin') {
-        setActiveTab('dashboard');
+      if (path.startsWith('/superadmin')) {
+        navigate('/dashboard', { replace: true });
       }
     }
-  }, [currentUser, activeTab]);
-
-  const handleLoginSuccess = (user: User) => {
-    setCurrentUser(user);
-    if (user.role === 'SUPER_ADMIN') {
-      setActiveTab('superadmin');
-    } else if (user.role === 'CASHIER') {
-      setActiveTab('pos');
-    } else {
-      setActiveTab('dashboard');
-    }
-  };
-
-  const handleLogout = () => {
-    store.logout();
-    setCurrentUser(null);
-    setAuthView('tenant_login');
-    setActiveTab('dashboard');
-  };
-
-  const handleTenantSwitched = (_tenant: Tenant) => {
-    // Force rerender so that child views read the updated store context
-    setTenantStateKey((prev) => prev + 1);
-  };
-
-  // If user is not authenticated, render the dedicated login screen
-  if (!currentUser) {
-    if (authView === 'superadmin_login') {
-      return (
-        <SuperAdminLoginView
-          onLoginSuccess={handleLoginSuccess}
-          onNavigateToTenantLogin={() => setAuthView('tenant_login')}
-        />
-      );
-    }
-    return (
-      <TenantLoginView
-        onLoginSuccess={handleLoginSuccess}
-        onNavigateToSuperAdmin={() => setAuthView('superadmin_login')}
-      />
-    );
-  }
-
-  const getPageTitle = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return 'Executive Dashboard';
-      case 'pos':
-        return 'POS Counter & Billing';
-      case 'inventory':
-        return 'Item Catalog & Inventory';
-      case 'parties':
-        return 'Parties & Contact Ledger';
-      case 'transactions':
-        return 'Invoices & Bills';
-      case 'reports':
-        return 'Financial Reports & Analytics';
-      case 'superadmin':
-        return 'Super Admin Multi-Tenant Governance';
-      case 'settings':
-        return 'Settings & Database Config';
-      default:
-        return 'QuickBill';
-    }
-  };
+  }, [currentUser, location.pathname, navigate]);
 
   return (
     <div className="app-layout">
-      {/* Sidebar */}
+      {/* Sidebar Navigation */}
       <Sidebar 
-        activeTab={activeTab} 
-        onTabChange={(tab) => setActiveTab(tab)} 
-        onLogout={handleLogout}
+        activeTab={location.pathname.replace('/', '') || 'dashboard'} 
+        onTabChange={(tab) => {
+          if (tab === 'transactions') {
+            navigate('/invoices');
+          } else {
+            navigate(`/${tab}`);
+          }
+        }} 
+        onLogout={onLogout}
       />
 
       {/* Main Content Area */}
       <div className="main-wrapper">
         <Header 
-          title={getPageTitle()} 
+          title={getRouteTitle(location.pathname)} 
           isBackendOnline={isBackendOnline} 
-          onQuickSale={() => setActiveTab('pos')} 
-          onNavigate={(tab) => setActiveTab(tab)}
-          onTenantChange={handleTenantSwitched}
-          onLogout={handleLogout}
+          onQuickSale={() => navigate('/pos')} 
+          onNavigate={(tab) => {
+            if (tab === 'transactions') {
+              navigate('/invoices');
+            } else {
+              navigate(`/${tab}`);
+            }
+          }}
+          onTenantChange={onTenantSwitched}
+          onLogout={onLogout}
         />
 
         <main className="main-content-scroll">
-          {activeTab === 'dashboard' && (
-            <DashboardView 
-              onNavigate={(tab) => setActiveTab(tab)} 
-              onViewInvoice={(inv) => setViewingInvoice(inv)} 
-            />
-          )}
-          {activeTab === 'pos' && (
-            <PosBillingView 
-              onInvoiceCreated={(inv) => setViewingInvoice(inv)} 
-            />
-          )}
-          {activeTab === 'inventory' && <InventoryView />}
-          {activeTab === 'parties' && <PartiesView />}
-          {activeTab === 'transactions' && (
-            <TransactionsView 
-              onViewInvoice={(inv) => setViewingInvoice(inv)} 
-            />
-          )}
-          {activeTab === 'reports' && <ReportsView />}
-          {activeTab === 'superadmin' && (
-            <SuperAdminView 
-              onTenantSwitched={(tenant) => {
-                handleTenantSwitched(tenant);
-                setActiveTab('dashboard');
-              }} 
-            />
-          )}
-          {activeTab === 'settings' && <SettingsView />}
+          <Outlet />
         </main>
       </div>
 
@@ -173,6 +133,128 @@ export const App: React.FC = () => {
         />
       )}
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  const [currentUser, setCurrentUser] = useState<User | null>(store.getCurrentUser());
+  const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
+  const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
+  const [, setTenantStateKey] = useState<number>(0);
+
+  useEffect(() => {
+    store.checkHealth().then((online) => setIsBackendOnline(online));
+  }, []);
+
+  const handleLoginSuccess = (user: User) => {
+    setCurrentUser(user);
+  };
+
+  const handleLogout = () => {
+    store.logout();
+    setCurrentUser(null);
+  };
+
+  const handleTenantSwitched = (_tenant: Tenant) => {
+    setTenantStateKey((prev) => prev + 1);
+  };
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Unauthenticated / Login Routes */}
+        <Route 
+          path="/login" 
+          element={
+            currentUser ? (
+              <Navigate to={getDefaultPathForRole(currentUser)} replace />
+            ) : (
+              <TenantLoginView 
+                onLoginSuccess={handleLoginSuccess}
+                onNavigateToSuperAdmin={() => {}}
+              />
+            )
+          } 
+        />
+        
+        <Route 
+          path="/superadmin/login" 
+          element={
+            currentUser && currentUser.role === 'SUPER_ADMIN' ? (
+              <Navigate to="/superadmin" replace />
+            ) : (
+              <SuperAdminLoginView 
+                onLoginSuccess={handleLoginSuccess}
+                onNavigateToTenantLogin={() => {}}
+              />
+            )
+          } 
+        />
+
+        {/* Protected Authenticated Routes */}
+        {currentUser ? (
+          <Route 
+            element={
+              <AppLayout 
+                currentUser={currentUser}
+                isBackendOnline={isBackendOnline}
+                onLogout={handleLogout}
+                onTenantSwitched={handleTenantSwitched}
+                viewingInvoice={viewingInvoice}
+                setViewingInvoice={setViewingInvoice}
+              />
+            }
+          >
+            <Route 
+              path="/dashboard" 
+              element={
+                <DashboardView 
+                  onNavigate={() => {}} 
+                  onViewInvoice={(inv) => setViewingInvoice(inv)} 
+                />
+              } 
+            />
+            <Route 
+              path="/pos" 
+              element={
+                <PosBillingView 
+                  onInvoiceCreated={(inv) => setViewingInvoice(inv)} 
+                />
+              } 
+            />
+            <Route path="/inventory" element={<InventoryView />} />
+            <Route path="/parties" element={<PartiesView />} />
+            <Route 
+              path="/invoices" 
+              element={
+                <TransactionsView 
+                  onViewInvoice={(inv) => setViewingInvoice(inv)} 
+                />
+              } 
+            />
+            {/* Alias /transactions to /invoices */}
+            <Route path="/transactions" element={<Navigate to="/invoices" replace />} />
+            <Route path="/reports" element={<ReportsView />} />
+            <Route 
+              path="/superadmin" 
+              element={
+                <SuperAdminView 
+                  onTenantSwitched={(tenant) => {
+                    handleTenantSwitched(tenant);
+                  }} 
+                />
+              } 
+            />
+            <Route path="/settings" element={<SettingsView />} />
+            <Route path="/" element={<Navigate to={getDefaultPathForRole(currentUser)} replace />} />
+            <Route path="*" element={<Navigate to={getDefaultPathForRole(currentUser)} replace />} />
+          </Route>
+        ) : (
+          /* Redirect any unauthenticated path to /login */
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        )}
+      </Routes>
+    </BrowserRouter>
   );
 };
 

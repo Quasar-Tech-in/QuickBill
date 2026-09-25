@@ -17,17 +17,19 @@ import {
   Layers
 } from 'lucide-react';
 import { store } from '../services/store';
+import { useNavigate } from 'react-router-dom';
 import { User } from '../types';
 
 interface TenantLoginViewProps {
   onLoginSuccess: (user: User) => void;
-  onNavigateToSuperAdmin: () => void;
+  onNavigateToSuperAdmin?: () => void;
 }
 
 export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
   onLoginSuccess,
   onNavigateToSuperAdmin,
 }) => {
+  const navigate = useNavigate();
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
@@ -269,7 +271,12 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
             </div>
             <button
               type="button"
-              onClick={onNavigateToSuperAdmin}
+              onClick={() => {
+                if (onNavigateToSuperAdmin) {
+                  onNavigateToSuperAdmin();
+                }
+                navigate('/superadmin/login');
+              }}
               className="btn-launch-superadmin"
             >
               <span>Control Plane</span>

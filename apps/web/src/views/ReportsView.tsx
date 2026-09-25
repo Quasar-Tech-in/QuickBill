@@ -11,12 +11,13 @@ import {
   MapPin
 } from 'lucide-react';
 import { store } from '../services/store';
-import { Invoice } from '../types';
+import { Invoice, Item } from '../types';
 
 export const ReportsView: React.FC = () => {
   const [reportType, setReportType] = useState<'PNL' | 'STOCK_VALUATION' | 'DAY_BOOK'>('PNL');
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
   const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices(selectedLocationId));
+  const [items, setItems] = useState<Item[]>(selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true));
 
   const locations = store.getAllLocations();
 
@@ -24,8 +25,10 @@ export const ReportsView: React.FC = () => {
     store.fetchInvoices(selectedLocationId).then(data => {
       setInvoices(data);
     }).catch(() => {});
+    store.fetchItems(selectedLocationId === 'ALL' ? undefined : selectedLocationId).then(data => {
+      setItems(data);
+    }).catch(() => {});
   }, [selectedLocationId]);
-  const items = selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true);
 
   // Financial Metrics
   const totalRevenue = invoices.reduce((s, i) => s + i.grandTotal, 0);

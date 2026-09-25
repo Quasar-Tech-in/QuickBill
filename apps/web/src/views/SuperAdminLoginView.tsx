@@ -15,18 +15,20 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { store } from '../services/store';
 import { User } from '../types';
 
 interface SuperAdminLoginViewProps {
   onLoginSuccess: (user: User) => void;
-  onNavigateToTenantLogin: () => void;
+  onNavigateToTenantLogin?: () => void;
 }
 
 export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
   onLoginSuccess,
   onNavigateToTenantLogin,
 }) => {
+  const navigate = useNavigate();
   const [email, setEmail] = useState<string>('superadmin@quickbill.local');
   const [password, setPassword] = useState<string>('superadmin123');
   const [securityKey, setSecurityKey] = useState<string>('QB-ROOT-AUTH-99');
@@ -208,7 +210,12 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
           <div className="superadmin-footer">
             <button
               type="button"
-              onClick={onNavigateToTenantLogin}
+              onClick={() => {
+                if (onNavigateToTenantLogin) {
+                  onNavigateToTenantLogin();
+                }
+                navigate('/login');
+              }}
               className="superadmin-back-btn"
             >
               <ArrowLeft size={16} />
