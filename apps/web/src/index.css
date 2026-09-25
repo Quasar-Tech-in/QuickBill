@@ -461,6 +461,20 @@ body {
   background-color: var(--primary-50);
 }
 
+.table-row-clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.table-row-clickable:hover td {
+  background-color: var(--neutral-200) !important;
+  color: var(--neutral-900) !important;
+}
+
+.table-row-clickable:active td {
+  background-color: var(--neutral-300) !important;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;

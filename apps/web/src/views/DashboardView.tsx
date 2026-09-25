@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   TrendingUp, 
   AlertTriangle, 
@@ -9,153 +9,677 @@ import {
   Plus, 
   Package, 
   Users,
-  Eye
+  Eye,
+  Flame,
+  CreditCard,
+  Wallet,
+  Smartphone,
+  Building2,
+  Calendar,
+  MapPin,
+  Sparkles,
+  Layers,
+  BarChart3,
+  Percent,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 import { MetricCard } from '../components/MetricCard';
 import { StatusBadge } from '../components/StatusBadge';
 import { store } from '../services/store';
-import { Invoice } from '../types';
+import { Invoice, Item, Party, StoreLocation } from '../types';
 
 interface DashboardViewProps {
   onNavigate: (tab: string) => void;
   onViewInvoice: (invoice: Invoice) => void;
 }
 
+type TimeRange = 'TODAY' | 'YESTERDAY' | 'LAST_7_DAYS' | 'THIS_MONTH' | 'ALL';
+
+interface TopItemStat {
+  itemId: string;
+  name: string;
+  category: string;
+  quantitySold: number;
+  revenue: number;
+  currentStock: number;
+  unit: string;
+  minStockAlert: number;
+}
+
+interface BranchSalesStat {
+  locationId: string;
+  name: string;
+  code: string;
+  sales: number;
+  transactionsCount: number;
+  avgOrderValue: number;
+  percentage: number;
+}
+
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onViewInvoice }) => {
-  const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices());
+  const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
+  const [timeRange, setTimeRange] = useState<TimeRange>('TODAY');
+  const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices(selectedLocationId));
+
+  const locations = store.getAllLocations();
 
   useEffect(() => {
-    store.fetchInvoices().then(data => {
+    store.fetchInvoices(selectedLocationId).then(data => {
       setInvoices(data);
     }).catch(() => {});
-  }, []);
+  }, [selectedLocationId]);
 
-  const stats = store.getDashboardStats();
-  const recentInvoices = invoices.slice(0, 5);
-  const items = store.getItems();
-  const lowStockItems = items.filter(i => i.currentStock <= i.minStockAlert);
+  const items = selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true);
+  const parties = selectedLocationId === 'ALL' ? store.getParties() : store.getParties(selectedLocationId);
+
+  // --- Filter Invoices by Date Range & Type ---
+  const filteredSalesInvoices = useMemo(() => {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
+
+    const currentYearMonth = todayStr.substring(0, 7);
+
+    return invoices.filter(inv => {
+      if (inv.type !== 'SALE') return false;
+      const invDate = inv.date;
+
+      if (timeRange === 'TODAY') return invDate === todayStr;
+      if (timeRange === 'YESTERDAY') return invDate === yesterdayStr;
+      if (timeRange === 'LAST_7_DAYS') return invDate >= sevenDaysAgoStr && invDate <= todayStr;
+      if (timeRange === 'THIS_MONTH') return invDate.startsWith(currentYearMonth);
+      return true; // 'ALL'
+    });
+  }, [invoices, timeRange]);
+
+  // --- Financial & Operational Metrics ---
+  const totalRevenue = useMemo(() => {
+    return filteredSalesInvoices.reduce((sum, inv) => sum + inv.grandTotal, 0);
+  }, [filteredSalesInvoices]);
+
+  const totalTransactions = filteredSalesInvoices.length;
+  const avgOrderValue = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+
+  const totalTax = useMemo(() => {
+    return filteredSalesInvoices.reduce((sum, inv) => sum + inv.taxTotal, 0);
+  }, [filteredSalesInvoices]);
+
+  const netSales = totalRevenue - totalTax;
+  // Estimated COGS based on ~70% cost ratio
+  const estimatedCOGS = netSales * 0.70;
+  const grossProfit = netSales - estimatedCOGS;
+  const grossMarginPercent = netSales > 0 ? (grossProfit / netSales) * 100 : 0;
+
+  // Stock Valuation & Alerts
+  const totalStockRetailVal = useMemo(() => {
+    return items.reduce((sum, item) => sum + (item.currentStock * item.salePrice), 0);
+  }, [items]);
+
+  const totalStockUnits = useMemo(() => {
+    return items.reduce((sum, item) => sum + item.currentStock, 0);
+  }, [items]);
+
+  const lowStockItems = useMemo(() => {
+    return items.filter(i => i.currentStock <= i.minStockAlert);
+  }, [items]);
+
+  // Receivables & Payables
+  const totalReceivables = useMemo(() => {
+    return parties.filter(p => p.currentBalance > 0).reduce((s, p) => s + p.currentBalance, 0);
+  }, [parties]);
+
+  const totalPayables = useMemo(() => {
+    return parties.filter(p => p.currentBalance < 0).reduce((s, p) => s + Math.abs(p.currentBalance), 0);
+  }, [parties]);
+
+  // --- Top-Selling Products Aggregation ---
+  const topSellingItems = useMemo<TopItemStat[]>(() => {
+    const itemMap = new Map<string, { quantity: number; revenue: number; name: string }>();
+
+    filteredSalesInvoices.forEach(inv => {
+      inv.items.forEach(line => {
+        const existing = itemMap.get(line.itemId) || { quantity: 0, revenue: 0, name: line.name };
+        existing.quantity += line.quantity;
+        existing.revenue += line.total;
+        existing.name = line.name || existing.name;
+        itemMap.set(line.itemId, existing);
+      });
+    });
+
+    const list: TopItemStat[] = [];
+    itemMap.forEach((val, itemId) => {
+      const foundItem = items.find(i => i.id === itemId);
+      list.push({
+        itemId,
+        name: foundItem?.name || val.name,
+        category: foundItem?.category || 'General',
+        quantitySold: val.quantity,
+        revenue: val.revenue,
+        currentStock: foundItem ? foundItem.currentStock : 0,
+        unit: foundItem?.unit || 'pcs',
+        minStockAlert: foundItem ? foundItem.minStockAlert : 5
+      });
+    });
+
+    // Sort by quantity sold descending (or revenue)
+    return list.sort((a, b) => b.quantitySold - a.quantitySold).slice(0, 6);
+  }, [filteredSalesInvoices, items]);
+
+  const maxQtySold = topSellingItems.length > 0 ? topSellingItems[0].quantitySold : 1;
+
+  // --- Payment Modes Breakdown ---
+  const paymentBreakdown = useMemo(() => {
+    const counts = { CASH: 0, UPI: 0, CARD: 0, CREDIT: 0, BANK_TRANSFER: 0 };
+    filteredSalesInvoices.forEach(inv => {
+      const mode = inv.paymentMode as keyof typeof counts;
+      if (counts[mode] !== undefined) {
+        counts[mode] += inv.grandTotal;
+      } else {
+        counts.CASH += inv.grandTotal;
+      }
+    });
+
+    const total = totalRevenue || 1;
+    return [
+      { mode: 'UPI / QR Scan', amount: counts.UPI, pct: (counts.UPI / total) * 100, color: '#6366f1', icon: Smartphone },
+      { mode: 'Cash in Hand', amount: counts.CASH, pct: (counts.CASH / total) * 100, color: '#10b981', icon: Wallet },
+      { mode: 'Credit / Khata', amount: counts.CREDIT, pct: (counts.CREDIT / total) * 100, color: '#f59e0b', icon: ArrowDownLeft },
+      { mode: 'Card POS', amount: counts.CARD, pct: (counts.CARD / total) * 100, color: '#ec4899', icon: CreditCard },
+      { mode: 'Bank Transfer', amount: counts.BANK_TRANSFER, pct: (counts.BANK_TRANSFER / total) * 100, color: '#8b5cf6', icon: Building2 },
+    ].filter(p => p.amount > 0 || totalRevenue === 0);
+  }, [filteredSalesInvoices, totalRevenue]);
+
+  // --- Multi-Branch Comparative Breakdown ---
+  const branchStats = useMemo<BranchSalesStat[]>(() => {
+    if (locations.length <= 1) return [];
+
+    const branchMap = new Map<string, { sales: number; count: number }>();
+    locations.forEach(l => branchMap.set(l.id, { sales: 0, count: 0 }));
+
+    filteredSalesInvoices.forEach(inv => {
+      const locId = inv.locationId || locations[0]?.id || 'main';
+      const current = branchMap.get(locId) || { sales: 0, count: 0 };
+      current.sales += inv.grandTotal;
+      current.count += 1;
+      branchMap.set(locId, current);
+    });
+
+    const total = totalRevenue || 1;
+    return locations.map(loc => {
+      const data = branchMap.get(loc.id) || { sales: 0, count: 0 };
+      return {
+        locationId: loc.id,
+        name: loc.name,
+        code: loc.code,
+        sales: data.sales,
+        transactionsCount: data.count,
+        avgOrderValue: data.count > 0 ? data.sales / data.count : 0,
+        percentage: totalRevenue > 0 ? (data.sales / total) * 100 : 0
+      };
+    }).sort((a, b) => b.sales - a.sales);
+  }, [locations, filteredSalesInvoices, totalRevenue]);
+
+  const recentInvoices = filteredSalesInvoices.slice(0, 6);
 
   return (
-    <div className="page-container">
-      {/* Top Banner / Hero */}
+    <div className="page-container" style={{ paddingBottom: 40 }}>
+      {/* Top Operations Header Bar */}
       <div 
         style={{
-          background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4338ca 100%)',
-          borderRadius: 'var(--radius-lg)',
-          padding: '28px 32px',
-          color: '#ffffff',
-          marginBottom: 28,
-          boxShadow: 'var(--shadow-md)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
-          gap: 20
+          gap: 16,
+          marginBottom: 24,
+          padding: '16px 20px',
+          background: 'var(--surface-card)',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--surface-border)',
+          boxShadow: 'var(--shadow-sm)'
         }}
       >
+        {/* Title & Scope */}
         <div>
-          <span style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#a5b4fc', fontWeight: 700 }}>
-            Real-Time Business Overview
-          </span>
-          <h1 style={{ fontSize: '1.8rem', fontWeight: 800, marginTop: 4, letterSpacing: '-0.02em' }}>
-            Welcome back to QuickBill POS
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ 
+              background: 'var(--primary-50)', 
+              color: 'var(--primary-600)', 
+              padding: '3px 8px', 
+              borderRadius: 'var(--radius-sm)', 
+              fontSize: '0.75rem', 
+              fontWeight: 700 
+            }}>
+              LIVE INTELLIGENCE
+            </span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--neutral-400)' }}>•</span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Clock size={13} /> Updated just now
+            </span>
+          </div>
+          <h1 style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--neutral-900)', marginTop: 4, letterSpacing: '-0.02em' }}>
+            Store Operations & Performance Cockpit
           </h1>
-          <p style={{ color: '#e0e7ff', fontSize: '0.9rem', marginTop: 4, maxWidth: 520 }}>
-            Unified cloud billing, immutable stock movements ledger, and real-time financial tracking for enterprise retail.
-          </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 12 }}>
+        {/* Action Controls & Selectors */}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          {/* Time Range Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', background: 'var(--neutral-100)', borderRadius: 'var(--radius-md)', padding: 3, border: '1px solid var(--neutral-200)' }}>
+            {(['TODAY', 'YESTERDAY', 'LAST_7_DAYS', 'THIS_MONTH', 'ALL'] as TimeRange[]).map((range) => {
+              const labels: Record<TimeRange, string> = {
+                TODAY: 'Today',
+                YESTERDAY: 'Yesterday',
+                LAST_7_DAYS: '7 Days',
+                THIS_MONTH: 'This Month',
+                ALL: 'All Time'
+              };
+              const isSelected = timeRange === range;
+              return (
+                <button
+                  key={range}
+                  onClick={() => setTimeRange(range)}
+                  style={{
+                    border: 'none',
+                    padding: '6px 12px',
+                    fontSize: '0.78rem',
+                    fontWeight: isSelected ? 700 : 500,
+                    borderRadius: 'var(--radius-sm)',
+                    cursor: 'pointer',
+                    background: isSelected ? 'var(--surface-card)' : 'transparent',
+                    color: isSelected ? 'var(--primary-600)' : 'var(--neutral-600)',
+                    boxShadow: isSelected ? 'var(--shadow-sm)' : 'none',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {labels[range]}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Location Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <select
+              className="form-select"
+              style={{ padding: '7px 14px', fontSize: '0.82rem', fontWeight: 600, minWidth: 170 }}
+              value={selectedLocationId}
+              onChange={(e) => setSelectedLocationId(e.target.value)}
+            >
+              <option value="ALL">🌐 Consolidated (All Branches)</option>
+              {locations.map((loc) => (
+                <option key={loc.id} value={loc.id}>
+                  📍 {loc.name} ({loc.code})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick Action: POS Billing */}
           <button 
             className="btn btn-primary" 
-            style={{ backgroundColor: '#ffffff', color: '#3730a3', fontWeight: 700 }}
+            style={{ padding: '7px 16px', fontSize: '0.82rem', fontWeight: 700 }}
             onClick={() => onNavigate('pos')}
           >
-            <Receipt size={17} />
-            <span>Launch POS Billing</span>
-          </button>
-          <button 
-            className="btn btn-secondary" 
-            style={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', color: '#ffffff', borderColor: 'transparent' }}
-            onClick={() => onNavigate('inventory')}
-          >
-            <Package size={17} />
-            <span>Manage Items</span>
+            <Receipt size={15} />
+            <span>New POS Bill</span>
           </button>
         </div>
       </div>
 
-      {/* KPI Cards Grid */}
-      <div className="kpi-grid">
+      {/* Primary KPI Grid (6 Cards for Complete Business Overview) */}
+      <div 
+        style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', 
+          gap: 16, 
+          marginBottom: 24 
+        }}
+      >
         <MetricCard
-          title="Today's Sales"
-          value={`₹${stats.todaySales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
-          subtitle={`${stats.todayTransactionsCount} transactions processed`}
+          title={`${timeRange === 'TODAY' ? "Today's" : "Selected"} Sales`}
+          value={`₹${totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          subtitle={`${totalTransactions} bills processed`}
           variant="primary"
           icon={TrendingUp}
         />
         <MetricCard
-          title="Total Receivables (To Collect)"
-          value={`₹${stats.totalReceivables.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
-          subtitle="From credit parties"
+          title="Est. Gross Profit"
+          value={`₹${grossProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          subtitle={`~${grossMarginPercent.toFixed(1)}% margin on sales`}
+          variant="success"
+          icon={Percent}
+        />
+        <MetricCard
+          title="Avg Order Value (AOV)"
+          value={`₹${avgOrderValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          subtitle="Revenue per transaction"
+          variant="primary"
+          icon={Receipt}
+        />
+        <MetricCard
+          title="Active Stock Valuation"
+          value={`₹${totalStockRetailVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          subtitle={`${items.length} SKUs (${totalStockUnits.toLocaleString()} units)`}
+          variant="primary"
+          icon={Package}
+        />
+        <MetricCard
+          title="Receivables (To Collect)"
+          value={`₹${totalReceivables.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          subtitle="Customer khata balance"
           variant="warning"
           icon={ArrowDownLeft}
         />
         <MetricCard
-          title="Total Payables (To Pay)"
-          value={`₹${stats.totalPayables.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
-          subtitle="Due to suppliers"
-          variant="danger"
-          icon={ArrowUpRight}
-        />
-        <MetricCard
-          title="Low Stock Warnings"
-          value={String(stats.lowStockCount)}
-          subtitle={stats.lowStockCount > 0 ? "Requires restock replenishment" : "All inventories optimal"}
-          variant={stats.lowStockCount > 0 ? "danger" : "success"}
+          title="Critical Restock Alerts"
+          value={String(lowStockItems.length)}
+          subtitle={lowStockItems.length > 0 ? "Items below min threshold" : "All inventories optimal"}
+          variant={lowStockItems.length > 0 ? "danger" : "success"}
           icon={AlertTriangle}
         />
       </div>
 
-      {/* Grid: Recent Bills & Low Stock Inventory */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 24 }}>
-        {/* Recent Invoices Card */}
-        <div className="card">
-          <div className="card-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Receipt size={18} color="var(--primary-500)" />
-              <h3 className="card-title">Recent Invoices</h3>
+      {/* Main Analytics Grid: Top Selling Items + Payment Mode Breakdown */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 24, marginBottom: 24 }}>
+        
+        {/* Top Selling Products Leaderboard */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ 
+                width: 32, 
+                height: 32, 
+                borderRadius: 'var(--radius-md)', 
+                background: '#fef3c7', 
+                color: '#d97706', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <Flame size={18} />
+              </div>
+              <div>
+                <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Top Fast-Selling Products</h3>
+                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', marginTop: 1 }}>
+                  Ranked by sales velocity and unit movement ({timeRange.toLowerCase().replace('_', ' ')})
+                </p>
+              </div>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('transactions')}>
-              View All
+            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('inventory')}>
+              View Inventory
             </button>
           </div>
+
+          <div style={{ padding: '16px 20px', flex: 1 }}>
+            {topSellingItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--neutral-400)' }}>
+                <Package size={36} style={{ margin: '0 auto 10px', opacity: 0.5 }} />
+                <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>No product sales recorded in this timeframe</p>
+                <p style={{ fontSize: '0.8rem', marginTop: 4 }}>Sales bills generated in POS will rank here in real-time.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {topSellingItems.map((item, idx) => {
+                  const percentOfTop = maxQtySold > 0 ? (item.quantitySold / maxQtySold) * 100 : 0;
+                  const rankBadge = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+                  const isLow = item.currentStock <= item.minStockAlert;
+                  const isOut = item.currentStock <= 0;
+
+                  return (
+                    <div 
+                      key={item.itemId} 
+                      style={{
+                        padding: '10px 14px',
+                        background: 'var(--neutral-50)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--neutral-200)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: '1.05rem', fontWeight: 800, width: 26, textAlign: 'center' }}>
+                            {rankBadge}
+                          </span>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--neutral-900)' }}>
+                              {item.name}
+                            </div>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--neutral-500)' }}>
+                              {item.category}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--primary-700)' }}>
+                            {item.quantitySold % 1 === 0 ? item.quantitySold : item.quantitySold.toFixed(3)} {item.unit}
+                          </div>
+                          <div style={{ fontSize: '0.76rem', color: 'var(--neutral-500)', fontWeight: 600 }}>
+                            ₹{item.revenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Velocity Progress Bar & Stock Indicator */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ flex: 1, height: 6, background: 'var(--neutral-200)', borderRadius: 99, overflow: 'hidden' }}>
+                          <div 
+                            style={{ 
+                              width: `${Math.max(percentOfTop, 8)}%`, 
+                              height: '100%', 
+                              background: idx === 0 ? 'linear-gradient(90deg, #f59e0b, #d97706)' : 'linear-gradient(90deg, #4f46e5, #6366f1)',
+                              borderRadius: 99 
+                            }} 
+                          />
+                        </div>
+                        <span style={{ 
+                          fontSize: '0.72rem', 
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: 'var(--radius-sm)',
+                          background: isOut ? 'var(--danger-100)' : isLow ? 'var(--warning-100)' : 'var(--success-100)',
+                          color: isOut ? 'var(--danger-700)' : isLow ? 'var(--warning-700)' : 'var(--success-700)'
+                        }}>
+                          {isOut ? 'Out of Stock' : isLow ? `Low: ${item.currentStock} ${item.unit}` : `In Stock: ${item.currentStock} ${item.unit}`}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Payment Tender & Collection Channels */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ 
+                width: 32, 
+                height: 32, 
+                borderRadius: 'var(--radius-md)', 
+                background: '#e0e7ff', 
+                color: '#4338ca', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <Wallet size={18} />
+              </div>
+              <div>
+                <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Payment & Tender Distribution</h3>
+                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', marginTop: 1 }}>
+                  Daily cash drawer reconciliation and digital payment share
+                </p>
+              </div>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('reports')}>
+              P&L Reports
+            </button>
+          </div>
+
+          <div style={{ padding: '20px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 20 }}>
+            {/* Payment Mode Bars */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {paymentBreakdown.map((item) => {
+                const IconComponent = item.icon;
+                return (
+                  <div key={item.mode} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ color: item.color, display: 'flex', alignItems: 'center' }}>
+                          <IconComponent size={16} />
+                        </div>
+                        <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--neutral-800)' }}>
+                          {item.mode}
+                        </span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--neutral-900)' }}>
+                          ₹{item.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', marginLeft: 6 }}>
+                          ({item.pct.toFixed(1)}%)
+                        </span>
+                      </div>
+                    </div>
+                    {/* Bar */}
+                    <div style={{ width: '100%', height: 8, background: 'var(--neutral-100)', borderRadius: 99, overflow: 'hidden' }}>
+                      <div 
+                        style={{ 
+                          width: `${Math.max(item.pct, item.amount > 0 ? 3 : 0)}%`, 
+                          height: '100%', 
+                          background: item.color,
+                          borderRadius: 99,
+                          transition: 'width 0.3s ease'
+                        }} 
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Quick Summary Box */}
+            <div 
+              style={{ 
+                padding: '14px 16px', 
+                background: 'var(--neutral-50)', 
+                borderRadius: 'var(--radius-md)', 
+                border: '1px solid var(--neutral-200)',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: 12
+              }}
+            >
+              <div>
+                <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--neutral-500)', fontWeight: 700 }}>
+                  Net Tax Collected
+                </span>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--neutral-900)', marginTop: 2 }}>
+                  ₹{totalTax.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--neutral-500)', fontWeight: 700 }}>
+                  Supplier Payables Due
+                </span>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--danger-600)', marginTop: 2 }}>
+                  ₹{totalPayables.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* Multi-Branch Performance Comparison (Visible when >1 locations exist or Consolidated view) */}
+      {branchStats.length > 0 && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ 
+                width: 32, 
+                height: 32, 
+                borderRadius: 'var(--radius-md)', 
+                background: '#ecfdf5', 
+                color: '#059669', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <Building2 size={18} />
+              </div>
+              <div>
+                <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Multi-Branch Performance Matrix</h3>
+                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', marginTop: 1 }}>
+                  Comparative store revenue contribution, order velocity, and branch efficiency
+                </p>
+              </div>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('settings')}>
+              Manage Locations
+            </button>
+          </div>
+
           <div className="table-responsive">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Invoice</th>
-                  <th>Customer</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Action</th>
+                  <th>Store / Branch</th>
+                  <th>Branch Code</th>
+                  <th>Revenue Contribution</th>
+                  <th>Sales Volume</th>
+                  <th>Avg Ticket (AOV)</th>
+                  <th style={{ textAlign: 'right' }}>Total Revenue</th>
                 </tr>
               </thead>
               <tbody>
-                {recentInvoices.map((inv) => (
-                  <tr key={inv.id}>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{inv.invoiceNumber}</td>
-                    <td style={{ fontWeight: 600 }}>{inv.partyName}</td>
-                    <td style={{ fontWeight: 700 }}>₹{inv.grandTotal.toFixed(2)}</td>
-                    <td><StatusBadge status={inv.status} /></td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button 
-                        className="btn btn-secondary btn-icon btn-sm"
-                        title="Print / View Invoice"
-                        onClick={() => onViewInvoice(inv)}
-                      >
-                        <Eye size={14} />
-                      </button>
+                {branchStats.map((branch) => (
+                  <tr key={branch.locationId}>
+                    <td style={{ fontWeight: 700, color: 'var(--neutral-900)' }}>
+                      📍 {branch.name}
+                    </td>
+                    <td>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', background: 'var(--neutral-100)', padding: '2px 6px', borderRadius: 4 }}>
+                        {branch.code}
+                      </span>
+                    </td>
+                    <td style={{ width: '28%' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ flex: 1, height: 6, background: 'var(--neutral-200)', borderRadius: 99, overflow: 'hidden' }}>
+                          <div 
+                            style={{ 
+                              width: `${Math.max(branch.percentage, branch.sales > 0 ? 5 : 0)}%`, 
+                              height: '100%', 
+                              background: 'var(--primary-600)',
+                              borderRadius: 99 
+                            }} 
+                          />
+                        </div>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--neutral-700)', minWidth: 42 }}>
+                          {branch.percentage.toFixed(1)}%
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ fontWeight: 600 }}>{branch.transactionsCount} bills</td>
+                    <td style={{ color: 'var(--neutral-600)' }}>₹{branch.avgOrderValue.toFixed(2)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--primary-700)', fontSize: '0.92rem' }}>
+                      ₹{branch.sales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </td>
                   </tr>
                 ))}
@@ -163,46 +687,126 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
             </table>
           </div>
         </div>
+      )}
 
-        {/* Low Stock Watchlist Card */}
+      {/* Grid: Recent Invoices & Low Stock Alert Tables */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 24 }}>
+        
+        {/* Recent Invoices Card */}
         <div className="card">
-          <div className="card-header">
+          <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Receipt size={18} color="var(--primary-500)" />
+              <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Recent Sales Invoices</h3>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('transactions')}>
+              View All Invoices
+            </button>
+          </div>
+          <div style={{ width: '100%', overflow: 'hidden' }}>
+            <table className="table" style={{ width: '100%', tableLayout: 'fixed' }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: '10px 14px', width: '26%' }}>Invoice #</th>
+                  <th style={{ padding: '10px 14px', width: '30%' }}>Customer</th>
+                  <th style={{ padding: '10px 14px', width: '18%' }}>Payment</th>
+                  <th style={{ padding: '10px 14px', width: '26%', textAlign: 'right' }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentInvoices.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} style={{ textAlign: 'center', padding: 24, color: 'var(--neutral-400)' }}>
+                      No transactions recorded in this period.
+                    </td>
+                  </tr>
+                ) : (
+                  recentInvoices.map((inv) => (
+                    <tr 
+                      key={inv.id}
+                      className="table-row-clickable"
+                      onClick={() => onViewInvoice(inv)}
+                      title="Click to view & print invoice"
+                    >
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.84rem', padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                        {inv.invoiceNumber}
+                      </td>
+                      <td style={{ fontWeight: 600, padding: '12px 14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {inv.partyName || inv.consumerName || 'Walk-in Customer'}
+                      </td>
+                      <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                        <span style={{ 
+                          fontSize: '0.72rem', 
+                          fontWeight: 700, 
+                          padding: '3px 8px', 
+                          borderRadius: 4,
+                          background: inv.paymentMode === 'UPI' ? '#eef2ff' : inv.paymentMode === 'CASH' ? '#ecfdf5' : '#fffbeb',
+                          color: inv.paymentMode === 'UPI' ? '#4f46e5' : inv.paymentMode === 'CASH' ? '#047857' : '#b45309'
+                        }}>
+                          {inv.paymentMode}
+                        </span>
+                      </td>
+                      <td style={{ fontWeight: 800, padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--neutral-900)' }}>
+                        ₹{inv.grandTotal.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Low Stock Restock Watchlist Card */}
+        <div className="card">
+          <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <AlertTriangle size={18} color="var(--warning-500)" />
-              <h3 className="card-title">Low Stock Alert Watchlist</h3>
+              <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Critical Stock Replenishment</h3>
             </div>
             <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('inventory')}>
               Adjust Stock
             </button>
           </div>
-          <div className="table-responsive">
-            <table className="table">
+          <div style={{ width: '100%', overflow: 'hidden' }}>
+            <table className="table" style={{ width: '100%', tableLayout: 'fixed' }}>
               <thead>
                 <tr>
-                  <th>Item Code</th>
-                  <th>Product</th>
-                  <th>Current Stock</th>
-                  <th>Min Alert</th>
-                  <th>Status</th>
+                  <th style={{ padding: '10px 14px', width: '22%' }}>Item Code</th>
+                  <th style={{ padding: '10px 14px', width: '38%' }}>Product Name</th>
+                  <th style={{ padding: '10px 14px', width: '22%' }}>Stock</th>
+                  <th style={{ padding: '10px 14px', width: '18%', textAlign: 'right' }}>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {lowStockItems.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--neutral-400)' }}>
-                      🎉 All item stocks are above minimum threshold levels!
+                    <td colSpan={4} style={{ textAlign: 'center', padding: 28, color: 'var(--success-700)' }}>
+                      <CheckCircle2 size={24} style={{ margin: '0 auto 6px', color: 'var(--success-500)' }} />
+                      <div style={{ fontWeight: 600 }}>All item inventory levels are healthy!</div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                        No items currently at or below minimum threshold alert.
+                      </div>
                     </td>
                   </tr>
                 ) : (
-                  lowStockItems.map((item) => (
-                    <tr key={item.id}>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{item.publicItemId}</td>
-                      <td style={{ fontWeight: 600 }}>{item.name}</td>
-                      <td style={{ fontWeight: 700, color: item.currentStock === 0 ? 'var(--danger-600)' : 'var(--warning-700)' }}>
-                        {item.currentStock} {item.unit}
+                  lowStockItems.slice(0, 6).map((item) => (
+                    <tr 
+                      key={item.id}
+                      className="table-row-clickable"
+                      onClick={() => onNavigate('inventory')}
+                      title="Click to view & manage in inventory"
+                    >
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                        {item.publicItemId}
                       </td>
-                      <td style={{ color: 'var(--neutral-500)' }}>{item.minStockAlert} {item.unit}</td>
-                      <td>
+                      <td style={{ fontWeight: 600, padding: '12px 14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.name}
+                      </td>
+                      <td style={{ fontWeight: 700, color: item.currentStock === 0 ? 'var(--danger-600)' : 'var(--warning-700)', padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                        {item.currentStock % 1 === 0 ? item.currentStock : item.currentStock.toFixed(3)} {item.unit}
+                      </td>
+                      <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <StatusBadge status={item.currentStock === 0 ? 'OUT_OF_STOCK' : 'LOW_STOCK'} />
                       </td>
                     </tr>
@@ -212,6 +816,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
             </table>
           </div>
         </div>
+
       </div>
     </div>
   );
