@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   BarChart3, 
   Download, 
@@ -8,7 +8,14 @@ import {
   TrendingDown, 
   Package, 
   FileSpreadsheet,
-  MapPin
+  MapPin,
+  Search,
+  Filter,
+  Layers,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  RefreshCw
 } from 'lucide-react';
 import { store } from '../services/store';
 import { Invoice, Item } from '../types';
@@ -17,22 +24,46 @@ export const ReportsView: React.FC = () => {
   const [reportType, setReportType] = useState<'PNL' | 'STOCK_VALUATION' | 'DAY_BOOK'>('PNL');
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
   const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices(selectedLocationId));
-  const [items, setItems] = useState<Item[]>(selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true));
+  const [items, setItems] = useState<Item[]>(store.getItems(selectedLocationId, true));
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   const locations = store.getAllLocations();
 
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [invData, itemData] = await Promise.all([
+        store.fetchInvoices(selectedLocationId),
+        store.fetchItems(selectedLocationId)
+      ]);
+      setInvoices(invData);
+      setItems(itemData);
+      
+      // Extract unique categories
+      const cats = Array.from(new Set(itemData.map(i => i.category).filter(Boolean)));
+      setCategories(cats);
+    } catch (err) {
+      console.error('Error loading report data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    store.fetchInvoices(selectedLocationId).then(data => {
-      setInvoices(data);
-    }).catch(() => {});
-    store.fetchItems(selectedLocationId === 'ALL' ? undefined : selectedLocationId).then(data => {
-      setItems(data);
-    }).catch(() => {});
+    // Initial sync from local store
+    setInvoices(store.getInvoices(selectedLocationId));
+    setItems(store.getItems(selectedLocationId, true));
+    
+    // Fetch live from backend
+    loadData();
   }, [selectedLocationId]);
 
   // Financial Metrics
-  const totalRevenue = invoices.reduce((s, i) => s + i.grandTotal, 0);
-  const totalTaxCollected = invoices.reduce((s, i) => s + i.taxTotal, 0);
+  const totalRevenue = invoices.reduce((s, i) => s + (i.grandTotal || 0), 0);
+  const totalTaxCollected = invoices.reduce((s, i) => s + (i.taxTotal || 0), 0);
   const totalNetSales = totalRevenue - totalTaxCollected;
   
   // Cost of Goods Sold (COGS) Estimation
@@ -41,23 +72,66 @@ export const ReportsView: React.FC = () => {
   const operatingExpenses = selectedLocationId === 'ALL' ? 3600.0 : 1200.0;
   const netProfit = grossProfit - operatingExpenses;
 
-  // Stock Valuation
-  const totalStockValueRetail = items.reduce((s, i) => s + (i.currentStock * i.salePrice), 0);
-  const totalStockValueCost = items.reduce((s, i) => s + (i.currentStock * i.purchasePrice), 0);
+  // Filtered Stock Items for Valuation Tab
+  const filteredItems = useMemo(() => {
+    return items.filter(i => {
+      if (selectedCategory !== 'ALL' && i.category !== selectedCategory) {
+        return false;
+      }
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase().trim();
+        const matchName = i.name.toLowerCase().includes(q);
+        const matchSku = i.sku ? i.sku.toLowerCase().includes(q) : false;
+        const matchCode = i.publicItemId ? i.publicItemId.toLowerCase().includes(q) : false;
+        const matchCategory = i.category ? i.category.toLowerCase().includes(q) : false;
+        if (!matchName && !matchSku && !matchCode && !matchCategory) return false;
+      }
+      return true;
+    });
+  }, [items, selectedCategory, searchTerm]);
+
+  // Stock Valuation Metrics (Computed on full dataset or filtered view)
+  const totalItemsCount = items.length;
+  const totalUnitsInStock = items.reduce((s, i) => s + (Number(i.currentStock) || 0), 0);
+  const totalStockValueRetail = items.reduce((s, i) => s + ((Number(i.currentStock) || 0) * (Number(i.salePrice) || 0)), 0);
+  const totalStockValueCost = items.reduce((s, i) => s + ((Number(i.currentStock) || 0) * (Number(i.purchasePrice) || 0)), 0);
   const potentialInventoryProfit = totalStockValueRetail - totalStockValueCost;
+  const marginPercentage = totalStockValueRetail > 0 ? ((potentialInventoryProfit / totalStockValueRetail) * 100) : 0;
+
+  // Filtered summary metrics for the table
+  const filteredUnits = filteredItems.reduce((s, i) => s + (Number(i.currentStock) || 0), 0);
+  const filteredCostValuation = filteredItems.reduce((s, i) => s + ((Number(i.currentStock) || 0) * (Number(i.purchasePrice) || 0)), 0);
+  const filteredRetailValuation = filteredItems.reduce((s, i) => s + ((Number(i.currentStock) || 0) * (Number(i.salePrice) || 0)), 0);
+  const filteredProfit = filteredRetailValuation - filteredCostValuation;
 
   // Export CSV
   const handleExportCSV = () => {
     let csvContent = 'data:text/csv;charset=utf-8,';
     if (reportType === 'STOCK_VALUATION') {
-      csvContent += 'Item Code,Name,Category,Stock,Purchase Price,Sale Price,Valuation (Cost),Valuation (Retail)\n';
-      items.forEach(i => {
-        csvContent += `"${i.publicItemId}","${i.name}","${i.category}",${i.currentStock},${i.purchasePrice},${i.salePrice},${i.currentStock * i.purchasePrice},${i.currentStock * i.salePrice}\n`;
+      csvContent += 'Item Code,Product Name,Category,Stock Qty,Unit,Cost Price,Sale Price,Valuation (Cost),Valuation (Retail),Potential Profit,Status\n';
+      filteredItems.forEach(i => {
+        const stock = Number(i.currentStock) || 0;
+        const cost = Number(i.purchasePrice) || 0;
+        const sale = Number(i.salePrice) || 0;
+        const costVal = stock * cost;
+        const retailVal = stock * sale;
+        const profit = retailVal - costVal;
+        const status = stock <= 0 ? 'OUT_OF_STOCK' : (stock <= (i.minStockAlert || 5) ? 'LOW_STOCK' : 'IN_STOCK');
+        csvContent += `"${i.publicItemId || i.id}","${i.name.replace(/"/g, '""')}","${i.category || 'General'}",${stock},"${i.unit || 'pcs'}",${cost.toFixed(2)},${sale.toFixed(2)},${costVal.toFixed(2)},${retailVal.toFixed(2)},${profit.toFixed(2)},"${status}"\n`;
       });
+    } else if (reportType === 'PNL') {
+      csvContent += 'Financial Metric,Amount (INR)\n';
+      csvContent += `"Gross Total Sales Revenue",${totalRevenue.toFixed(2)}\n`;
+      csvContent += `"Less: GST / Output Taxes",-${totalTaxCollected.toFixed(2)}\n`;
+      csvContent += `"Net Sales Revenue",${totalNetSales.toFixed(2)}\n`;
+      csvContent += `"Less: Estimated COGS",-${estimatedCOGS.toFixed(2)}\n`;
+      csvContent += `"Gross Profit Margin",${grossProfit.toFixed(2)}\n`;
+      csvContent += `"Less: Operating Expenses",-${operatingExpenses.toFixed(2)}\n`;
+      csvContent += `"Net Profit / (Loss)",${netProfit.toFixed(2)}\n`;
     } else {
       csvContent += 'Invoice Number,Date,Branch,Party,Payment Mode,Subtotal,Tax Total,Grand Total,Status\n';
       invoices.forEach(i => {
-        csvContent += `"${i.invoiceNumber}","${i.date}","${i.locationName || 'Main Store'}","${i.partyName}","${i.paymentMode}",${i.subtotal},${i.taxTotal},${i.grandTotal},"${i.status}"\n`;
+        csvContent += `"${i.invoiceNumber}","${i.date}","${i.locationName || 'Main Store'}","${(i.partyName || 'Walk-in').replace(/"/g, '""')}","${i.paymentMode}",${i.subtotal || 0},${i.taxTotal || 0},${i.grandTotal || 0},"${i.status}"\n`;
       });
     }
 
@@ -104,6 +178,11 @@ export const ReportsView: React.FC = () => {
             </select>
           </div>
 
+          <button className="btn btn-secondary" onClick={loadData} disabled={isLoading} title="Refresh Data">
+            <RefreshCw size={15} className={isLoading ? 'spin' : ''} />
+            <span>Refresh</span>
+          </button>
+
           <button className="btn btn-secondary" onClick={handleExportCSV}>
             <FileSpreadsheet size={16} color="var(--success-600)" />
             <span>Export CSV</span>
@@ -139,6 +218,7 @@ export const ReportsView: React.FC = () => {
               fontWeight: 700,
               fontSize: '0.88rem',
               cursor: 'pointer',
+              transition: 'all 0.15s ease',
             }}
           >
             {tab.label}
@@ -217,58 +297,257 @@ export const ReportsView: React.FC = () => {
 
       {/* Stock Valuation View */}
       {reportType === 'STOCK_VALUATION' && (
-        <div className="card">
-          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <span className="card-title">Inventory Valuation ({selectedLocationId === 'ALL' ? 'All Branches' : activeLocObj?.name})</span>
-              <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-                Current asset value of products in stock at this location
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: 20 }}>
-              <div>
-                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)', textTransform: 'uppercase' }}>At Cost Price</span>
-                <p style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
-                  ₹{totalStockValueCost.toFixed(2)}
-                </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Top KPI Cards Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+            {/* Total SKUs */}
+            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--primary-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-600)' }}>
+                <Package size={22} />
               </div>
               <div>
-                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)', textTransform: 'uppercase' }}>At Sale Price</span>
-                <p style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--primary-600)' }}>
-                  ₹{totalStockValueRetail.toFixed(2)}
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>Active Products</span>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--neutral-900)', marginTop: 2 }}>
+                  {totalItemsCount} SKUs
                 </p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>{totalUnitsInStock.toFixed(1)} units in stock</span>
+              </div>
+            </div>
+
+            {/* Total Valuation @ Cost */}
+            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(59, 130, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
+                <DollarSign size={22} />
+              </div>
+              <div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>Valuation @ Cost</span>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--neutral-900)', marginTop: 2 }}>
+                  ₹{totalStockValueCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Asset purchase value</span>
+              </div>
+            </div>
+
+            {/* Total Valuation @ Retail */}
+            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(16, 185, 129, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--success-600)' }}>
+                <TrendingUp size={22} />
+              </div>
+              <div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>Valuation @ Retail</span>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--success-700)', marginTop: 2 }}>
+                  ₹{totalStockValueRetail.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Estimated revenue value</span>
+              </div>
+            </div>
+
+            {/* Potential Profit */}
+            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(245, 158, 11, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706' }}>
+                <Layers size={22} />
+              </div>
+              <div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>Unrealized Profit</span>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: '#d97706', marginTop: 2 }}>
+                  ₹{potentialInventoryProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontWeight: 600 }}>
+                  Margin: {marginPercentage.toFixed(1)}%
+                </span>
               </div>
             </div>
           </div>
-          <div className="table-responsive">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Category</th>
-                  <th>Branch Stock</th>
-                  <th>Cost / Unit</th>
-                  <th>Total Cost Valuation</th>
-                  <th>Sale / Unit</th>
-                  <th>Total Retail Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((i) => (
-                  <tr key={i.id}>
-                    <td style={{ fontWeight: 700 }}>{i.name}</td>
-                    <td>{i.category}</td>
-                    <td style={{ fontWeight: 600 }}>{i.currentStock} {i.unit}</td>
-                    <td>₹{i.purchasePrice.toFixed(2)}</td>
-                    <td style={{ fontWeight: 700 }}>₹{(i.currentStock * i.purchasePrice).toFixed(2)}</td>
-                    <td>₹{i.salePrice.toFixed(2)}</td>
-                    <td style={{ fontWeight: 800, color: 'var(--primary-600)' }}>
-                      ₹{(i.currentStock * i.salePrice).toFixed(2)}
-                    </td>
+
+          {/* Search & Category Filter Bar */}
+          <div className="card" style={{ padding: 14 }}>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ position: 'relative', minWidth: 260, flex: 1 }}>
+                <Search size={17} style={{ position: 'absolute', left: 12, top: 11, color: 'var(--neutral-400)', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Search product name, SKU, or item code..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ paddingLeft: 38, width: '100%' }}
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    style={{
+                      position: 'absolute',
+                      right: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--neutral-400)',
+                      cursor: 'pointer',
+                      padding: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title="Clear search"
+                  >
+                    <XCircle size={15} />
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Filter size={15} color="var(--neutral-500)" />
+                  <select
+                    className="form-select"
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    style={{ padding: '6px 12px', fontSize: '0.82rem', width: 'auto', minWidth: 160 }}
+                  >
+                    <option value="ALL">🌐 All Categories ({items.length})</option>
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>
+                        📁 {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ fontSize: '0.82rem', color: 'var(--neutral-500)', fontWeight: 600 }}>
+                  Showing <span style={{ color: 'var(--primary-600)', fontWeight: 700 }}>{filteredItems.length}</span> of {items.length} items
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Table Card */}
+          <div className="card">
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <h3 className="card-title">Inventory Valuation Breakdown ({selectedLocationId === 'ALL' ? 'All Branches Consolidated' : activeLocObj?.name})</h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                  Detailed itemized asset valuation at purchase cost and retail price
+                </p>
+              </div>
+            </div>
+
+            <div className="table-responsive" style={{ overflowX: 'hidden' }}>
+              <table className="table" style={{ width: '100%', tableLayout: 'auto' }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: '30%' }}>Product & Details</th>
+                    <th style={{ width: '16%', textAlign: 'center' }}>Current Stock</th>
+                    <th style={{ width: '18%', textAlign: 'right' }}>Cost Valuation</th>
+                    <th style={{ width: '18%', textAlign: 'right' }}>Retail Valuation</th>
+                    <th style={{ width: '18%', textAlign: 'right' }}>Unrealized Profit</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--neutral-400)' }}>
+                        <Package size={36} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
+                        <p style={{ fontWeight: 600 }}>No products found matching your search or category filter.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredItems.map((i) => {
+                      const stock = Number(i.currentStock) || 0;
+                      const cost = Number(i.purchasePrice) || 0;
+                      const sale = Number(i.salePrice) || 0;
+                      const costValuation = stock * cost;
+                      const retailValuation = stock * sale;
+                      const profit = retailValuation - costValuation;
+                      const minAlert = Number(i.minStockAlert) || 5;
+                      const isOutOfStock = stock <= 0;
+                      const isLowStock = !isOutOfStock && stock <= minAlert;
+
+                      return (
+                        <tr key={i.id}>
+                          <td>
+                            <div style={{ fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.88rem' }}>{i.name}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)', fontFamily: 'var(--font-mono)' }}>
+                                {i.publicItemId || i.sku || i.id}
+                              </span>
+                              <span style={{ fontSize: '0.7rem', padding: '1px 6px', borderRadius: 4, background: 'var(--neutral-100)', color: 'var(--neutral-600)', fontWeight: 600 }}>
+                                {i.category || 'General'}
+                              </span>
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--neutral-900)' }}>
+                              {stock} <span style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', fontWeight: 500 }}>{i.unit || 'pcs'}</span>
+                            </div>
+                            <div style={{ marginTop: 2 }}>
+                              {isOutOfStock ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 10, background: 'var(--danger-50)', color: 'var(--danger-700)', fontSize: '0.7rem', fontWeight: 700 }}>
+                                  <XCircle size={10} /> Out of Stock
+                                </span>
+                              ) : isLowStock ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 10, background: 'var(--warning-50)', color: 'var(--warning-700)', fontSize: '0.7rem', fontWeight: 700 }}>
+                                  <AlertTriangle size={10} /> Low Stock
+                                </span>
+                              ) : (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 10, background: 'var(--success-50)', color: 'var(--success-700)', fontSize: '0.7rem', fontWeight: 700 }}>
+                                  <CheckCircle2 size={10} /> In Stock
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.88rem' }}>
+                              ₹{costValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
+                              @ ₹{cost.toFixed(2)}/unit
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 800, color: 'var(--primary-600)', fontSize: '0.88rem' }}>
+                              ₹{retailValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
+                              @ ₹{sale.toFixed(2)}/unit
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 700, color: profit >= 0 ? 'var(--success-700)' : 'var(--danger-600)', fontSize: '0.88rem' }}>
+                              ₹{profit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: profit >= 0 ? 'var(--success-600)' : 'var(--danger-500)', fontWeight: 600 }}>
+                              {retailValuation > 0 ? `${((profit / retailValuation) * 100).toFixed(1)}% margin` : '-'}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+                {filteredItems.length > 0 && (
+                  <tfoot>
+                    <tr style={{ background: 'var(--neutral-50)', fontWeight: 800 }}>
+                      <td style={{ color: 'var(--neutral-800)' }}>
+                        Filtered Total ({filteredItems.length} items):
+                      </td>
+                      <td style={{ textAlign: 'center', color: 'var(--neutral-900)' }}>
+                        {filteredUnits.toFixed(1)} units
+                      </td>
+                      <td style={{ textAlign: 'right', color: 'var(--neutral-900)' }}>
+                        ₹{filteredCostValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ textAlign: 'right', color: 'var(--primary-700)' }}>
+                        ₹{filteredRetailValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ textAlign: 'right', color: 'var(--success-700)' }}>
+                        ₹{filteredProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
           </div>
         </div>
       )}

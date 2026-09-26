@@ -625,50 +625,19 @@ class StoreService {
   // --- Strict Tenant & Location-Isolated Items ---
   getItems(locationId?: string, includeUnlisted: boolean = false): Item[] {
     const activeTenantId = this.currentTenant.id;
-    const targetLocId = locationId || this.getActiveLocation().id;
+    const isConsolidated = !locationId || locationId === 'ALL';
     const tenantItems = this.items.filter(i => (i.businessId || DEFAULT_TENANTS[0].id) === activeTenantId);
 
     const result: Item[] = [];
 
     for (const item of tenantItems) {
-      // Find location-specific override if present
-      const locInv = item.locations?.find(l => l.locationId === targetLocId);
-
-      if (locInv) {
-        if (!includeUnlisted && locInv.isListed === false) {
-          continue; // skip item if explicitly not listed in this branch
+      if (isConsolidated) {
+        // Consolidated across all branches: sum stock across all locations if available
+        let consolidatedStock = item.currentStock || 0;
+        if (item.locations && item.locations.length > 0) {
+          consolidatedStock = item.locations.reduce((sum, l) => sum + (Number(l.currentStock) || 0), 0);
         }
 
-        const mrp = locInv.mrp ?? locInv.salePrice ?? item.salePrice;
-        let effectiveSalePrice = mrp;
-        if (locInv.hasDiscount && locInv.discountValue && locInv.discountValue > 0) {
-          if (locInv.discountType === 'PERCENT') {
-            effectiveSalePrice = Number((mrp - (mrp * locInv.discountValue / 100)).toFixed(2));
-          } else {
-            effectiveSalePrice = Math.max(0, Number((mrp - locInv.discountValue).toFixed(2)));
-          }
-        } else if (locInv.salePrice) {
-          effectiveSalePrice = locInv.salePrice;
-        }
-
-        result.push({
-          ...item,
-          mrp,
-          salePrice: effectiveSalePrice,
-          hasDiscount: locInv.hasDiscount || false,
-          discountType: locInv.discountType || 'PERCENT',
-          discountValue: locInv.discountValue || 0,
-          purchasePrice: locInv.purchasePrice ?? item.purchasePrice,
-          currentStock: locInv.currentStock ?? item.currentStock,
-          minStockAlert: locInv.minStockAlert ?? item.minStockAlert,
-        });
-      } else {
-        // If the item has explicit locations specified, but NOT this target location, skip when unlisted are excluded
-        if (!includeUnlisted && item.locations && item.locations.length > 0) {
-          continue;
-        }
-
-        // Fall back to item master defaults
         const mrp = item.mrp ?? item.salePrice;
         let effectiveSalePrice = mrp;
         if (item.hasDiscount && item.discountValue && item.discountValue > 0) {
@@ -681,9 +650,67 @@ class StoreService {
 
         result.push({
           ...item,
+          currentStock: Number(consolidatedStock.toFixed(3)),
           mrp,
           salePrice: effectiveSalePrice,
+          purchasePrice: Number(item.purchasePrice || 0),
         });
+      } else {
+        const targetLocId = locationId;
+        // Find location-specific override if present
+        const locInv = item.locations?.find(l => l.locationId === targetLocId);
+
+        if (locInv) {
+          if (!includeUnlisted && locInv.isListed === false) {
+            continue; // skip item if explicitly not listed in this branch
+          }
+
+          const mrp = locInv.mrp ?? locInv.salePrice ?? item.salePrice;
+          let effectiveSalePrice = mrp;
+          if (locInv.hasDiscount && locInv.discountValue && locInv.discountValue > 0) {
+            if (locInv.discountType === 'PERCENT') {
+              effectiveSalePrice = Number((mrp - (mrp * locInv.discountValue / 100)).toFixed(2));
+            } else {
+              effectiveSalePrice = Math.max(0, Number((mrp - locInv.discountValue).toFixed(2)));
+            }
+          } else if (locInv.salePrice) {
+            effectiveSalePrice = locInv.salePrice;
+          }
+
+          result.push({
+            ...item,
+            mrp,
+            salePrice: effectiveSalePrice,
+            hasDiscount: locInv.hasDiscount || false,
+            discountType: locInv.discountType || 'PERCENT',
+            discountValue: locInv.discountValue || 0,
+            purchasePrice: locInv.purchasePrice ?? item.purchasePrice,
+            currentStock: locInv.currentStock ?? item.currentStock,
+            minStockAlert: locInv.minStockAlert ?? item.minStockAlert,
+          });
+        } else {
+          // If the item has explicit locations specified, but NOT this target location, skip when unlisted are excluded
+          if (!includeUnlisted && item.locations && item.locations.length > 0) {
+            continue;
+          }
+
+          // Fall back to item master defaults
+          const mrp = item.mrp ?? item.salePrice;
+          let effectiveSalePrice = mrp;
+          if (item.hasDiscount && item.discountValue && item.discountValue > 0) {
+            if (item.discountType === 'PERCENT') {
+              effectiveSalePrice = Number((mrp - (mrp * item.discountValue / 100)).toFixed(2));
+            } else {
+              effectiveSalePrice = Math.max(0, Number((mrp - item.discountValue).toFixed(2)));
+            }
+          }
+
+          result.push({
+            ...item,
+            mrp,
+            salePrice: effectiveSalePrice,
+          });
+        }
       }
     }
 
@@ -692,8 +719,11 @@ class StoreService {
 
   async fetchItems(locationId?: string): Promise<Item[]> {
     try {
-      const locId = locationId || this.getActiveLocation().id;
-      const res = await apiClient.get('/items', { params: { page: 1, page_size: 500, locationId: locId } });
+      const qParams: any = { page: 1, page_size: 500 };
+      if (locationId && locationId !== 'ALL') {
+        qParams.locationId = locationId;
+      }
+      const res = await apiClient.get('/items', { params: qParams });
       if (res.data?.data && Array.isArray(res.data.data)) {
         const liveItems: Item[] = res.data.data.map((d: any) => ({
           id: d._id || d.id || d.publicItemId,
@@ -739,7 +769,7 @@ class StoreService {
   }): Promise<PaginatedApiResponse<Item>> {
     const page = params.page || 1;
     const pageSize = params.pageSize || 25;
-    const locId = params.locationId || this.getActiveLocation().id;
+    const locId = params.locationId;
 
     try {
       const qParams: any = {
