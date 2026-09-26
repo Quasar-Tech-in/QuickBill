@@ -160,40 +160,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
       </nav>
 
       {/* Sidebar Footer */}
-      <div className="sidebar-footer">
-        <div className="business-pill">
-          <div className="business-avatar" style={{ backgroundColor: isSuperAdmin ? '#7c3aed' : undefined }}>
-            {isSuperAdmin ? '⚡' : activeTenant.name.slice(0, 2).toUpperCase()}
-          </div>
-          <div style={{ overflow: 'hidden', flex: 1 }}>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-              {isSuperAdmin ? 'Root Super Admin' : activeTenant.name}
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-              <span style={{ 
-                fontSize: '0.68rem', 
-                fontWeight: 700,
-                padding: '1px 6px',
-                borderRadius: 4,
-                backgroundColor: userRole === 'SUPER_ADMIN' ? 'rgba(124, 58, 237, 0.4)' :
-                                 userRole === 'TENANT_ADMIN' ? 'rgba(79, 70, 229, 0.4)' :
-                                 userRole === 'MANAGER' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)',
-                color: userRole === 'SUPER_ADMIN' ? '#d8b4fe' :
-                       userRole === 'TENANT_ADMIN' ? '#c7d2fe' :
-                       userRole === 'MANAGER' ? '#a7f3d0' : '#fde68a'
-              }}>
-                {userRole === 'SUPER_ADMIN' ? '⚡ Super Admin' :
-                 userRole === 'TENANT_ADMIN' ? '👑 Store Admin' :
-                 userRole === 'MANAGER' ? '🏪 Manager' : '🧾 Cashier'}
-              </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)' }}>
-                {isSuperAdmin ? 'Platform' : activeTenant.slug}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {onLogout && (
+      {onLogout && (
+        <div className="sidebar-footer">
           <button
             onClick={onLogout}
             style={{
@@ -202,10 +170,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
               alignItems: 'center',
               justifyContent: 'center',
               gap: 8,
-              marginTop: 10,
               padding: '8px 12px',
-              backgroundColor: 'rgba(239, 68, 68, 0.15)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
+              backgroundColor: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
               borderRadius: 'var(--radius-md)',
               color: '#fca5a5',
               fontSize: '0.8rem',
@@ -217,8 +184,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
             <LogOut size={14} />
             <span>Sign Out</span>
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </aside>
   );
 };

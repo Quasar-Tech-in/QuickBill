@@ -17,7 +17,7 @@ import { store } from '../services/store';
 import { Tenant, StoreLocation } from '../types';
 
 interface HeaderProps {
-  title: string;
+  title?: string;
   isBackendOnline: boolean;
   onQuickSale: () => void;
   onNavigate: (tab: string) => void;
@@ -26,7 +26,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
-  title, 
+  title: _title, 
   isBackendOnline, 
   onQuickSale: _onQuickSale, 
   onNavigate,
@@ -113,8 +113,6 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="top-header">
       <div className="header-left">
-        <h2 className="header-title">{title}</h2>
-
         {/* Store Context Display: Interactive Switcher for SuperAdmin, Static Isolated Badge for Tenants */}
         {isSuperAdmin ? (
           <div className="header-tenant-selector" ref={tenantMenuRef}>
@@ -199,6 +197,11 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <span className="tenant-slug-badge">{activeTenant.slug}</span>
           </div>
+        )}
+
+        {/* Visual Separator */}
+        {!isSuperAdmin && (
+          <div style={{ width: 1, height: 26, backgroundColor: 'var(--neutral-200)', margin: '0 4px' }} />
         )}
 
         {/* Location / Branch Context Badge & Dropdown */}

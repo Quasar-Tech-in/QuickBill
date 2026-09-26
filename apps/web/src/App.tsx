@@ -33,20 +33,6 @@ const getDefaultPathForRole = (user: User | null): string => {
   return '/dashboard';
 };
 
-// Route title resolver
-const getRouteTitle = (pathname: string): string => {
-  if (pathname.startsWith('/dashboard')) return 'Executive Dashboard';
-  if (pathname.startsWith('/pos')) return 'POS Counter & Billing';
-  if (pathname.startsWith('/inventory')) return 'Item Catalog & Inventory';
-  if (pathname.startsWith('/parties')) return 'Parties & Contact Directory';
-  if (pathname.startsWith('/ledger')) return 'Financial Ledger & Operating Expenses';
-  if (pathname.startsWith('/invoices') || pathname.startsWith('/transactions')) return 'Invoices & Bills';
-  if (pathname.startsWith('/reports')) return 'Financial Reports & Analytics';
-  if (pathname.startsWith('/superadmin')) return 'Super Admin Multi-Tenant Governance';
-  if (pathname.startsWith('/settings')) return 'Settings & Database Config';
-  return 'QuickBill POS';
-};
-
 // Authenticated Main Layout Component
 interface AppLayoutProps {
   currentUser: User;
@@ -108,7 +94,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({
       {/* Main Content Area */}
       <div className="main-wrapper">
         <Header 
-          title={getRouteTitle(location.pathname)} 
           isBackendOnline={isBackendOnline} 
           onQuickSale={() => navigate('/pos')} 
           onNavigate={(tab) => {
