@@ -51,8 +51,17 @@ export const InventoryView: React.FC = () => {
   const [rawItems, setRawItems] = useState<Item[]>([]);
   const [categoriesList, setCategoriesList] = useState<ItemCategory[]>(store.getCategories());
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   
+  // Debounce search query input (300ms) for responsive API searching
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
   // Category Multi-Select Dropdown State
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const [dropdownSearch, setDropdownSearch] = useState('');
@@ -86,7 +95,7 @@ export const InventoryView: React.FC = () => {
   // Reset page when search or category filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, selectedCategories, selectedLocationId]);
+  }, [debouncedSearch, selectedCategories, selectedLocationId]);
 
   // Close Category Dropdown on Outside Click
   useEffect(() => {
@@ -218,11 +227,11 @@ export const InventoryView: React.FC = () => {
     page: number = currentPage,
     size: number = pageSize,
     locId: string = selectedLocationId,
-    search: string = searchQuery,
+    search: string = debouncedSearch,
     cats: string[] = selectedCategories
   ) => {
     try {
-      const catParam = cats.length === 1 ? cats[0] : undefined;
+      const catParam = cats.length > 0 ? cats.join(',') : undefined;
       const res = await store.fetchItemsPaginated({
         page,
         pageSize: size,
@@ -239,11 +248,11 @@ export const InventoryView: React.FC = () => {
       setItems(all.slice((page - 1) * size, page * size));
       setTotalItems(all.length);
     }
-  }, [currentPage, pageSize, selectedLocationId, searchQuery, selectedCategories]);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, selectedCategories]);
 
   useEffect(() => {
-    loadPaginatedItems(currentPage, pageSize, selectedLocationId, searchQuery, selectedCategories);
-  }, [currentPage, pageSize, selectedLocationId, searchQuery, selectedCategories, loadPaginatedItems]);
+    loadPaginatedItems(currentPage, pageSize, selectedLocationId, debouncedSearch, selectedCategories);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, selectedCategories, loadPaginatedItems]);
 
   useEffect(() => {
     store.fetchCategories().then(() => {
@@ -278,21 +287,6 @@ export const InventoryView: React.FC = () => {
       setSelectedCategories([...selectedCategories, catName]);
     }
   };
-
-  const filteredItems = items.filter(item => {
-    const q = (searchQuery || '').toLowerCase();
-    const matchesSearch = 
-      (item.name || '').toLowerCase().includes(q) ||
-      (item.publicItemId || '').toLowerCase().includes(q) ||
-      (item.sku ? item.sku.toLowerCase().includes(q) : false) ||
-      (item.barcode ? item.barcode.toLowerCase().includes(q) : false);
-    
-    const matchesCategory = 
-      selectedCategories.length === 0 || 
-      selectedCategories.includes(item.category);
-
-    return matchesSearch && matchesCategory;
-  });
 
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();

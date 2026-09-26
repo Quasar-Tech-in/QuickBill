@@ -1322,7 +1322,9 @@ class StoreService {
           id: p._id || p.id,
           businessId: p.businessId || this.currentTenant.id,
           name: p.name,
-          type: Array.isArray(p.type) ? (p.type.includes('supplier') ? 'SUPPLIER' : 'CUSTOMER') : (p.type || 'CUSTOMER'),
+          type: Array.isArray(p.type) 
+            ? (p.type.some((t: string) => String(t).toLowerCase().includes('supplier')) ? 'SUPPLIER' : 'CUSTOMER') 
+            : (String(p.type || '').toUpperCase() === 'SUPPLIER' ? 'SUPPLIER' : 'CUSTOMER'),
           phone: p.phone || undefined,
           email: p.email || undefined,
           address: p.billingAddress?.street || p.address || undefined,

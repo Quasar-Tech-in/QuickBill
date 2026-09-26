@@ -23,20 +23,25 @@ async def list_expenses(
 ):
     db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "expenses")
-    query: dict = {}
+    b_oid = repo._to_object_id(business_id)
+    conditions: list = [{"$or": [{"businessId": b_oid}, {"businessId": business_id}]}]
+
     if category and category != "ALL":
-        query["category"] = category
+        conditions.append({"category": category})
+
     if location_id and location_id != "ALL":
-        query["locationId"] = location_id
+        conditions.append({"locationId": location_id})
 
     if search and search.strip():
         s = search.strip()
-        query["$or"] = [
-            {"payee": {"$regex": s, "$options": "i"}},
-            {"description": {"$regex": s, "$options": "i"}},
-            {"referenceNumber": {"$regex": s, "$options": "i"}},
-            {"category": {"$regex": s, "$options": "i"}},
-        ]
+        conditions.append({
+            "$or": [
+                {"payee": {"$regex": s, "$options": "i"}},
+                {"description": {"$regex": s, "$options": "i"}},
+                {"referenceNumber": {"$regex": s, "$options": "i"}},
+                {"category": {"$regex": s, "$options": "i"}},
+            ]
+        })
 
     if from_date or to_date:
         date_cond: dict = {}
@@ -44,7 +49,9 @@ async def list_expenses(
             date_cond["$gte"] = from_date
         if to_date:
             date_cond["$lte"] = f"{to_date}T23:59:59.999Z" if "T" not in to_date else to_date
-        query["createdAt"] = date_cond
+        conditions.append({"$or": [{"createdAt": date_cond}, {"expenseDate": date_cond}]})
+
+    query = {"$and": conditions}
 
     docs, total = await repo.list_paginated(
         business_id=business_id,

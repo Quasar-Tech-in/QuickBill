@@ -27,7 +27,16 @@ export const PartiesView: React.FC = () => {
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
   const [parties, setParties] = useState<Party[]>(store.getParties());
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>(isCashier ? 'CUSTOMER' : 'ALL');
+
+  // Debounce search query input (300ms) for responsive API searching
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -37,7 +46,7 @@ export const PartiesView: React.FC = () => {
   // Reset pagination when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterType, selectedLocationId]);
+  }, [debouncedSearch, filterType, selectedLocationId]);
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -90,7 +99,7 @@ export const PartiesView: React.FC = () => {
     page: number = currentPage,
     size: number = pageSize,
     locId: string = selectedLocationId,
-    search: string = searchQuery,
+    search: string = debouncedSearch,
     fType: 'ALL' | 'CUSTOMER' | 'SUPPLIER' = filterType
   ) => {
     try {
@@ -109,14 +118,14 @@ export const PartiesView: React.FC = () => {
       setParties(all.slice((page - 1) * size, page * size));
       setTotalItems(all.length);
     }
-  }, [currentPage, pageSize, selectedLocationId, searchQuery, filterType, isCashier]);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, filterType, isCashier]);
 
   useEffect(() => {
-    loadPaginatedParties(currentPage, pageSize, selectedLocationId, searchQuery, filterType);
-  }, [currentPage, pageSize, selectedLocationId, searchQuery, filterType, loadPaginatedParties]);
+    loadPaginatedParties(currentPage, pageSize, selectedLocationId, debouncedSearch, filterType);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, filterType, loadPaginatedParties]);
 
   const refreshData = () => {
-    loadPaginatedParties(currentPage, pageSize, selectedLocationId, searchQuery, filterType);
+    loadPaginatedParties(currentPage, pageSize, selectedLocationId, debouncedSearch, filterType);
   };
 
   // Summary Metrics
@@ -129,24 +138,6 @@ export const PartiesView: React.FC = () => {
   const totalPayables = allCurrentParties
     .filter(p => p.currentBalance < 0)
     .reduce((sum, p) => sum + Math.abs(p.currentBalance), 0);
-
-  const filteredParties = parties.filter(p => {
-    if (isCashier && p.type !== 'CUSTOMER') return false;
-    
-    // Branch Filter
-    if (selectedLocationId !== 'ALL') {
-      const matchLoc = !p.locationIds || p.locationIds.length === 0 || p.locationIds.includes(selectedLocationId) || p.locationId === selectedLocationId;
-      if (!matchLoc) return false;
-    }
-
-    const matchesSearch = 
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.phone && p.phone.includes(searchQuery)) ||
-      (p.email && p.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (p.gstin && p.gstin.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesType = filterType === 'ALL' || p.type === filterType;
-    return matchesSearch && matchesType;
-  });
 
   const handleCreateParty = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -436,7 +427,7 @@ export const PartiesView: React.FC = () => {
                             color: party.type === 'CUSTOMER' ? 'var(--primary-700)' : 'var(--warning-700)',
                           }}
                         >
-                          {party.type === 'CUSTOMER' ? '👤 Customer' : '🏢 Supplier'}
+                          {party.type === 'CUSTOMER' ? 'Customer' : '🏢Supplier'}
                         </span>
                       </td>
                       <td>

@@ -15,13 +15,33 @@ async def list_payments(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     direction: Optional[str] = None,
+    search: Optional[str] = None,
+    location_id: Optional[str] = Query(None, alias="locationId"),
     business_id: str = Depends(get_current_business_id),
     db = Depends(get_database)
 ):
     repo = BaseTenantRepository(db, "payments")
-    query = {}
-    if direction:
-        query["direction"] = direction
+    b_oid = repo._to_object_id(business_id)
+    conditions: list = [{"$or": [{"businessId": b_oid}, {"businessId": business_id}]}]
+
+    if direction and direction != "ALL":
+        conditions.append({"direction": direction})
+
+    if location_id and location_id != "ALL":
+        conditions.append({"locationId": location_id})
+
+    if search and search.strip():
+        s = search.strip()
+        conditions.append({
+            "$or": [
+                {"paymentNumber": {"$regex": s, "$options": "i"}},
+                {"partyName": {"$regex": s, "$options": "i"}},
+                {"referenceNumber": {"$regex": s, "$options": "i"}},
+                {"notes": {"$regex": s, "$options": "i"}},
+            ]
+        })
+
+    query = {"$and": conditions}
 
     docs, total = await repo.list_paginated(
         business_id=business_id,

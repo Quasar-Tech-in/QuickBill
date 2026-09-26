@@ -21,28 +21,38 @@ async def list_parties(
 ):
     db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "parties")
-    query: dict = {}
+    b_oid = repo._to_object_id(business_id)
+    
+    conditions: list = [{"$or": [{"businessId": b_oid}, {"businessId": business_id}]}]
+
     if party_type and party_type != "ALL":
-        query["type"] = party_type
+        pt_variants = [party_type.lower(), party_type.upper(), party_type.capitalize()]
+        conditions.append({"type": {"$in": pt_variants}})
+
     if location_id and location_id != "ALL":
-        query["$or"] = [
-            {"locationIds": location_id},
-            {"locationId": location_id},
-            {"locationIds": {"$size": 0}},
-            {"locationIds": {"$exists": False}},
-        ]
+        conditions.append({
+            "$or": [
+                {"locationIds": location_id},
+                {"locationId": location_id},
+                {"locationIds": {"$size": 0}},
+                {"locationIds": {"$exists": False}},
+            ]
+        })
+
     if search and search.strip():
         s = search.strip()
-        search_cond = [
-            {"name": {"$regex": s, "$options": "i"}},
-            {"phone": {"$regex": s, "$options": "i"}},
-            {"email": {"$regex": s, "$options": "i"}},
-            {"gstin": {"$regex": s, "$options": "i"}},
-        ]
-        if "$or" in query:
-            query = {"$and": [{"$or": query["$or"]}, {"$or": search_cond}]}
-        else:
-            query["$or"] = search_cond
+        conditions.append({
+            "$or": [
+                {"name": {"$regex": s, "$options": "i"}},
+                {"phone": {"$regex": s, "$options": "i"}},
+                {"email": {"$regex": s, "$options": "i"}},
+                {"taxId": {"$regex": s, "$options": "i"}},
+                {"gstin": {"$regex": s, "$options": "i"}},
+                {"address": {"$regex": s, "$options": "i"}},
+            ]
+        })
+
+    query = {"$and": conditions} if conditions else {}
     
     docs, total = await repo.list_paginated(
         business_id=business_id,

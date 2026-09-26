@@ -32,22 +32,40 @@ async def list_items(
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
-    query: dict = {"isActive": True}
+    b_oid = repo._to_object_id(business_id)
+
+    conditions: list = [
+        {"isActive": True},
+        {"$or": [{"businessId": b_oid}, {"businessId": business_id}]}
+    ]
+
+    if location_id and location_id != "ALL":
+        conditions.append({
+            "$or": [
+                {"locations.locationId": location_id},
+                {"locationId": location_id}
+            ]
+        })
+
+    if category and category != "ALL":
+        cats = [c.strip() for c in category.split(",") if c.strip()]
+        if len(cats) > 1:
+            conditions.append({"category": {"$in": cats}})
+        elif len(cats) == 1:
+            conditions.append({"category": cats[0]})
+
     if search and search.strip():
         s = search.strip()
-        query["$or"] = [
-            {"name": {"$regex": s, "$options": "i"}},
-            {"sku": {"$regex": s, "$options": "i"}},
-            {"barcode": {"$regex": s, "$options": "i"}},
-            {"publicItemId": {"$regex": s, "$options": "i"}}
-        ]
-    if category and category != "ALL":
-        query["category"] = category
-    if location_id and location_id != "ALL":
-        query["$or"] = [
-            {"locations.locationId": location_id},
-            {"locationId": location_id}
-        ]
+        conditions.append({
+            "$or": [
+                {"name": {"$regex": s, "$options": "i"}},
+                {"sku": {"$regex": s, "$options": "i"}},
+                {"barcode": {"$regex": s, "$options": "i"}},
+                {"publicItemId": {"$regex": s, "$options": "i"}}
+            ]
+        })
+
+    query = {"$and": conditions}
     
     docs, total = await repo.list_paginated(
         business_id=business_id,

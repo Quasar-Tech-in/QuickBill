@@ -30,8 +30,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
   const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices());
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID'>('ALL');
   const [updatingInvoice, setUpdatingInvoice] = useState<Invoice | null>(null);
+
+  // Debounce search query input (300ms) for responsive API searching
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(25);
@@ -41,7 +50,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
     page: number = currentPage,
     size: number = pageSize,
     locId: string = selectedLocationId,
-    search: string = searchQuery,
+    search: string = debouncedSearch,
     status: string = statusFilter
   ) => {
     setIsLoading(true);
@@ -63,17 +72,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
     } finally {
       setIsLoading(false);
     }
-  }, [currentPage, pageSize, selectedLocationId, searchQuery, statusFilter]);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter]);
 
   // When filters or search query change, reset page to 1
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, selectedLocationId]);
+  }, [debouncedSearch, statusFilter, selectedLocationId]);
 
   // Fetch when page, size, or filters change
   useEffect(() => {
-    loadInvoices(currentPage, pageSize, selectedLocationId, searchQuery, statusFilter);
-  }, [currentPage, pageSize, selectedLocationId, searchQuery, statusFilter]);
+    loadInvoices(currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, loadInvoices]);
 
   // Calculate summary stats
   const totalSalesAmount = invoices.reduce((sum, i) => sum + i.grandTotal, 0);

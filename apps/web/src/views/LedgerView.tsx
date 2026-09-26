@@ -39,8 +39,17 @@ export const LedgerView: React.FC = () => {
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'PAYMENT_IN' | 'PAYMENT_OUT' | 'EXPENSE'>('ALL');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
+
+  // Debounce search query input (300ms) for responsive API searching
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -50,7 +59,7 @@ export const LedgerView: React.FC = () => {
   // Reset pagination when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterType, filterCategory, selectedLocationId]);
+  }, [debouncedSearch, filterType, filterCategory, selectedLocationId]);
 
   // Modals
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
@@ -111,7 +120,7 @@ export const LedgerView: React.FC = () => {
         const res = await store.fetchExpensesPaginated({
           page: currentPage,
           pageSize,
-          search: searchQuery.trim() || undefined,
+          search: debouncedSearch.trim() || undefined,
           category: filterCategory !== 'ALL' ? filterCategory : undefined,
           locationId: loc,
         });
@@ -140,8 +149,8 @@ export const LedgerView: React.FC = () => {
         const filtered = entries.filter(entry => {
           if (filterType !== 'ALL' && entry.type !== filterType) return false;
           if (filterCategory !== 'ALL' && entry.category !== filterCategory) return false;
-          if (searchQuery) {
-            const q = searchQuery.toLowerCase();
+          if (debouncedSearch) {
+            const q = debouncedSearch.toLowerCase();
             const matchParty = entry.partyOrPayee.toLowerCase().includes(q);
             const matchTitle = entry.title.toLowerCase().includes(q);
             const matchRef = entry.referenceNumber ? entry.referenceNumber.toLowerCase().includes(q) : false;
@@ -160,7 +169,7 @@ export const LedgerView: React.FC = () => {
       setTotalItems(entries.length);
       setLedgerEntries(entries.slice((currentPage - 1) * pageSize, currentPage * pageSize));
     }
-  }, [currentPage, pageSize, selectedLocationId, filterType, filterCategory, searchQuery]);
+  }, [currentPage, pageSize, selectedLocationId, filterType, filterCategory, debouncedSearch]);
 
   useEffect(() => {
     refreshData();

@@ -34,28 +34,34 @@ async def list_customers(
     db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "customers")
     b_oid = repo._to_object_id(business_id)
-    query: dict = {"businessId": b_oid}
+    conditions: list = [{"$or": [{"businessId": b_oid}, {"businessId": business_id}]}]
 
     if search:
         clean_s = normalize_phone(search)
-        query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"phone": {"$regex": clean_s if clean_s else search, "$options": "i"}},
-            {"email": {"$regex": search, "$options": "i"}}
-        ]
+        conditions.append({
+            "$or": [
+                {"name": {"$regex": search, "$options": "i"}},
+                {"phone": {"$regex": clean_s if clean_s else search, "$options": "i"}},
+                {"email": {"$regex": search, "$options": "i"}}
+            ]
+        })
 
     if tag:
-        query["tags"] = tag
+        conditions.append({"tags": tag})
 
     if min_spent is not None:
-        query["totalSpent"] = {"$gte": min_spent}
+        conditions.append({"totalSpent": {"$gte": min_spent}})
 
-    if location_id:
-        query["$or"] = [
-            {"locationIds": {"$exists": False}},
-            {"locationIds": {"$size": 0}},
-            {"locationIds": location_id}
-        ]
+    if location_id and location_id != "ALL":
+        conditions.append({
+            "$or": [
+                {"locationIds": {"$exists": False}},
+                {"locationIds": {"$size": 0}},
+                {"locationIds": location_id}
+            ]
+        })
+
+    query = {"$and": conditions}
 
     docs, total = await repo.list_paginated(
         business_id=business_id,
