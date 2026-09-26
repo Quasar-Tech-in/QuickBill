@@ -5,6 +5,10 @@ from pydantic import BaseModel, Field
 def quantize_currency(val: Decimal) -> Decimal:
     return val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+def quantize_qty(val: Decimal) -> Decimal:
+    return val.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+
 class LineItemCalcInput(BaseModel):
     item_id: str
     name_snapshot: str
@@ -55,13 +59,14 @@ class BillingEngine:
         # 1. First pass: compute line items gross and item discount
         item_intermediates = []
         for item in items:
-            gross = quantize_currency(item.quantity * item.unit_price)
+            q_qty = quantize_qty(item.quantity)
+            gross = quantize_currency(q_qty * item.unit_price)
             discount = quantize_currency(min(item.discount, gross))
             net_line_inclusive = quantize_currency(gross - discount)
             
             gross_total += net_line_inclusive
             item_discount_total += discount
-            item_intermediates.append((item, gross, discount, net_line_inclusive))
+            item_intermediates.append((item, q_qty, gross, discount, net_line_inclusive))
 
         # 2. Compute proportional order/invoice discount factor
         discount_factor = Decimal("1.00")
@@ -72,7 +77,7 @@ class BillingEngine:
         tax_total = Decimal("0.00")
 
         # 3. Second pass: inclusive tax extraction & line totals
-        for item, gross, discount, net_line_inclusive in item_intermediates:
+        for item, q_qty, gross, discount, net_line_inclusive in item_intermediates:
             effective_line = quantize_currency(net_line_inclusive * discount_factor)
             
             # Taxable base extracted from inclusive amount: Base = Effective / (1 + Rate/100)
@@ -92,7 +97,7 @@ class BillingEngine:
                 item_id=item.item_id,
                 name_snapshot=item.name_snapshot,
                 sku_snapshot=item.sku_snapshot,
-                quantity=item.quantity,
+                quantity=q_qty,
                 unit_price=item.unit_price,
                 gross_amount=gross,
                 discount=discount,

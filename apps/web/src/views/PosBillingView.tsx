@@ -17,10 +17,47 @@ import {
   X,
   FileText,
   ArrowRight,
-  RotateCw
+  RotateCw,
+  Divide,
+  Calculator,
+  Scale
 } from 'lucide-react';
 import { Item, Party, CartItem, Invoice, ItemCategory } from '../types';
 import { store } from '../services/store';
+
+// Helper to parse decimal numbers or fraction expressions (e.g. "4/30", "6/12", "1 4/12", "1+4/12")
+const parseFractionString = (str: string): number | null => {
+  const trimmed = str.trim();
+  if (!trimmed) return null;
+
+  // Single decimal or integer e.g. "1.5" or "4"
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    return parseFloat(trimmed);
+  }
+
+  // Fraction e.g. "4/30" or "6/12"
+  const fractionMatch = trimmed.match(/^(\d+(\.\d+)?)\s*\/\s*(\d+(\.\d+)?)$/);
+  if (fractionMatch) {
+    const num = parseFloat(fractionMatch[1]);
+    const den = parseFloat(fractionMatch[3]);
+    if (den > 0) {
+      return num / den;
+    }
+  }
+
+  // Mixed fraction e.g. "1 4/12" or "1+4/12"
+  const mixedMatch = trimmed.match(/^(\d+(\.\d+)?)\s*(?:\+|\s)\s*(\d+(\.\d+)?)\s*\/\s*(\d+(\.\d+)?)$/);
+  if (mixedMatch) {
+    const whole = parseFloat(mixedMatch[1]);
+    const num = parseFloat(mixedMatch[3]);
+    const den = parseFloat(mixedMatch[5]);
+    if (den > 0) {
+      return whole + (num / den);
+    }
+  }
+
+  return null;
+};
 
 interface PosBillingViewProps {
   onInvoiceCreated: (invoice: Invoice) => void;
@@ -46,8 +83,29 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   // Cart State (Synchronized with store.posCart)
   const [cart, setCart] = useState<CartItem[]>(store.getPosCart());
-  // Map of raw typed input string per item to allow typing "0.", "0.0", "0.01" without React resetting mid-keystroke
+  // Map of raw typed input string per item to allow typing "0.", "0.0", "0.01", "4/30" without React resetting mid-keystroke
   const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({});
+
+  // Fraction / Parts Calculator Modal State (Strictly for parts-enabled items)
+  const [fractionModal, setFractionModal] = useState<{
+    isOpen: boolean;
+    cartItemId: string;
+    itemName: string;
+    unit: string;
+    unitPrice: number;
+    wholeUnits: string;
+    partsGiven: string;
+    totalParts: string;
+  }>({
+    isOpen: false,
+    cartItemId: '',
+    itemName: '',
+    unit: 'unit',
+    unitPrice: 0,
+    wholeUnits: '0',
+    partsGiven: '1',
+    totalParts: '12',
+  });
 
   // Subscribe to store posCart updates (e.g. when cleared upon location switch)
   useEffect(() => {
@@ -275,7 +333,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     });
   };
 
-  // Adjust Qty by step
+  // Adjust Qty by step (strictly 3 decimal places for parts-enabled items)
   const handleUpdateQty = (itemId: string, delta: number) => {
     setQtyInputMap((prev) => {
       const next = { ...prev };
@@ -305,16 +363,24 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     });
   };
 
-  // Set Qty directly (manual input with exact typing preservation for 0.01 etc.)
+  // Set Qty directly (manual input with exact typing preservation for 0.01, 4/30 etc.)
   const handleSetQty = (itemId: string, rawVal: string) => {
-    // Only allow digits and at most one decimal point
-    if (rawVal !== '' && !/^\d*\.?\d*$/.test(rawVal)) {
-      return;
+    const targetItem = cart.find(c => c.item.id === itemId)?.item;
+    const isAllowParts = !!targetItem?.allowParts;
+
+    // For parts-enabled: allow digits, decimals, fractions (slash), plus, and spaces (e.g. "4/30", "1 4/12", "0.5")
+    // For non-parts: only allow digits
+    if (rawVal !== '') {
+      if (isAllowParts) {
+        if (!/^[\d\.\/\+\s]*$/.test(rawVal)) return;
+      } else {
+        if (!/^\d*$/.test(rawVal)) return;
+      }
     }
 
     setQtyInputMap((prev) => ({ ...prev, [itemId]: rawVal }));
 
-    if (rawVal === '' || rawVal === '.' || rawVal.endsWith('.')) {
+    if (rawVal === '' || rawVal === '.' || rawVal.endsWith('.') || rawVal.includes('/') || rawVal.includes('+')) {
       if (rawVal === '') {
         updateCart((prevCart) =>
           prevCart.map((c) =>
@@ -327,8 +393,6 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       return;
     }
 
-    const targetItem = cart.find(c => c.item.id === itemId)?.item;
-    const isAllowParts = !!targetItem?.allowParts;
     const val = isAllowParts ? parseFloat(rawVal) : parseInt(rawVal, 10);
     if (isNaN(val) || val < 0) return;
 
@@ -336,8 +400,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       prevCart.map((c) => {
         if (c.item.id === itemId) {
           const maxAvailable = (c.item?.currentStock && c.item.currentStock > 0) ? c.item.currentStock : 99999;
-          const newQty = c.item.allowParts
-            ? Math.min(val, maxAvailable)
+          const newQty = isAllowParts
+            ? Number(Math.min(val, maxAvailable).toFixed(3))
             : Math.max(1, Math.min(val, maxAvailable));
           const unitPrice = Number(c.unitPrice || c.item?.salePrice || 0);
           return {
@@ -351,7 +415,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     );
   };
 
-  // Handle onBlur for manual quantity input
+  // Handle onBlur for manual quantity input (evaluates fractions e.g. 4/30 -> 0.133)
   const handleBlurQty = (itemId: string) => {
     const rawVal = qtyInputMap[itemId];
     setQtyInputMap((prev) => {
@@ -361,17 +425,81 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     });
 
     if (rawVal !== undefined) {
-      const val = parseFloat(rawVal);
-      if (isNaN(val) || val <= 0) {
-        updateCart((prevCart) =>
-          prevCart.map((c) =>
-            c.item.id === itemId
-              ? { ...c, quantity: 1, lineTotal: 1 * Number(c.unitPrice || c.item?.salePrice || 0) }
-              : c
-          )
-        );
+      const targetItem = cart.find(c => c.item.id === itemId)?.item;
+      const isAllowParts = !!targetItem?.allowParts;
+      const parsedVal = isAllowParts ? parseFractionString(rawVal) : parseInt(rawVal, 10);
+
+      let finalVal: number;
+      if (parsedVal === null || isNaN(parsedVal) || parsedVal <= 0) {
+        finalVal = 1;
+      } else {
+        finalVal = isAllowParts ? Number(parsedVal.toFixed(3)) : Math.round(parsedVal);
       }
+
+      updateCart((prevCart) =>
+        prevCart.map((c) => {
+          if (c.item.id === itemId) {
+            const unitPrice = Number(c.unitPrice || c.item?.salePrice || 0);
+            return {
+              ...c,
+              quantity: finalVal,
+              lineTotal: Number((finalVal * unitPrice).toFixed(2)),
+            };
+          }
+          return c;
+        })
+      );
     }
+  };
+
+  // Open Fraction / Loose Parts Calculator (Only for parts-enabled items)
+  const handleOpenFractionModal = (line: CartItem) => {
+    const whole = Math.floor(line.quantity || 0);
+    setFractionModal({
+      isOpen: true,
+      cartItemId: line.item.id,
+      itemName: line.item.name,
+      unit: line.item.unit || 'unit',
+      unitPrice: Number(line.unitPrice || line.item.salePrice || 0),
+      wholeUnits: whole > 0 ? String(whole) : '0',
+      partsGiven: '1',
+      totalParts: '12',
+    });
+  };
+
+  // Apply Fraction / Loose Parts to Cart (strictly 3 decimal places)
+  const handleApplyFraction = () => {
+    const whole = parseFloat(fractionModal.wholeUnits) || 0;
+    const parts = parseFloat(fractionModal.partsGiven) || 0;
+    const total = parseFloat(fractionModal.totalParts) || 1;
+
+    if (total <= 0 || (whole === 0 && parts === 0)) return;
+
+    // Strict 3 decimal places rounding
+    const calculatedQty = Number((whole + (parts / total)).toFixed(3));
+    if (calculatedQty <= 0) return;
+
+    setQtyInputMap((prev) => {
+      const next = { ...prev };
+      delete next[fractionModal.cartItemId];
+      return next;
+    });
+
+    updateCart((prevCart) =>
+      prevCart.map((c) => {
+        if (c.item.id === fractionModal.cartItemId) {
+          const unitPrice = Number(c.unitPrice || c.item?.salePrice || 0);
+          return {
+            ...c,
+            quantity: calculatedQty,
+            lineTotal: Number((calculatedQty * unitPrice).toFixed(2)),
+          };
+        }
+        return c;
+      })
+    );
+
+    setFractionModal((prev) => ({ ...prev, isOpen: false }));
   };
 
   // Remove Item
@@ -1017,9 +1145,31 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                           GST {item.taxRate}%
                         </span>
                       </div>
+
+                      {/* Loose / Parts Tag Bottom-Left on Image */}
+                      {item.allowParts && (
+                        <div style={{ position: 'absolute', bottom: 6, left: 6, zIndex: 1 }}>
+                          <span style={{
+                            fontSize: '0.62rem',
+                            color: '#065f46',
+                            backgroundColor: 'rgba(236, 253, 245, 0.95)',
+                            backdropFilter: 'blur(4px)',
+                            border: '1px solid #a7f3d0',
+                            padding: '2px 5px',
+                            borderRadius: 4,
+                            fontWeight: 700,
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3,
+                          }}>
+                            ⚖️ Loose / Parts
+                          </span>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Card Body: Full Product Title, Parts info & Price Footer */}
+                    {/* Card Body: Full Product Title & Price Footer */}
                     <div style={{
                       padding: '10px 12px 12px',
                       display: 'flex',
@@ -1040,24 +1190,6 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                         }}>
                           {item.name}
                         </h4>
-
-                        {/* Loose / Parts Tag if enabled */}
-                        {item.allowParts && (
-                          <div style={{ marginBottom: 6 }}>
-                            <span style={{
-                              fontSize: '0.64rem',
-                              color: '#047857',
-                              backgroundColor: '#ecfdf5',
-                              border: '1px solid #a7f3d0',
-                              padding: '1px 5px',
-                              borderRadius: 4,
-                              fontWeight: 700,
-                              display: 'inline-block',
-                            }}>
-                              ⚖️ Loose / Parts
-                            </span>
-                          </div>
-                        )}
                       </div>
 
                       {/* Card Bottom: Price & Quick Add Button */}
@@ -1141,154 +1273,246 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           </div>
 
           {/* Cart Items List with Independent Scroll */}
-          <div className="pos-cart-items" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto' }}>
+          <div className="pos-cart-items" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', padding: '10px 12px', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {cart.length === 0 ? (
-              <div style={{ textAlign: 'center', margin: 'auto', color: 'var(--neutral-400)', padding: 20 }}>
-                <ShoppingBag size={34} style={{ margin: '0 auto 6px', opacity: 0.35 }} />
-                <p style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--neutral-600)', margin: 0 }}>Cart is empty</p>
-                <p style={{ fontSize: '0.75rem', marginTop: 4 }}>Select products or scan barcodes to begin billing</p>
+              <div style={{ textAlign: 'center', margin: 'auto', color: 'var(--neutral-400)', padding: 24 }}>
+                <ShoppingBag size={38} style={{ margin: '0 auto 8px', opacity: 0.3 }} />
+                <p style={{ fontWeight: 700, fontSize: '0.90rem', color: 'var(--neutral-600)', margin: 0 }}>Cart is empty</p>
+                <p style={{ fontSize: '0.76rem', marginTop: 4, color: 'var(--neutral-400)' }}>Select products or scan barcodes to begin billing</p>
               </div>
             ) : (
               cart.map((line) => {
                 return (
                   <div 
                     key={line.item.id} 
-                    className="pos-cart-row"
+                    className="pos-cart-card"
                     style={{
+                      backgroundColor: '#ffffff',
+                      borderRadius: 10,
+                      border: '1px solid #e2e8f0',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                      padding: '10px 12px',
                       display: 'flex',
-                      alignItems: 'center',
+                      flexDirection: 'column',
                       gap: 8,
-                      padding: '8px 10px',
-                      borderBottom: '1px solid var(--neutral-100)',
-                      backgroundColor: '#ffffff'
+                      transition: 'all 0.15s ease',
                     }}
                   >
-                    {/* Full Item Name & Unit Price */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                        <p style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-900)', margin: 0, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35 }}>
+                    {/* Top Row: Product Name on Left & Quantity Stepper on Top-Right */}
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                      {/* Left: Product Name & Parts Badge */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, flexWrap: 'wrap' }}>
+                        <h5 style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0f172a', margin: 0, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35 }}>
                           {line.item.name}
-                        </p>
+                        </h5>
                         {line.item.allowParts && (
-                          <span style={{ fontSize: '0.62rem', padding: '1px 4px', borderRadius: 3, backgroundColor: 'var(--primary-50)', color: 'var(--primary-700)', fontWeight: 700, border: '1px solid var(--primary-200)' }}>
+                          <span style={{
+                            fontSize: '0.62rem',
+                            padding: '1px 5px',
+                            borderRadius: 4,
+                            backgroundColor: '#ecfdf5',
+                            color: '#047857',
+                            fontWeight: 700,
+                            border: '1px solid #a7f3d0',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            whiteSpace: 'nowrap'
+                          }}>
                             ⚖️ {line.item.unit}
                           </span>
                         )}
                       </div>
-                      <p style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
-                        ₹{line.unitPrice.toFixed(2)} / {line.item.unit || 'unit'}
-                        {line.discountPercent > 0 && (
-                          <span style={{ color: 'var(--success-700)', fontWeight: 700, marginLeft: 4 }}>
-                            ({line.discountPercent}% off)
+
+                      {/* Top-Right: Quantity Stepper Pill */}
+                      <div 
+                        style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          border: '1px solid #cbd5e1', 
+                          borderRadius: 7, 
+                          backgroundColor: '#f8fafc',
+                          overflow: 'hidden',
+                          flexShrink: 0,
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                        }}
+                      >
+                        <button 
+                          type="button"
+                          onClick={() => handleUpdateQty(line.item.id, line.item.allowParts ? -0.5 : -1)} 
+                          aria-label="Decrease quantity"
+                          style={{
+                            width: 24,
+                            height: 26,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'none',
+                            border: 'none',
+                            color: '#475569',
+                            cursor: 'pointer',
+                            padding: 0,
+                            transition: 'background-color 0.12s ease'
+                          }}
+                          title={line.item.allowParts ? "Reduce by 0.5" : "Reduce by 1"}
+                        >
+                          <Minus size={11} strokeWidth={2.5} />
+                        </button>
+                        <input 
+                          type="text"
+                          inputMode={line.item.allowParts ? "text" : "numeric"}
+                          value={qtyInputMap[line.item.id] !== undefined ? qtyInputMap[line.item.id] : String(line.quantity)}
+                          onChange={(e) => handleSetQty(line.item.id, e.target.value)}
+                          onBlur={() => handleBlurQty(line.item.id)}
+                          className="cart-qty-input"
+                          style={{
+                            width: line.item.allowParts ? 54 : 36,
+                            height: 26,
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            color: '#0f172a',
+                            padding: '0 2px',
+                            textAlign: 'center',
+                            backgroundColor: '#ffffff',
+                            borderTop: 'none',
+                            borderBottom: 'none',
+                            borderLeft: '1px solid #e2e8f0',
+                            borderRight: '1px solid #e2e8f0',
+                            outline: 'none'
+                          }}
+                          aria-label="Quantity"
+                          placeholder="0"
+                          title={line.item.allowParts ? "Enter decimal (0.5) or fraction (e.g. 4/30)" : "Enter quantity"}
+                        />
+                        <button 
+                          type="button"
+                          onClick={() => handleUpdateQty(line.item.id, line.item.allowParts ? 0.5 : 1)} 
+                          aria-label="Increase quantity"
+                          style={{
+                            width: 24,
+                            height: 26,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'none',
+                            border: 'none',
+                            color: '#475569',
+                            cursor: 'pointer',
+                            padding: 0,
+                            transition: 'background-color 0.12s ease'
+                          }}
+                          title={line.item.allowParts ? "Add 0.5" : "Add 1"}
+                        >
+                          <Plus size={11} strokeWidth={2.5} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Subtle Internal Divider */}
+                    <div style={{ height: 1, backgroundColor: '#f1f5f9', width: '100%' }} />
+
+                    {/* Bottom Row: Unit Rate & Fraction Tools (Left) & Cost with Delete Button (Right) */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      {/* Left: Unit Cost & Fraction Part Below It */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600 }}>
+                            ₹{line.unitPrice.toFixed(2)} / {line.item.unit || 'unit'}
                           </span>
-                        )}
-                      </p>
-                      {line.item.allowParts && (
-                        <div style={{ display: 'flex', gap: 3, marginTop: 4, alignItems: 'center' }}>
-                          <span style={{ fontSize: '0.65rem', color: 'var(--neutral-400)', fontWeight: 600 }}>+Quick:</span>
-                          {['0.25', '0.5', '1'].map((preset) => (
+                          {line.discountPercent > 0 && (
+                            <span style={{
+                              fontSize: '0.64rem',
+                              padding: '1px 5px',
+                              borderRadius: 3,
+                              backgroundColor: '#ecfdf5',
+                              color: '#059669',
+                              fontWeight: 700,
+                              border: '1px solid #a7f3d0'
+                            }}>
+                              {line.discountPercent}% OFF
+                            </span>
+                          )}
+                        </div>
+
+                        {line.item.allowParts && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                             <button
-                              key={preset}
                               type="button"
-                              onClick={() => handleUpdateQty(line.item.id, Number(preset))}
+                              onClick={() => handleOpenFractionModal(line)}
                               style={{
-                                fontSize: '0.64rem',
-                                padding: '1px 5px',
-                                borderRadius: 3,
-                                backgroundColor: '#f1f5f9',
-                                border: '1px solid #cbd5e1',
-                                color: '#334155',
+                                fontSize: '0.65rem',
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                backgroundColor: '#eef2ff',
+                                border: '1px solid #c7d2fe',
+                                color: '#4338ca',
                                 cursor: 'pointer',
                                 fontWeight: 700,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 3,
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.12s ease',
                               }}
-                              title={`Add +${preset} ${line.item.unit}`}
+                              title="Calculate loose/fraction quantity"
                             >
-                              +{preset}
+                              <Divide size={10} strokeWidth={2.5} />
+                              <span>Fraction</span>
                             </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                            {['0.25', '0.5', '1'].map((preset) => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => handleUpdateQty(line.item.id, Number(preset))}
+                                style={{
+                                  fontSize: '0.63rem',
+                                  padding: '2px 5px',
+                                  borderRadius: 4,
+                                  backgroundColor: '#f8fafc',
+                                  border: '1px solid #e2e8f0',
+                                  color: '#475569',
+                                  cursor: 'pointer',
+                                  fontWeight: 700,
+                                  whiteSpace: 'nowrap',
+                                  transition: 'all 0.12s ease',
+                                }}
+                                title={`Add +${preset} ${line.item.unit}`}
+                              >
+                                +{preset}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
 
-                    {/* Perfectly Centered Manual Editable Quantity Stepper */}
-                    <div 
-                      style={{ 
-                        display: 'inline-flex', 
-                        alignItems: 'center', 
-                        border: '1px solid var(--neutral-300)', 
-                        borderRadius: 'var(--radius-sm, 6px)', 
-                        backgroundColor: 'var(--neutral-50)',
-                        overflow: 'hidden',
-                        flexShrink: 0
-                      }}
-                    >
-                      <button 
-                        type="button"
-                        onClick={() => handleUpdateQty(line.item.id, line.item.allowParts ? -0.5 : -1)} 
-                        aria-label="Decrease quantity"
-                        style={{
-                          width: 24,
-                          height: 28,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--neutral-700)',
-                          cursor: 'pointer',
-                          padding: 0
-                        }}
-                        title={line.item.allowParts ? "Reduce by 0.5" : "Reduce by 1"}
-                      >
-                        <Minus size={12} />
-                      </button>
-                      <input 
-                        type="text"
-                        inputMode="decimal"
-                        value={qtyInputMap[line.item.id] !== undefined ? qtyInputMap[line.item.id] : String(line.quantity)}
-                        onChange={(e) => handleSetQty(line.item.id, e.target.value)}
-                        onBlur={() => handleBlurQty(line.item.id)}
-                        className="cart-qty-input"
-                        style={{ width: line.item.allowParts ? 58 : 40, fontSize: '0.82rem' }}
-                        aria-label="Quantity"
-                        placeholder="0"
-                      />
-                      <button 
-                        type="button"
-                        onClick={() => handleUpdateQty(line.item.id, line.item.allowParts ? 0.5 : 1)} 
-                        aria-label="Increase quantity"
-                        style={{
-                          width: 24,
-                          height: 28,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--neutral-700)',
-                          cursor: 'pointer',
-                          padding: 0
-                        }}
-                        title={line.item.allowParts ? "Add 0.5" : "Add 1"}
-                      >
-                        <Plus size={12} />
-                      </button>
+                      {/* Right: Cost (Below Quantity Stepper) & Delete Button */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, justifyContent: 'flex-end' }}>
+                        <span style={{ fontWeight: 800, fontSize: '0.96rem', color: '#0f172a', letterSpacing: '-0.01em' }}>
+                          ₹{line.lineTotal.toFixed(2)}
+                        </span>
+                        <button 
+                          type="button"
+                          onClick={() => handleRemoveFromCart(line.item.id)} 
+                          style={{
+                            width: 24,
+                            height: 24,
+                            borderRadius: 5,
+                            border: 'none',
+                            backgroundColor: '#fef2f2',
+                            color: '#ef4444',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 0,
+                            transition: 'all 0.12s ease'
+                          }}
+                          title="Remove item"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
-
-                    {/* Line Total */}
-                    <div style={{ width: 72, textAlign: 'right', fontWeight: 800, fontSize: '0.86rem', color: 'var(--neutral-900)', flexShrink: 0 }}>
-                      ₹{line.lineTotal.toFixed(2)}
-                    </div>
-
-                    {/* Remove Action */}
-                    <button 
-                      type="button"
-                      onClick={() => handleRemoveFromCart(line.item.id)} 
-                      style={{ background: 'none', border: 'none', color: 'var(--danger-500)', cursor: 'pointer', padding: '3px 4px', display: 'flex', alignItems: 'center', flexShrink: 0 }}
-                      title="Remove item"
-                    >
-                      <Trash2 size={14} />
-                    </button>
                   </div>
                 );
               })
@@ -1880,6 +2104,290 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           </div>
         </div>
       )}
+      {/* Simple Fraction / Loose Calculator Modal (Strictly for parts-enabled items) */}
+      {fractionModal.isOpen && (() => {
+        const whole = parseFloat(fractionModal.wholeUnits) || 0;
+        const parts = parseFloat(fractionModal.partsGiven) || 0;
+        const total = parseFloat(fractionModal.totalParts) || 1;
+        const calculatedQty = Number((whole + (parts / Math.max(1, total))).toFixed(3));
+        const piecePrice = total > 0 ? (fractionModal.unitPrice / total) : 0;
+        const calculatedTotal = Number((calculatedQty * fractionModal.unitPrice).toFixed(2));
+
+        const packPresets = [
+          { label: '12 (Dozen)', value: '12' },
+          { label: '30 (Tray)', value: '30' },
+          { label: '6 (Half)', value: '6' },
+          { label: '24 (Box)', value: '24' },
+          { label: '1000 (Kg➔g)', value: '1000' },
+        ];
+
+        return (
+          <div 
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(15, 23, 42, 0.65)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+              padding: 16,
+            }}
+            onClick={() => setFractionModal(prev => ({ ...prev, isOpen: false }))}
+          >
+            <div 
+              style={{
+                backgroundColor: '#ffffff',
+                borderRadius: 'var(--radius-lg, 12px)',
+                width: '100%',
+                maxWidth: 380,
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Simple Modal Header */}
+              <div style={{
+                padding: '12px 16px',
+                borderBottom: '1px solid var(--surface-border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: 'var(--neutral-50)'
+              }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '0.94rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                    {fractionModal.itemName}
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '0.74rem', color: 'var(--primary-700)', fontWeight: 600 }}>
+                    ₹{fractionModal.unitPrice.toFixed(2)} / {fractionModal.unit}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFractionModal(prev => ({ ...prev, isOpen: false }))}
+                  style={{
+                    border: 'none',
+                    background: 'none',
+                    color: 'var(--neutral-400)',
+                    cursor: 'pointer',
+                    padding: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                  title="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Simple Modal Body */}
+              <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* 1. Giving Pieces (Numerator) */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: 'var(--neutral-700)', marginBottom: 4 }}>
+                    Pieces / Parts Giving
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setFractionModal(prev => ({ ...prev, partsGiven: String(Math.max(1, (parseFloat(prev.partsGiven) || 1) - 1)) }))}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 6,
+                        border: '1px solid var(--neutral-300)',
+                        backgroundColor: '#ffffff',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--neutral-700)'
+                      }}
+                    >
+                      <Minus size={13} />
+                    </button>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={fractionModal.partsGiven}
+                      onChange={(e) => setFractionModal(prev => ({ ...prev, partsGiven: e.target.value }))}
+                      className="form-input"
+                      placeholder="4"
+                      style={{ fontSize: '0.90rem', padding: '5px 8px', flex: 1, textAlign: 'center', fontWeight: 700 }}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFractionModal(prev => ({ ...prev, partsGiven: String((parseFloat(prev.partsGiven) || 0) + 1) }))}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 6,
+                        border: '1px solid var(--neutral-300)',
+                        backgroundColor: '#ffffff',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--neutral-700)'
+                      }}
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Out of Total in Pack (Denominator) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <label style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
+                      Out of Total in 1 Full {fractionModal.unit || 'Unit'}
+                    </label>
+                    {piecePrice > 0 && (
+                      <span style={{ fontSize: '0.70rem', color: 'var(--primary-700)', fontWeight: 700 }}>
+                        ₹{piecePrice.toFixed(2)}/pc
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Pack Presets */}
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                    {packPresets.map((preset) => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => setFractionModal(prev => ({ ...prev, totalParts: preset.value }))}
+                        style={{
+                          fontSize: '0.68rem',
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          border: '1px solid',
+                          borderColor: fractionModal.totalParts === preset.value ? 'var(--primary-500)' : 'var(--neutral-200)',
+                          backgroundColor: fractionModal.totalParts === preset.value ? 'var(--primary-50)' : '#ffffff',
+                          color: fractionModal.totalParts === preset.value ? 'var(--primary-700)' : 'var(--neutral-700)',
+                          fontWeight: fractionModal.totalParts === preset.value ? 700 : 500,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={fractionModal.totalParts}
+                    onChange={(e) => setFractionModal(prev => ({ ...prev, totalParts: e.target.value }))}
+                    className="form-input"
+                    placeholder="Total parts (e.g. 12 or 30)"
+                    style={{ fontSize: '0.84rem', padding: '5px 8px', width: '100%', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                {/* 3. Optional Whole Packs */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label style={{ fontSize: '0.74rem', color: 'var(--neutral-600)', fontWeight: 600 }}>
+                    + Whole {fractionModal.unit || 'Units'} (Optional)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={fractionModal.wholeUnits}
+                    onChange={(e) => setFractionModal(prev => ({ ...prev, wholeUnits: e.target.value }))}
+                    className="form-input"
+                    placeholder="0"
+                    style={{ fontSize: '0.80rem', padding: '4px 6px', width: 64, textAlign: 'center' }}
+                  />
+                </div>
+
+                {/* Simple Live Result Card */}
+                <div style={{
+                  padding: '10px 12px',
+                  backgroundColor: 'var(--neutral-900)',
+                  borderRadius: 8,
+                  color: '#ffffff',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div>
+                    <div style={{ fontSize: '0.72rem', color: '#a5b4fc', fontFamily: 'monospace', fontWeight: 700 }}>
+                      {whole > 0 ? `${whole} + ` : ''}{parts}/{total} = {calculatedQty.toFixed(3)} {fractionModal.unit}
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--neutral-400)' }}>
+                      Total Amount
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '1.20rem', fontWeight: 800, color: '#34d399' }}>
+                    ₹{calculatedTotal.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Simple Modal Footer */}
+              <div style={{
+                padding: '10px 16px',
+                borderTop: '1px solid var(--surface-border)',
+                backgroundColor: 'var(--neutral-50)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 8
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setFractionModal(prev => ({ ...prev, isOpen: false }))}
+                  style={{
+                    height: 34,
+                    padding: '0 12px',
+                    fontSize: '0.80rem',
+                    borderRadius: 6,
+                    border: '1px solid var(--neutral-300)',
+                    backgroundColor: '#ffffff',
+                    color: 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyFraction}
+                  style={{
+                    height: 34,
+                    padding: '0 16px',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    borderRadius: 6,
+                    border: 'none',
+                    backgroundColor: 'var(--primary-600)',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    boxShadow: '0 2px 6px rgba(79, 70, 229, 0.3)'
+                  }}
+                >
+                  <CheckCircle size={14} />
+                  <span>Apply ({calculatedQty.toFixed(3)} {fractionModal.unit})</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

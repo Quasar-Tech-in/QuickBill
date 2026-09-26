@@ -238,7 +238,7 @@ class SaleService:
 
         # Record stock decrements
         for it in totals.items:
-            qty_sold = float(it.quantity)
+            qty_sold = round(float(it.quantity), 3)
             target_item_oid = ObjectId(it.item_id) if ObjectId.is_valid(it.item_id) else None
             if target_item_oid:
                 await self.db.items.update_one(

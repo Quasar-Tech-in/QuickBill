@@ -88,3 +88,22 @@ def test_fractional_partial_quantity_calculation():
     assert totals.grand_total == Decimal("181.00")
     assert totals.round_off == Decimal("0.28")
 
+def test_fraction_quantization_three_decimals():
+    # 4 eggs from 30-egg tray at 180.00 / tray: 4/30 = 0.13333333333...
+    items = [
+        LineItemCalcInput(
+            item_id="egg-1",
+            name_snapshot="Farm Eggs (Tray of 30)",
+            quantity=Decimal("4") / Decimal("30"),  # 0.1333333333333333333333333333
+            unit_price=Decimal("180.00"),
+            discount=Decimal("0.00"),
+            tax_rate=Decimal("0.0")
+        )
+    ]
+    totals = BillingEngine.calculate(items=items, enable_round_off=False)
+    # 0.133 * 180.00 = 23.94
+    assert totals.items[0].quantity == Decimal("0.133")
+    assert totals.items[0].gross_amount == Decimal("23.94")
+    assert totals.grand_total == Decimal("23.94")
+
+
