@@ -8,6 +8,13 @@ interface InvoicePrintModalProps {
   onClose: () => void;
 }
 
+// Clean quantity formatting rounded to max 3 decimal places without floating-point artifacts
+const formatQty = (qty: number | undefined | null): string => {
+  if (qty === undefined || qty === null || isNaN(qty)) return '0';
+  const rounded = Math.round(Number(qty) * 1000) / 1000;
+  return Number(rounded.toFixed(3)).toString();
+};
+
 export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, onClose }) => {
   // Default to POS Thermal 80mm standard template as requested
   const [printFormat, setPrintFormat] = useState<'POS' | 'A4'>('POS');
@@ -240,19 +247,22 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 </thead>
                 <tbody>
                   {invoice.items.map((line, idx) => {
-                    const hasRet = line.returnedQuantity && line.returnedQuantity > 0;
+                    const retQty = line.returnedQuantity ? Math.round(Number(line.returnedQuantity) * 1000) / 1000 : 0;
+                    const hasRet = retQty > 0;
+                    const activeQty = Math.max(0, Math.round((Number(line.quantity) - retQty) * 1000) / 1000);
+
                     return (
                       <tr key={idx} style={{ borderBottom: '1px dotted #e5e5e5' }}>
                         <td style={{ padding: '3px 0', fontWeight: 600, wordBreak: 'break-word' }}>
                           <div>{line.name}</div>
                           {hasRet && (
                             <div style={{ fontSize: '0.66rem', color: '#b91c1c', fontWeight: 700 }}>
-                              [RET: {line.returnedQuantity} {line.returnReason === 'DEFECTIVE_DAMAGED' ? 'DEFECTIVE' : 'RETURN'}]
+                              [RET: {formatQty(retQty)} {line.returnReason === 'DEFECTIVE_DAMAGED' ? 'DEFECTIVE' : 'RETURN'}]
                             </div>
                           )}
                         </td>
                         <td style={{ padding: '3px 0', textAlign: 'center' }}>
-                          {hasRet ? `${line.quantity - (line.returnedQuantity || 0)}/${line.quantity}` : line.quantity}
+                          {hasRet ? `${formatQty(activeQty)}/${formatQty(line.quantity)}` : formatQty(line.quantity)}
                         </td>
                         <td style={{ padding: '3px 0', textAlign: 'right' }}>
                           {line.unitPrice.toFixed(2)}
@@ -385,25 +395,30 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   </tr>
                 </thead>
                 <tbody>
-                  {invoice.items.map((line, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid var(--neutral-100)' }}>
-                      <td style={{ padding: '7px 6px', fontWeight: 600 }}>
-                        <div>{line.name}</div>
-                        {line.returnNote && (
-                          <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontWeight: 400 }}>
-                            Note: {line.returnNote}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '7px 6px', textAlign: 'center' }}>{line.quantity}</td>
-                      <td style={{ padding: '7px 6px', textAlign: 'center', color: line.returnedQuantity ? 'var(--danger-700)' : 'var(--neutral-400)', fontWeight: line.returnedQuantity ? 700 : 400 }}>
-                        {line.returnedQuantity ? `${line.returnedQuantity} (${line.returnReason === 'DEFECTIVE_DAMAGED' ? 'Defective' : 'Return'})` : '-'}
-                      </td>
-                      <td style={{ padding: '7px 6px', textAlign: 'right' }}>₹{line.unitPrice.toFixed(2)}</td>
-                      <td style={{ padding: '7px 6px', textAlign: 'right' }}>{line.taxRate}%</td>
-                      <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 700 }}>₹{line.total.toFixed(2)}</td>
-                    </tr>
-                  ))}
+                  {invoice.items.map((line, idx) => {
+                    const retQty = line.returnedQuantity ? Math.round(Number(line.returnedQuantity) * 1000) / 1000 : 0;
+                    const hasRet = retQty > 0;
+
+                    return (
+                      <tr key={idx} style={{ borderBottom: '1px solid var(--neutral-100)' }}>
+                        <td style={{ padding: '7px 6px', fontWeight: 600 }}>
+                          <div>{line.name}</div>
+                          {line.returnNote && (
+                            <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontWeight: 400 }}>
+                              Note: {line.returnNote}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: '7px 6px', textAlign: 'center' }}>{formatQty(line.quantity)}</td>
+                        <td style={{ padding: '7px 6px', textAlign: 'center', color: hasRet ? 'var(--danger-700)' : 'var(--neutral-400)', fontWeight: hasRet ? 700 : 400 }}>
+                          {hasRet ? `${formatQty(retQty)} (${line.returnReason === 'DEFECTIVE_DAMAGED' ? 'Defective' : 'Return'})` : '-'}
+                        </td>
+                        <td style={{ padding: '7px 6px', textAlign: 'right' }}>₹{line.unitPrice.toFixed(2)}</td>
+                        <td style={{ padding: '7px 6px', textAlign: 'right' }}>{line.taxRate}%</td>
+                        <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 700 }}>₹{line.total.toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
 

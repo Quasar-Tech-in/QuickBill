@@ -146,6 +146,7 @@ export interface CartItem {
 export interface InvoiceItem {
   itemId: string;
   name: string;
+  unit?: string;
   quantity: number;
   returnedQuantity?: number;
   returnReason?: 'RESTOCKABLE_RETURN' | 'DEFECTIVE_DAMAGED' | 'EXCHANGE' | 'WRONG_ITEM';
