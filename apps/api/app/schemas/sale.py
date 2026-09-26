@@ -16,6 +16,11 @@ class SaleItemSnapshot(BaseSchema):
     name_snapshot: str = Field(..., alias="nameSnapshot")
     sku_snapshot: Optional[str] = Field(None, alias="skuSnapshot")
     quantity: Decimal
+    returned_quantity: Decimal = Field(default=Decimal("0.00"), alias="returnedQuantity")
+    return_reason: Optional[str] = Field(None, alias="returnReason")  # RESTOCKABLE_RETURN, DEFECTIVE_DAMAGED, EXCHANGE, WRONG_ITEM
+    return_note: Optional[str] = Field(None, alias="returnNote")
+    return_date: Optional[datetime] = Field(None, alias="returnDate")
+    return_status: Optional[str] = Field(None, alias="returnStatus")  # NONE, PARTIAL, FULL
     unit_price: Decimal = Field(..., alias="unitPrice")
     discount: Decimal = Field(default=Decimal("0.00"))
     taxable_amount: Decimal = Field(..., alias="taxableAmount")
@@ -48,6 +53,27 @@ class SaleCreateRequest(BaseSchema):
     notes: Optional[str] = None
     enable_round_off: bool = Field(default=True, alias="enableRoundOff")
 
+class SaleItemReturnInput(BaseSchema):
+    item_id: str = Field(..., alias="itemId")
+    quantity: Decimal = Field(..., ge=0)
+    returned_quantity: Decimal = Field(default=Decimal("0.00"), ge=0, alias="returnedQuantity")
+    return_reason: Optional[str] = Field(None, alias="returnReason")  # RESTOCKABLE_RETURN, DEFECTIVE_DAMAGED, EXCHANGE, WRONG_ITEM
+    return_note: Optional[str] = Field(None, alias="returnNote")
+    unit_price: Optional[Decimal] = Field(None, alias="unitPrice")
+    discount: Optional[Decimal] = None
+    tax_rate: Optional[Decimal] = Field(None, alias="taxRate")
+
+class SaleUpdateRequest(BaseSchema):
+    items: List[SaleItemReturnInput] = Field(..., min_length=1)
+    invoice_discount: Optional[Decimal] = Field(None, ge=0, alias="invoiceDiscount")
+    additional_charges: Optional[Decimal] = Field(None, ge=0, alias="additionalCharges")
+    paid_amount: Optional[Decimal] = Field(None, ge=0, alias="paidAmount")
+    payment_status: Optional[str] = Field(None, alias="paymentStatus")
+    payment_mode: Optional[str] = Field(None, alias="paymentMode")
+    notes: Optional[str] = None
+    return_notes: Optional[str] = Field(None, alias="returnNotes")
+    enable_round_off: bool = Field(default=True, alias="enableRoundOff")
+
 class SaleResponse(BaseSchema):
     id: str = Field(..., alias="_id")
     business_id: str = Field(..., alias="businessId")
@@ -65,8 +91,8 @@ class SaleResponse(BaseSchema):
     billed_by_id: Optional[str] = Field(None, alias="billedById")
     billed_by_name: Optional[str] = Field(None, alias="billedByName")
     billed_by_role: Optional[str] = Field(None, alias="billedByRole")
-    status: str = "CONFIRMED"
-    payment_status: str = Field(..., alias="paymentStatus")  # PAID, PARTIAL, UNPAID
+    status: str = "CONFIRMED"  # CONFIRMED, PARTIALLY_RETURNED, RETURNED, CANCELLED
+    payment_status: str = Field(..., alias="paymentStatus")  # PAID, PARTIAL, UNPAID, REFUNDED
     items: List[SaleItemSnapshot]
     subtotal: Decimal
     tax_total: Decimal = Field(..., alias="taxTotal")
@@ -76,9 +102,16 @@ class SaleResponse(BaseSchema):
     additional_charges: Decimal = Field(default=Decimal("0.00"), alias="additionalCharges")
     round_off: Decimal = Field(default=Decimal("0.00"), alias="roundOff")
     grand_total: Decimal = Field(..., alias="grandTotal")
+    original_grand_total: Optional[Decimal] = Field(None, alias="originalGrandTotal")
+    return_total: Optional[Decimal] = Field(default=Decimal("0.00"), alias="returnTotal")
+    has_returns: Optional[bool] = Field(default=False, alias="hasReturns")
+    return_status: Optional[str] = Field(default="NONE", alias="returnStatus")
+    return_notes: Optional[str] = Field(None, alias="returnNotes")
     paid_amount: Decimal = Field(..., alias="paidAmount")
     balance_due: Decimal = Field(..., alias="balanceDue")
     payment_mode: Optional[str] = Field(default="CASH", alias="paymentMode")
     type: Optional[str] = "SALE"
     notes: Optional[str] = None
     created_at: datetime = Field(..., alias="createdAt")
+    updated_at: Optional[datetime] = Field(None, alias="updatedAt")
+

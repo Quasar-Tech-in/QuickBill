@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.database import get_tenant_db
 from app.core.security import get_current_user, get_current_business_id, TokenPayload
 from app.schemas.common import PaginatedResponse
-from app.schemas.sale import SaleCreateRequest, SaleResponse
+from app.schemas.sale import SaleCreateRequest, SaleUpdateRequest, SaleResponse
 from app.services.sale_service import SaleService
 
 router = APIRouter(prefix="/sales", tags=["Sales & Billing"])
@@ -108,3 +108,21 @@ async def get_sale(
     if doc.get("partyId"):
         doc["partyId"] = str(doc["partyId"])
     return SaleResponse(**doc)
+
+@router.put("/{sale_id}", response_model=SaleResponse, response_model_by_alias=True)
+async def update_sale_return(
+    sale_id: str,
+    payload: SaleUpdateRequest,
+    user: TokenPayload = Depends(get_current_user),
+    business_id: str = Depends(get_current_business_id),
+):
+    db = await get_tenant_db(business_id)
+    service = SaleService(db)
+    doc = await service.update_sale_return(
+        business_id=business_id,
+        sale_id=sale_id,
+        user_id=user.sub,
+        request=payload
+    )
+    return SaleResponse(**doc)
+

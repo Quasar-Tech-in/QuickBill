@@ -2018,6 +2018,11 @@ class StoreService {
         itemId: it.itemId || it.item_id,
         name: it.nameSnapshot || it.name_snapshot || it.name || 'Item',
         quantity: Number(it.quantity || 1),
+        returnedQuantity: Number(it.returnedQuantity !== undefined ? it.returnedQuantity : (it.returned_quantity || 0)),
+        returnReason: it.returnReason || it.return_reason || undefined,
+        returnNote: it.returnNote || it.return_note || undefined,
+        returnDate: it.returnDate || it.return_date || undefined,
+        returnStatus: it.returnStatus || it.return_status || undefined,
         unitPrice: Number(it.unitPrice !== undefined ? it.unitPrice : (it.unit_price || 0)),
         discountPercent: Number(it.discount || 0),
         taxRate: Number(it.taxRate !== undefined ? it.taxRate : (it.tax_rate || 0)),
@@ -2031,18 +2036,130 @@ class StoreService {
       discountValue: doc.discountValue !== undefined ? Number(doc.discountValue) : (doc.discount_value !== undefined ? Number(doc.discount_value) : undefined),
       roundOff: Number(rawRoundOff),
       grandTotal: Number(rawGrand),
+      originalGrandTotal: doc.originalGrandTotal !== undefined ? Number(doc.originalGrandTotal) : (doc.original_grand_total !== undefined ? Number(doc.original_grand_total) : undefined),
+      returnTotal: doc.returnTotal !== undefined ? Number(doc.returnTotal) : (doc.return_total !== undefined ? Number(doc.return_total) : 0),
+      hasReturns: !!(doc.hasReturns || doc.has_returns || (doc.returnTotal && Number(doc.returnTotal) > 0)),
+      returnStatus: (doc.returnStatus || doc.return_status || 'NONE') as any,
+      returnNotes: doc.returnNotes || doc.return_notes || undefined,
       paidAmount: Number(rawPaid),
       balanceAmount: Number(rawBalance),
       paymentMode: (doc.paymentMode || doc.payment_mode || 'CASH') as any,
-      status: (doc.paymentStatus || doc.payment_status || (Number(rawBalance) <= 0 ? 'PAID' : (Number(rawPaid) > 0 ? 'PARTIAL' : 'UNPAID'))) as any,
+      status: (doc.status || doc.paymentStatus || doc.payment_status || (Number(rawBalance) <= 0 ? 'PAID' : (Number(rawPaid) > 0 ? 'PARTIAL' : 'UNPAID'))) as any,
       notes: doc.notes || undefined,
     };
+  }
+
+  async updateInvoiceWithReturn(
+    invoiceId: string,
+    updateData: {
+      items: Array<{
+        itemId: string;
+        quantity: number;
+        returnedQuantity: number;
+        returnReason?: string;
+        returnNote?: string;
+      }>;
+      notes?: string;
+      returnNotes?: string;
+      refundAmount?: number;
+      paymentMode?: string;
+    }
+  ): Promise<Invoice> {
+    const existing = this.invoices.find(i => i.id === invoiceId);
+    
+    try {
+      const payload = {
+        items: updateData.items.map(it => ({
+          itemId: it.itemId,
+          quantity: it.quantity,
+          returnedQuantity: it.returnedQuantity,
+          returnReason: it.returnReason,
+          returnNote: it.returnNote,
+        })),
+        notes: updateData.notes,
+        returnNotes: updateData.returnNotes,
+        paymentMode: updateData.paymentMode,
+      };
+
+      const res = await apiClient.put(`/sales/${invoiceId}`, payload);
+      if (res.data) {
+        const updated = this.mapSaleDocToInvoice(res.data);
+        this.invoices = this.invoices.map(inv => inv.id === invoiceId ? updated : inv);
+        this.saveToStorage();
+        return updated;
+      }
+    } catch (err) {
+      console.warn('Backend PUT /sales/{id} failed, applying local calculation fallback:', err);
+    }
+
+    // Local in-memory calculation fallback
+    if (!existing) {
+      throw new Error('Invoice not found');
+    }
+
+    const origGrand = existing.originalGrandTotal || existing.grandTotal;
+    let netSubtotal = 0;
+    let netTax = 0;
+    let anyReturn = false;
+    let allReturned = true;
+
+    const updatedItems = existing.items.map(item => {
+      const up = updateData.items.find(u => u.itemId === item.itemId);
+      const retQty = up ? up.returnedQuantity : (item.returnedQuantity || 0);
+      const activeQty = Math.max(0, item.quantity - retQty);
+      
+      if (retQty > 0) anyReturn = true;
+      if (activeQty > 0) allReturned = false;
+
+      const lineGross = activeQty * item.unitPrice;
+      const lineDisc = item.discountPercent ? (lineGross * (item.discountPercent / 100)) : 0;
+      const lineTaxable = Math.max(0, lineGross - lineDisc);
+      const lineTax = lineTaxable * (item.taxRate / 100);
+      const lineTotal = lineTaxable + lineTax;
+
+      netSubtotal += lineTaxable;
+      netTax += lineTax;
+
+      return {
+        ...item,
+        returnedQuantity: retQty,
+        returnReason: up?.returnReason as any || item.returnReason,
+        returnNote: up?.returnNote || item.returnNote,
+        returnDate: retQty > 0 ? (item.returnDate || new Date().toISOString()) : undefined,
+        returnStatus: retQty >= item.quantity ? 'FULL' : (retQty > 0 ? 'PARTIAL' : 'NONE'),
+        total: Number(lineTotal.toFixed(2)),
+      };
+    });
+
+    const netGrand = Number((netSubtotal + netTax).toFixed(2));
+    const retTotal = Math.max(0, Number((origGrand - netGrand).toFixed(2)));
+    const newStatus = allReturned && anyReturn ? 'RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : existing.status);
+
+    const updatedInvoice: Invoice = {
+      ...existing,
+      items: updatedItems as any,
+      subtotal: Number(netSubtotal.toFixed(2)),
+      taxTotal: Number(netTax.toFixed(2)),
+      grandTotal: netGrand,
+      originalGrandTotal: origGrand,
+      returnTotal: retTotal,
+      hasReturns: anyReturn,
+      returnStatus: allReturned && anyReturn ? 'FULLY_RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : 'NONE'),
+      returnNotes: updateData.returnNotes || existing.returnNotes,
+      status: newStatus as any,
+      notes: updateData.notes !== undefined ? updateData.notes : existing.notes,
+    };
+
+    this.invoices = this.invoices.map(inv => inv.id === invoiceId ? updatedInvoice : inv);
+    this.saveToStorage();
+    return updatedInvoice;
   }
 
   getInvoices(locationId?: string): Invoice[] {
     const activeId = this.currentTenant.id;
     const list = this.invoices.filter(inv => (inv.businessId || DEFAULT_TENANTS[0].id) === activeId);
     if (!locationId || locationId === 'ALL') return list;
+
     return list.filter(inv => inv.locationId === locationId);
   }
 

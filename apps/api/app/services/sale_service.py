@@ -319,3 +319,148 @@ class SaleService:
         if party_oid:
             invoice_doc["partyId"] = str(party_oid)
         return invoice_doc
+
+    async def update_sale_return(self, business_id: str, sale_id: str, user_id: str, request: Any) -> Dict[str, Any]:
+        b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
+        s_oid = ObjectId(sale_id) if ObjectId.is_valid(sale_id) else None
+        if not s_oid:
+            raise HTTPException(status_code=404, detail="Sale invoice not found")
+
+        invoice = await self.db.invoices.find_one({"_id": s_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Sale invoice not found")
+
+        now = datetime.now(timezone.utc)
+        original_grand_total = Decimal(str(invoice.get("originalGrandTotal") or invoice.get("grandTotal", "0.00")))
+        
+        # Map item snapshots from existing invoice
+        existing_items_map = {it.get("itemId") or str(it.get("item_id")): it for it in invoice.get("items", [])}
+
+        calc_inputs: List[LineItemCalcInput] = []
+        updated_item_snapshots = []
+        total_has_returns = False
+        all_fully_returned = True
+
+        for it in request.items:
+            existing_snap = existing_items_map.get(it.item_id, {})
+            name_snap = existing_snap.get("nameSnapshot") or existing_snap.get("name") or f"Item ({it.item_id})"
+            sku_snap = existing_snap.get("skuSnapshot") or existing_snap.get("sku") or ""
+            
+            orig_qty = Decimal(str(it.quantity))
+            ret_qty = Decimal(str(it.returned_quantity or "0.00"))
+            active_qty = max(Decimal("0.00"), orig_qty - ret_qty)
+            
+            unit_price = Decimal(str(it.unit_price if it.unit_price is not None else existing_snap.get("unitPrice", "0.00")))
+            tax_rate = Decimal(str(it.tax_rate if it.tax_rate is not None else existing_snap.get("taxRate", "0.00")))
+            discount = Decimal(str(it.discount if it.discount is not None else existing_snap.get("discount", "0.00")))
+
+            if ret_qty > Decimal("0.00"):
+                total_has_returns = True
+
+            if active_qty > Decimal("0.00"):
+                all_fully_returned = False
+
+            # Calculation input uses active remaining quantity for billing totals
+            calc_inputs.append(LineItemCalcInput(
+                item_id=it.item_id,
+                name_snapshot=name_snap,
+                sku_snapshot=sku_snap,
+                quantity=active_qty,
+                unit_price=unit_price,
+                discount=discount if active_qty > 0 else Decimal("0.00"),
+                tax_rate=tax_rate
+            ))
+
+        # Calculate authoritative net financial totals
+        invoice_discount = request.invoice_discount if request.invoice_discount is not None else Decimal(str(invoice.get("discountTotal", "0.00")))
+        additional_charges = request.additional_charges if request.additional_charges is not None else Decimal(str(invoice.get("additionalCharges", "0.00")))
+        paid_amount = request.paid_amount if request.paid_amount is not None else Decimal(str(invoice.get("paidAmount", "0.00")))
+
+        totals = BillingEngine.calculate(
+            items=calc_inputs,
+            invoice_discount=invoice_discount,
+            additional_charges=additional_charges,
+            paid_amount=paid_amount,
+            enable_round_off=request.enable_round_off
+        )
+
+        return_total = max(Decimal("0.00"), original_grand_total - totals.grand_total)
+
+        # Build updated item snapshots
+        for idx, it in enumerate(request.items):
+            calc_item = totals.items[idx]
+            orig_qty = Decimal(str(it.quantity))
+            ret_qty = Decimal(str(it.returned_quantity or "0.00"))
+            
+            ret_status = "FULL" if (ret_qty >= orig_qty and orig_qty > 0) else ("PARTIAL" if ret_qty > 0 else "NONE")
+
+            updated_item_snapshots.append({
+                "itemId": it.item_id,
+                "nameSnapshot": calc_item.name_snapshot,
+                "skuSnapshot": calc_item.sku_snapshot,
+                "quantity": float(orig_qty),
+                "returnedQuantity": float(ret_qty),
+                "returnReason": it.return_reason,
+                "returnNote": it.return_note,
+                "returnDate": now if ret_qty > 0 else None,
+                "returnStatus": ret_status,
+                "unitPrice": float(calc_item.unit_price),
+                "discount": float(calc_item.discount),
+                "taxableAmount": float(calc_item.taxable_amount),
+                "taxRate": float(calc_item.tax_rate),
+                "taxAmount": float(calc_item.tax_amount),
+                "lineTotal": float(calc_item.line_total)
+            })
+
+        # Determine statuses
+        if all_fully_returned and total_has_returns:
+            invoice_status = "RETURNED"
+            return_status = "FULLY_RETURNED"
+            payment_status = "REFUNDED"
+        elif total_has_returns:
+            invoice_status = "PARTIALLY_RETURNED"
+            return_status = "PARTIALLY_RETURNED"
+            payment_status = "PAID" if totals.balance_due == Decimal("0.00") else ("PARTIAL" if totals.paid_amount > 0 else "UNPAID")
+        else:
+            invoice_status = invoice.get("status", "CONFIRMED")
+            return_status = "NONE"
+            payment_status = request.payment_status or invoice.get("paymentStatus", "PAID")
+
+        update_fields = {
+            "items": updated_item_snapshots,
+            "subtotal": float(totals.subtotal),
+            "taxTotal": float(totals.tax_total),
+            "discountTotal": float(totals.item_discount_total + totals.invoice_discount),
+            "additionalCharges": float(totals.additional_charges),
+            "roundOff": float(totals.round_off),
+            "grandTotal": float(totals.grand_total),
+            "originalGrandTotal": float(original_grand_total),
+            "returnTotal": float(return_total),
+            "hasReturns": total_has_returns,
+            "returnStatus": return_status,
+            "returnNotes": request.return_notes,
+            "paidAmount": float(totals.paid_amount),
+            "balanceDue": float(totals.balance_due),
+            "status": invoice_status,
+            "paymentStatus": payment_status,
+            "notes": request.notes if request.notes is not None else invoice.get("notes"),
+            "updatedAt": now,
+            "updatedByUserId": user_id
+        }
+
+        if request.payment_mode:
+            update_fields["paymentMode"] = request.payment_mode
+
+        await self.db.invoices.update_one(
+            {"_id": s_oid},
+            {"$set": update_fields}
+        )
+
+        updated_doc = await self.db.invoices.find_one({"_id": s_oid})
+        updated_doc["_id"] = str(updated_doc["_id"])
+        updated_doc["businessId"] = str(updated_doc["businessId"])
+        if updated_doc.get("partyId"):
+            updated_doc["partyId"] = str(updated_doc["partyId"])
+
+        return updated_doc
+

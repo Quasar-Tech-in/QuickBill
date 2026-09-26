@@ -2525,3 +2525,261 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* =========================================================
+   Invoices Page Compact Table & Layout Styles
+   ========================================================= */
+
+.invoices-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.invoices-stat-card {
+  background: #ffffff;
+  border: 1px solid var(--neutral-200);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.invoices-stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.invoices-stat-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.invoices-stat-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--neutral-500);
+  margin-bottom: 2px;
+}
+
+.invoices-stat-value {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--neutral-900);
+  line-height: 1.2;
+}
+
+/* Compact Table Formatting */
+.compact-invoices-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.compact-invoices-table th {
+  padding: 13px 14px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--neutral-600);
+  background-color: var(--neutral-50);
+  border-bottom: 2px solid var(--neutral-200);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.compact-invoices-table td {
+  padding: 12px 14px;
+  font-size: 0.84rem;
+  border-bottom: 1px solid var(--neutral-150, #f1f5f9);
+  vertical-align: middle;
+  line-height: 1.45;
+}
+
+.invoice-interactive-row {
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.invoice-interactive-row:hover {
+  background-color: #f8faff !important;
+}
+
+.invoice-num-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono, monospace);
+  font-weight: 800;
+  font-size: 0.82rem;
+  color: var(--primary-700);
+  background-color: var(--primary-50);
+  border: 1px solid var(--primary-200);
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.03em;
+  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.06);
+}
+
+.invoice-date-sub {
+  font-size: 0.74rem;
+  color: var(--neutral-500);
+  margin-top: 4px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+
+.party-name-primary {
+  font-weight: 700;
+  color: var(--neutral-900);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.party-meta-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--neutral-500);
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+
+.branch-pill {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--neutral-100);
+  color: var(--neutral-700);
+  border: 1px solid var(--neutral-200);
+}
+
+.pay-mode-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--neutral-100);
+  color: var(--neutral-700);
+  border: 1px solid var(--neutral-200);
+  text-transform: uppercase;
+}
+
+.amount-grand-highlight {
+  font-weight: 800;
+  font-size: 0.92rem;
+  color: var(--neutral-900);
+  font-family: var(--font-sans);
+}
+
+.amount-tax-sub {
+  font-size: 0.7rem;
+  color: var(--neutral-500);
+  margin-top: 1px;
+}
+
+.balance-due-pill {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--danger-700);
+  background-color: var(--danger-50);
+  border: 1px solid var(--danger-200);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-top: 3px;
+}
+
+/* =========================================================
+   Print Media Styles (Fit in One Page & Clean Thermal/A4)
+   ========================================================= */
+
+@media print {
+  @page {
+    size: auto;
+    margin: 8mm 6mm;
+  }
+
+  html, body, #root, .app-layout, .main-wrapper, .main-content-scroll {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide all app chrome, sidebars, headers, and UI controls */
+  .sidebar, 
+  .header, 
+  .page-container, 
+  .no-print, 
+  button, 
+  .card-header,
+  .pagination-container {
+    display: none !important;
+  }
+
+  /* Make modal printable container visible and isolated */
+  .modal-overlay {
+    position: static !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  .modal-content {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+  }
+
+  .invoice-printable {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .invoice-printable * {
+    color: #000000 !important;
+    background: transparent !important;
+  }
+
+  table {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}

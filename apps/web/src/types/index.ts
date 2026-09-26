@@ -147,6 +147,11 @@ export interface InvoiceItem {
   itemId: string;
   name: string;
   quantity: number;
+  returnedQuantity?: number;
+  returnReason?: 'RESTOCKABLE_RETURN' | 'DEFECTIVE_DAMAGED' | 'EXCHANGE' | 'WRONG_ITEM';
+  returnNote?: string;
+  returnDate?: string;
+  returnStatus?: 'NONE' | 'PARTIAL' | 'FULL';
   unitPrice: number;
   discountPercent: number;
   taxRate: number;
@@ -181,12 +186,18 @@ export interface Invoice {
   discountValue?: number;
   roundOff: number;
   grandTotal: number;
+  originalGrandTotal?: number;
+  returnTotal?: number;
+  hasReturns?: boolean;
+  returnStatus?: 'NONE' | 'PARTIALLY_RETURNED' | 'FULLY_RETURNED';
+  returnNotes?: string;
   paidAmount: number;
   balanceAmount: number;
   paymentMode: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'BANK_TRANSFER';
-  status: 'PAID' | 'PARTIAL' | 'UNPAID';
+  status: 'PAID' | 'PARTIAL' | 'UNPAID' | 'CONFIRMED' | 'PARTIALLY_RETURNED' | 'RETURNED' | 'CANCELLED' | 'REFUNDED';
   notes?: string;
 }
+
 
 export interface Payment {
   id: string;
