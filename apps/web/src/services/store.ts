@@ -1,12 +1,11 @@
 import axios from 'axios';
 import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse } from '../types';
-import { INITIAL_ITEMS, INITIAL_PARTIES, INITIAL_INVOICES, INITIAL_PAYMENTS } from './mockData';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 3000,
+  timeout: 5000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -55,9 +54,9 @@ const DEFAULT_TENANTS: Tenant[] = [
       databaseName: 'quickbill_main_db',
     },
     stats: {
-      productsCount: 3,
+      productsCount: 32,
       invoicesCount: 2,
-      monthlyGmv: 6149.0,
+      monthlyGmv: 2629.0,
       usersCount: 3,
     },
   },
@@ -157,10 +156,12 @@ class StoreService {
     this.setupAxiosInterceptors();
     this.checkHealth().then(isOnline => {
       if (isOnline) {
+        this.fetchCategories().catch(() => {});
         this.fetchItems().catch(() => {});
         this.fetchInvoices().catch(() => {});
         this.fetchParties().catch(() => {});
         this.fetchExpenses().catch(() => {});
+        this.fetchExpenseCategories().catch(() => {});
       }
     });
   }
@@ -196,21 +197,9 @@ class StoreService {
       localStorage.removeItem('qb_invoices');
       this.invoices = [];
 
-      this.items = savedItems ? JSON.parse(savedItems) : INITIAL_ITEMS;
-      // Enrich mock items with images if missing from previous localStorage saves
-      this.items = this.items.map(item => {
-        const matchingInitial = INITIAL_ITEMS.find(init => init.id === item.id || init.publicItemId === item.publicItemId);
-        if (matchingInitial && !item.imageUrl && !item.images?.length && (matchingInitial.imageUrl || matchingInitial.images?.length)) {
-          return {
-            ...item,
-            imageUrl: matchingInitial.imageUrl,
-            images: matchingInitial.images,
-          };
-        }
-        return item;
-      });
-      this.parties = savedParties ? JSON.parse(savedParties) : INITIAL_PARTIES;
-      this.payments = savedPayments ? JSON.parse(savedPayments) : INITIAL_PAYMENTS;
+      this.items = savedItems ? JSON.parse(savedItems) : [];
+      this.parties = savedParties ? JSON.parse(savedParties) : [];
+      this.payments = savedPayments ? JSON.parse(savedPayments) : [];
       this.expenses = savedExpenses ? JSON.parse(savedExpenses) : [];
       this.expenseCategories = savedExpCats ? JSON.parse(savedExpCats) : DEFAULT_EXPENSE_CATEGORIES;
       this.tenants = savedTenants ? JSON.parse(savedTenants) : DEFAULT_TENANTS;
@@ -230,6 +219,8 @@ class StoreService {
 
       if (savedUser) {
         this.currentUser = JSON.parse(savedUser);
+      } else {
+        this.currentUser = DEFAULT_USERS[0];
       }
 
       // Sync businessIds to single tenant
@@ -240,10 +231,10 @@ class StoreService {
       this.categories.forEach(c => { c.businessId = this.currentTenant.id; });
 
     } catch {
-      this.items = INITIAL_ITEMS;
-      this.parties = INITIAL_PARTIES;
+      this.items = [];
+      this.parties = [];
       this.invoices = [];
-      this.payments = INITIAL_PAYMENTS;
+      this.payments = [];
       this.expenses = [];
       this.expenseCategories = DEFAULT_EXPENSE_CATEGORIES;
       this.tenants = DEFAULT_TENANTS;
@@ -252,7 +243,7 @@ class StoreService {
       this.categories = DEFAULT_CATEGORIES;
       this.currentTenant = DEFAULT_TENANTS[0];
       this.activeLocation = DEFAULT_LOCATIONS[0];
-      this.currentUser = null;
+      this.currentUser = DEFAULT_USERS[0];
     }
   }
 
@@ -390,6 +381,10 @@ class StoreService {
     this.cartListeners.forEach(listener => {
       try { listener(cart); } catch (e) { console.error(e); }
     });
+  }
+
+  setPosCartSilent(cart: CartItem[]): void {
+    this.posCart = cart;
   }
 
   clearPosCart(): void {

@@ -60,7 +60,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const updateCart = (newCartOrUpdater: CartItem[] | ((prev: CartItem[]) => CartItem[])) => {
     setCart((prev) => {
       const nextCart = typeof newCartOrUpdater === 'function' ? newCartOrUpdater(prev) : newCartOrUpdater;
-      store.setPosCart(nextCart);
+      store.setPosCartSilent(nextCart);
       return nextCart;
     });
   };
@@ -153,11 +153,12 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   // Filter items based on search and selected categories
   const filteredItems = items.filter(item => {
+    const q = (searchQuery || '').toLowerCase();
     const matchesSearch = 
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.publicItemId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.sku && item.sku.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (item.barcode && item.barcode.toLowerCase().includes(searchQuery.toLowerCase()));
+      (item.name || '').toLowerCase().includes(q) ||
+      (item.publicItemId || '').toLowerCase().includes(q) ||
+      (item.sku ? item.sku.toLowerCase().includes(q) : false) ||
+      (item.barcode ? item.barcode.toLowerCase().includes(q) : false);
     
     const matchesCategory = 
       selectedCategories.length === 0 || 
@@ -221,12 +222,16 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   // Add Item to Cart
   const handleAddToCart = (item: Item) => {
+    const price = Number(item.salePrice || 0);
+    const mrp = Number(item.mrp || item.salePrice || 0);
+    const taxRate = Number(item.taxRate || 0);
+
     let itemDiscountPercent = 0;
     if (item.hasDiscount && item.discountValue && item.discountValue > 0) {
       if (item.discountType === 'PERCENT') {
-        itemDiscountPercent = item.discountValue;
-      } else if (item.mrp && item.mrp > 0) {
-        itemDiscountPercent = Number(((item.discountValue / item.mrp) * 100).toFixed(1));
+        itemDiscountPercent = Number(item.discountValue);
+      } else if (mrp > 0) {
+        itemDiscountPercent = Number(((Number(item.discountValue) / mrp) * 100).toFixed(1));
       }
     }
 
@@ -240,13 +245,16 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       const existingIdx = prevCart.findIndex(c => c.item.id === item.id);
       if (existingIdx >= 0) {
         const nextCart = [...prevCart];
+        const currentQty = Number(nextCart[existingIdx].quantity || 0);
         const newQty = item.allowParts
-          ? Number((nextCart[existingIdx].quantity + 1).toFixed(3))
-          : nextCart[existingIdx].quantity + 1;
-        const lineTotal = Number((newQty * item.salePrice).toFixed(2));
+          ? Number((currentQty + 1).toFixed(3))
+          : currentQty + 1;
+        const lineTotal = Number((newQty * price).toFixed(2));
         nextCart[existingIdx] = {
           ...nextCart[existingIdx],
           quantity: newQty,
+          unitPrice: price,
+          taxRate: taxRate,
           lineTotal,
         };
         return nextCart;
@@ -256,11 +264,11 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           {
             item,
             quantity: 1,
-            unitPrice: item.salePrice,
+            unitPrice: price,
             discountPercent: itemDiscountPercent,
-            taxRate: item.taxRate,
-            lineTotal: Number((1 * item.salePrice).toFixed(2)),
-            allowParts: item.allowParts,
+            taxRate: taxRate,
+            lineTotal: Number((1 * price).toFixed(2)),
+            allowParts: !!item.allowParts,
           },
         ];
       }
@@ -278,14 +286,17 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       return prevCart
         .map((c) => {
           if (c.item.id === itemId) {
+            const currentQty = Number(c.quantity || 0);
+            const unitPrice = Number(c.unitPrice || c.item?.salePrice || 0);
             const nextQty = c.item.allowParts
-              ? Number((c.quantity + delta).toFixed(3))
-              : (c.quantity + delta);
+              ? Number((currentQty + delta).toFixed(3))
+              : (currentQty + delta);
             if (nextQty <= 0) return null;
             return {
               ...c,
               quantity: nextQty,
-              lineTotal: Number((nextQty * c.unitPrice).toFixed(2)),
+              unitPrice,
+              lineTotal: Number((nextQty * unitPrice).toFixed(2)),
             };
           }
           return c;
@@ -324,14 +335,15 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     updateCart((prevCart) =>
       prevCart.map((c) => {
         if (c.item.id === itemId) {
-          const maxAvailable = c.item.currentStock > 0 ? c.item.currentStock : 99999;
+          const maxAvailable = (c.item?.currentStock && c.item.currentStock > 0) ? c.item.currentStock : 99999;
           const newQty = c.item.allowParts
             ? Math.min(val, maxAvailable)
             : Math.max(1, Math.min(val, maxAvailable));
+          const unitPrice = Number(c.unitPrice || c.item?.salePrice || 0);
           return {
             ...c,
             quantity: newQty,
-            lineTotal: Number((newQty * c.unitPrice).toFixed(2)),
+            lineTotal: Number((newQty * unitPrice).toFixed(2)),
           };
         }
         return c;
@@ -354,7 +366,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         updateCart((prevCart) =>
           prevCart.map((c) =>
             c.item.id === itemId
-              ? { ...c, quantity: 1, lineTotal: 1 * c.unitPrice }
+              ? { ...c, quantity: 1, lineTotal: 1 * Number(c.unitPrice || c.item?.salePrice || 0) }
               : c
           )
         );
@@ -373,7 +385,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   };
 
   // Financial Calculations with Discounts (% and Flat ₹)
-  const grossSubtotal = cart.reduce((sum, c) => sum + (c.unitPrice * c.quantity), 0);
+  const grossSubtotal = cart.reduce((sum, c) => sum + (Number(c.unitPrice || 0) * Number(c.quantity || 0)), 0);
   
   // Calculate Order Discount (configured in checkout modal)
   const parsedDiscountVal = showDiscount ? Math.max(0, Number(orderDiscountValue) || 0) : 0;
@@ -395,15 +407,21 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   // Base taxable amount & GST Taxes
   const taxBaseTotal = cart.reduce((sum, c) => {
-    const discountedLinePrice = c.unitPrice * c.quantity * discountFactor;
-    const base = discountedLinePrice * (100 / (100 + c.taxRate));
+    const rate = Number(c.taxRate || 0);
+    const unitPrice = Number(c.unitPrice || 0);
+    const qty = Number(c.quantity || 0);
+    const discountedLinePrice = unitPrice * qty * discountFactor;
+    const base = rate > 0 ? discountedLinePrice * (100 / (100 + rate)) : discountedLinePrice;
     return sum + base;
   }, 0);
 
   const taxTotal = cart.reduce((sum, c) => {
-    const discountedLinePrice = c.unitPrice * c.quantity * discountFactor;
-    const base = discountedLinePrice * (100 / (100 + c.taxRate));
-    return sum + (base * (c.taxRate / 100));
+    const rate = Number(c.taxRate || 0);
+    const unitPrice = Number(c.unitPrice || 0);
+    const qty = Number(c.quantity || 0);
+    const discountedLinePrice = unitPrice * qty * discountFactor;
+    const base = rate > 0 ? discountedLinePrice * (100 / (100 + rate)) : discountedLinePrice;
+    return sum + (base * (rate / 100));
   }, 0);
 
   const unroundedTotal = netSubtotal;
@@ -778,10 +796,10 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                     {/* Checkbox Category Items */}
                     <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
                       {availableCategories
-                        .filter(cat => cat.toLowerCase().includes(dropdownSearch.toLowerCase()))
+                        .filter(cat => (cat || '').toLowerCase().includes((dropdownSearch || '').toLowerCase()))
                         .map(cat => {
                           const isChecked = selectedCategories.includes(cat);
-                          const count = items.filter(i => i.category.toLowerCase() === cat.toLowerCase()).length;
+                          const count = items.filter(i => (i.category || '').toLowerCase() === (cat || '').toLowerCase()).length;
                           return (
                             <div
                               key={cat}
@@ -1053,11 +1071,11 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                       }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
                           <span style={{ fontSize: '1.10rem', fontWeight: 800, color: 'var(--primary-700)' }}>
-                            ₹{item.salePrice.toFixed(2)}
+                            ₹{Number(item.salePrice || 0).toFixed(2)}
                           </span>
                           {item.hasDiscount && item.discountValue && item.discountValue > 0 && (
                             <del style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
-                              ₹{(item.mrp || item.salePrice).toFixed(2)}
+                              ₹{Number(item.mrp || item.salePrice || 0).toFixed(2)}
                             </del>
                           )}
                         </div>
@@ -1370,9 +1388,9 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                       <span style={{ fontSize: '0.72rem', background: 'var(--success-100)', color: 'var(--success-700)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
                         ✓ Existing Customer
                       </span>
-                      {selectedParty.currentBalance !== 0 && (
-                        <span style={{ fontSize: '0.72rem', color: selectedParty.currentBalance > 0 ? 'var(--danger-700)' : 'var(--success-700)', fontWeight: 700 }}>
-                          Bal: ₹{selectedParty.currentBalance.toFixed(2)}
+                      {selectedParty.currentBalance !== undefined && selectedParty.currentBalance !== 0 && (
+                        <span style={{ fontSize: '0.72rem', color: Number(selectedParty.currentBalance || 0) > 0 ? 'var(--danger-700)' : 'var(--success-700)', fontWeight: 700 }}>
+                          Bal: ₹{Number(selectedParty.currentBalance || 0).toFixed(2)}
                         </span>
                       )}
                     </div>

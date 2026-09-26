@@ -262,7 +262,10 @@ export const InventoryView: React.FC = () => {
 
   const activeLocation = locations.find(l => l.id === selectedLocationId) || locations[0] || store.getActiveLocation();
 
-  const availableCategories = Array.from(new Set([...categoriesList.map(c => c.name), ...rawItems.map(i => i.category)]));
+  const availableCategories = Array.from(new Set([
+    ...categoriesList.map(c => c.name).filter(Boolean),
+    ...rawItems.map(i => i.category).filter(Boolean),
+  ]));
 
   const toggleCategoryFilter = (catName: string) => {
     if (catName === 'ALL') {
@@ -277,11 +280,12 @@ export const InventoryView: React.FC = () => {
   };
 
   const filteredItems = items.filter(item => {
+    const q = (searchQuery || '').toLowerCase();
     const matchesSearch = 
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.publicItemId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.sku && item.sku.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (item.barcode && item.barcode.toLowerCase().includes(searchQuery.toLowerCase()));
+      (item.name || '').toLowerCase().includes(q) ||
+      (item.publicItemId || '').toLowerCase().includes(q) ||
+      (item.sku ? item.sku.toLowerCase().includes(q) : false) ||
+      (item.barcode ? item.barcode.toLowerCase().includes(q) : false);
     
     const matchesCategory = 
       selectedCategories.length === 0 || 
@@ -330,7 +334,7 @@ export const InventoryView: React.FC = () => {
   };
 
   const handleDeleteCategory = async (catId: string, catName: string) => {
-    const usageCount = rawItems.filter(i => i.category.toLowerCase() === catName.toLowerCase()).length;
+    const usageCount = rawItems.filter(i => (i.category || '').toLowerCase() === (catName || '').toLowerCase()).length;
     const confirmMsg = usageCount > 0
       ? `Category "${catName}" is currently used by ${usageCount} product(s). Are you sure you want to delete it?`
       : `Delete category "${catName}"?`;
@@ -380,12 +384,12 @@ export const InventoryView: React.FC = () => {
   const openEditModal = (item: Item) => {
     const raw = rawItems.find(r => r.id === item.id) || item;
     setEditingItem(raw);
-    setFormName(raw.name);
+    setFormName(raw.name || '');
     setFormSku(raw.sku || '');
     setFormBarcode(raw.barcode || '');
-    setFormCategory(raw.category);
-    setFormTaxRate(raw.taxRate);
-    setFormUnit(raw.unit);
+    setFormCategory(raw.category || categoriesList[0]?.name || 'Grocery');
+    setFormTaxRate(Number(raw.taxRate ?? 5));
+    setFormUnit(raw.unit || 'pcs');
     setFormAllowParts(!!raw.allowParts);
     setFormDescription(raw.description || '');
     setPendingDeletedImageUrls([]);
@@ -393,7 +397,7 @@ export const InventoryView: React.FC = () => {
 
     // Load existing images ordered by order index
     if (raw.images && raw.images.length > 0) {
-      setFormImages([...raw.images].sort((a, b) => a.order - b.order));
+      setFormImages([...raw.images].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
     } else if (raw.imageUrl) {
       setFormImages([{
         id: 'img_0',
@@ -412,21 +416,27 @@ export const InventoryView: React.FC = () => {
       const existing = raw.locations?.find(l => l.locationId === loc.id);
       if (existing) {
         initialOverrides[loc.id] = { 
-          ...existing,
-          mrp: existing.mrp ?? existing.salePrice ?? raw.mrp ?? raw.salePrice,
+          locationId: loc.id,
+          locationName: loc.name,
+          mrp: Number(existing.mrp ?? existing.salePrice ?? raw.mrp ?? raw.salePrice ?? 100),
+          salePrice: Number(existing.salePrice ?? raw.salePrice ?? 100),
+          purchasePrice: Number(existing.purchasePrice ?? raw.purchasePrice ?? 80),
+          currentStock: Number(existing.currentStock ?? 0),
+          minStockAlert: Number(existing.minStockAlert ?? raw.minStockAlert ?? 5),
+          isListed: existing.isListed !== false,
           hasDiscount: !!existing.hasDiscount,
-          discountType: existing.discountType || 'PERCENT',
-          discountValue: existing.discountValue || 0,
+          discountType: (existing.discountType as 'PERCENT' | 'FLAT') || 'PERCENT',
+          discountValue: Number(existing.discountValue || 0),
         };
       } else {
         initialOverrides[loc.id] = {
           locationId: loc.id,
           locationName: loc.name,
-          mrp: raw.mrp ?? raw.salePrice,
-          salePrice: raw.salePrice,
-          purchasePrice: raw.purchasePrice,
+          mrp: Number(raw.mrp ?? raw.salePrice ?? 100),
+          salePrice: Number(raw.salePrice ?? 100),
+          purchasePrice: Number(raw.purchasePrice ?? 80),
           currentStock: 0,
-          minStockAlert: raw.minStockAlert,
+          minStockAlert: Number(raw.minStockAlert ?? 5),
           isListed: true,
           hasDiscount: false,
           discountType: 'PERCENT',
@@ -438,16 +448,18 @@ export const InventoryView: React.FC = () => {
     setIsAddModalOpen(true);
   };
 
-  const calculateEffectiveSalePrice = (locInv: ItemLocationInventory): number => {
+  const calculateEffectiveSalePrice = (locInv?: Partial<ItemLocationInventory> | null): number => {
+    if (!locInv) return 0;
     const baseMrp = Number(locInv.mrp || 0);
-    if (!locInv.hasDiscount || !locInv.discountValue || locInv.discountValue <= 0) {
+    if (!locInv.hasDiscount || !locInv.discountValue || Number(locInv.discountValue) <= 0) {
       return baseMrp;
     }
+    const discVal = Number(locInv.discountValue || 0);
     if (locInv.discountType === 'PERCENT') {
-      const disc = (baseMrp * locInv.discountValue) / 100;
+      const disc = (baseMrp * discVal) / 100;
       return Math.max(0, Number((baseMrp - disc).toFixed(2)));
     } else {
-      return Math.max(0, Number((baseMrp - locInv.discountValue).toFixed(2)));
+      return Math.max(0, Number((baseMrp - discVal).toFixed(2)));
     }
   };
 
@@ -503,27 +515,36 @@ export const InventoryView: React.FC = () => {
       const primaryImageUrl = primaryImg ? primaryImg.url : undefined;
 
       const locArray: ItemLocationInventory[] = Object.values(locationOverrides).map(loc => ({
-        ...loc,
+        locationId: loc.locationId,
+        locationName: loc.locationName,
+        mrp: Number(loc.mrp || 0),
         salePrice: calculateEffectiveSalePrice(loc),
+        purchasePrice: Number(loc.purchasePrice || 0),
+        currentStock: Number(loc.currentStock || 0),
+        minStockAlert: Number(loc.minStockAlert ?? 5),
+        isListed: loc.isListed !== false,
+        hasDiscount: !!loc.hasDiscount,
+        discountType: loc.discountType || 'PERCENT',
+        discountValue: Number(loc.discountValue || 0),
       }));
 
       // Master fallback defaults
       const currentLocInv = locationOverrides[selectedLocationId] || locArray[0];
-      const masterMrp = currentLocInv ? currentLocInv.mrp : 100;
+      const masterMrp = currentLocInv ? Number(currentLocInv.mrp || 100) : 100;
       const masterSalePrice = currentLocInv ? calculateEffectiveSalePrice(currentLocInv) : 100;
-      const masterPurchasePrice = currentLocInv ? currentLocInv.purchasePrice : 80;
-      const masterStock = currentLocInv ? currentLocInv.currentStock : 10;
-      const masterMinAlert = currentLocInv ? currentLocInv.minStockAlert : 5;
+      const masterPurchasePrice = currentLocInv ? Number(currentLocInv.purchasePrice || 80) : 80;
+      const masterStock = currentLocInv ? Number(currentLocInv.currentStock || 0) : 0;
+      const masterMinAlert = currentLocInv ? Number(currentLocInv.minStockAlert ?? 5) : 5;
 
       if (editingItem) {
         await store.updateItem(editingItem.id, {
           name: formName.trim(),
           sku: formSku.trim() || undefined,
           barcode: formBarcode.trim() || undefined,
-          category: formCategory.trim(),
-          taxRate: formTaxRate,
-          unit: formUnit,
-          allowParts: formAllowParts,
+          category: formCategory.trim() || 'General',
+          taxRate: Number(formTaxRate || 0),
+          unit: formUnit || 'pcs',
+          allowParts: !!formAllowParts,
           description: formDescription.trim() || undefined,
           mrp: masterMrp,
           salePrice: masterSalePrice,
@@ -539,10 +560,10 @@ export const InventoryView: React.FC = () => {
           name: formName.trim(),
           sku: formSku.trim() || undefined,
           barcode: formBarcode.trim() || undefined,
-          category: formCategory.trim(),
-          taxRate: formTaxRate,
-          unit: formUnit,
-          allowParts: formAllowParts,
+          category: formCategory.trim() || 'General',
+          taxRate: Number(formTaxRate || 0),
+          unit: formUnit || 'pcs',
+          allowParts: !!formAllowParts,
           description: formDescription.trim() || undefined,
           mrp: masterMrp,
           salePrice: masterSalePrice,
@@ -979,38 +1000,38 @@ export const InventoryView: React.FC = () => {
                     </td>
                     <td style={{ padding: '10px 12px' }}>
                       <span style={{ backgroundColor: 'var(--neutral-100)', padding: '2px 7px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 600 }}>
-                        {item.category}
+                        {item.category || 'General'}
                       </span>
                     </td>
                     <td style={{ padding: '10px 12px' }}>
                       <div>
                         <span style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--primary-600)' }}>
-                          ₹{item.salePrice.toFixed(2)}
+                          ₹{Number(item.salePrice || 0).toFixed(2)}
                         </span>
                         {hasDiscount ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
-                            <del style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>₹{mrp.toFixed(2)}</del>
+                            <del style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>₹{Number(mrp || 0).toFixed(2)}</del>
                             <span style={{ fontSize: '0.65rem', padding: '1px 4px', borderRadius: 3, background: 'var(--success-50)', color: 'var(--success-700)', fontWeight: 700 }}>
                               {discountText}
                             </span>
                           </div>
                         ) : (
                           <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
-                            MRP ₹{mrp.toFixed(2)}
+                            MRP ₹{Number(mrp || 0).toFixed(2)}
                           </div>
                         )}
                       </div>
                     </td>
                     <td style={{ color: 'var(--neutral-600)', fontSize: '0.85rem', padding: '10px 12px' }}>
-                      ₹{item.purchasePrice.toFixed(2)}
+                      ₹{Number(item.purchasePrice || 0).toFixed(2)}
                     </td>
-                    <td style={{ fontSize: '0.85rem', padding: '10px 12px' }}>{item.taxRate}%</td>
+                    <td style={{ fontSize: '0.85rem', padding: '10px 12px' }}>{Number(item.taxRate || 0)}%</td>
                     <td style={{ padding: '10px 12px' }}>
                       <span style={{ fontWeight: 700, fontSize: '0.85rem', color: stockStatus === 'OUT_OF_STOCK' ? 'var(--danger-600)' : 'var(--neutral-900)' }}>
-                        {item.currentStock} {item.unit}
+                        {Number(item.currentStock || 0)} {item.unit || 'pcs'}
                       </span>
                       <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)', marginLeft: 3 }}>
-                        (Min: {item.minStockAlert})
+                        (Min: {Number(item.minStockAlert ?? 5)})
                       </span>
                     </td>
                     <td style={{ padding: '10px 12px' }}>
@@ -1153,7 +1174,7 @@ export const InventoryView: React.FC = () => {
                         options={categoriesList.map(cat => ({
                           value: cat.name,
                           label: cat.name,
-                          badge: `${rawItems.filter(i => i.category.toLowerCase() === cat.name.toLowerCase()).length}`,
+                          badge: `${rawItems.filter(i => (i.category || '').toLowerCase() === (cat.name || '').toLowerCase()).length}`,
                           icon: <Layers size={13} />,
                         }))}
                         placeholder="Select Category"

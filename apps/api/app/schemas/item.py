@@ -18,7 +18,7 @@ class LocationInventorySchema(BaseSchema):
     discount_value: Optional[Decimal] = Field(default=Decimal("0.0"), ge=0, alias="discountValue")
 
 class ItemImageSchema(BaseSchema):
-    id: str
+    id: Optional[str] = None
     url: str
     order: int = 0
     is_primary: bool = Field(default=False, alias="isPrimary")
@@ -81,11 +81,12 @@ class StockAdjustmentRequest(BaseSchema):
 class ItemResponse(ItemBase):
     id: str = Field(..., alias="_id")
     business_id: str = Field(..., alias="businessId")
-    public_item_id: str = Field(..., alias="publicItemId")
-    qr_payload: str = Field(..., alias="qrPayload")
-    current_stock: Decimal = Field(..., alias="currentStock")
+    public_item_id: Optional[str] = Field(default="", alias="publicItemId")
+    qr_payload: Optional[str] = Field(default="", alias="qrPayload")
+    current_stock: Decimal = Field(default=Decimal("0.0"), alias="currentStock")
     is_active: bool = Field(default=True, alias="isActive")
-    created_at: datetime = Field(..., alias="createdAt")
+    created_at: Optional[datetime] = Field(default=None, alias="createdAt")
     updated_at: Optional[datetime] = Field(None, alias="updatedAt")
+
 
 

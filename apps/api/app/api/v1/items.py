@@ -24,7 +24,7 @@ router = APIRouter(prefix="/items", tags=["Items"])
 @router.get("", response_model=PaginatedResponse[ItemResponse])
 async def list_items(
     page: int = Query(1, ge=1),
-    page_size: int = Query(25, ge=1, le=200),
+    page_size: int = Query(25, ge=1, le=500),
     search: Optional[str] = None,
     category: Optional[str] = None,
     location_id: Optional[str] = Query(None, alias="locationId"),

@@ -46,7 +46,7 @@ class PartyUpdate(BaseSchema):
 class PartyResponse(PartyBase):
     id: str = Field(..., alias="_id")
     business_id: str = Field(..., alias="businessId")
-    opening_balance: Decimal = Field(..., alias="openingBalance")
+    opening_balance: Decimal = Field(default=Decimal("0.00"), alias="openingBalance")
     current_receivable: Decimal = Field(default=Decimal("0.00"), alias="currentReceivable")
     current_payable: Decimal = Field(default=Decimal("0.00"), alias="currentPayable")
     created_at: datetime = Field(..., alias="createdAt")

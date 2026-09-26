@@ -103,6 +103,10 @@ async def test_cross_tenant_item_isolation(superadmin_token):
         qr_res_b = await ac.get(f"/api/v1/items/lookup/qr/{public_id}", headers=headers_tenant_b)
         assert qr_res_b.status_code == 404
 
+        # 5. Clean up test item in Store A so test does not pollute DB
+        del_res = await ac.delete(f"/api/v1/items/{item_id}", headers=headers_tenant_a)
+        assert del_res.status_code == 204
+
 @pytest.mark.asyncio
 async def test_cross_tenant_party_isolation(superadmin_token):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -134,6 +138,10 @@ async def test_cross_tenant_party_isolation(superadmin_token):
         # Store B CANNOT access (must be 404)
         res_b = await ac.get(f"/api/v1/parties/{party_id}", headers=headers_tenant_b)
         assert res_b.status_code == 404
+
+        # Cleanup
+        del_res = await ac.delete(f"/api/v1/parties/{party_id}", headers=headers_tenant_a)
+        assert del_res.status_code == 204
 
 @pytest.mark.asyncio
 async def test_customers_crm_and_marketing_isolation(superadmin_token):
@@ -178,6 +186,10 @@ async def test_customers_crm_and_marketing_isolation(superadmin_token):
         assert export_res_a.status_code == 200
         exports = export_res_a.json()
         assert any(c["id"] == cust_id for c in exports)
+
+        # Cleanup
+        del_cust = await ac.delete(f"/api/v1/customers/{cust_id}", headers=headers_tenant_a)
+        assert del_cust.status_code in [200, 204]
 
 
 @pytest.mark.asyncio
