@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Users, 
   UserPlus, 
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Party } from '../types';
 import { store } from '../services/store';
+import { Pagination } from '../components/Pagination';
 
 export const PartiesView: React.FC = () => {
   const currentUser = store.getCurrentUser();
@@ -27,6 +28,16 @@ export const PartiesView: React.FC = () => {
   const [parties, setParties] = useState<Party[]>(store.getParties());
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>(isCashier ? 'CUSTOMER' : 'ALL');
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [totalItems, setTotalItems] = useState<number>(0);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterType, selectedLocationId]);
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -75,16 +86,38 @@ export const PartiesView: React.FC = () => {
 
   const [isSaving, setIsSaving] = useState(false);
 
-  const refreshData = () => {
-    setParties(store.getParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId));
-  };
+  const loadPaginatedParties = useCallback(async (
+    page: number = currentPage,
+    size: number = pageSize,
+    locId: string = selectedLocationId,
+    search: string = searchQuery,
+    fType: 'ALL' | 'CUSTOMER' | 'SUPPLIER' = filterType
+  ) => {
+    try {
+      const res = await store.fetchPartiesPaginated({
+        page,
+        pageSize: size,
+        search: search.trim() || undefined,
+        type: isCashier ? 'CUSTOMER' : (fType !== 'ALL' ? fType : undefined),
+        locationId: locId !== 'ALL' ? locId : undefined,
+      });
+      setParties(res.data);
+      setTotalItems(res.total);
+    } catch (e) {
+      console.error('Error fetching paginated parties:', e);
+      const all = store.getParties(locId === 'ALL' ? undefined : locId);
+      setParties(all.slice((page - 1) * size, page * size));
+      setTotalItems(all.length);
+    }
+  }, [currentPage, pageSize, selectedLocationId, searchQuery, filterType, isCashier]);
 
   useEffect(() => {
-    refreshData();
-    store.fetchParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId)
-      .then(fetched => setParties(fetched))
-      .catch(() => {});
-  }, [selectedLocationId]);
+    loadPaginatedParties(currentPage, pageSize, selectedLocationId, searchQuery, filterType);
+  }, [currentPage, pageSize, selectedLocationId, searchQuery, filterType, loadPaginatedParties]);
+
+  const refreshData = () => {
+    loadPaginatedParties(currentPage, pageSize, selectedLocationId, searchQuery, filterType);
+  };
 
   // Summary Metrics
   const allCurrentParties = store.getParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId);
@@ -365,14 +398,14 @@ export const PartiesView: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredParties.length === 0 ? (
+              {parties.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--neutral-400)' }}>
                     No contact profiles match your search criteria.
                   </td>
                 </tr>
               ) : (
-                filteredParties.map((party) => {
+                parties.map((party) => {
                   const isReceivable = party.currentBalance > 0;
                   const isPayable = party.currentBalance < 0;
 
@@ -483,6 +516,14 @@ export const PartiesView: React.FC = () => {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={currentPage}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          itemLabel="parties"
+        />
       </div>
 
       {/* Add Profile Modal */}

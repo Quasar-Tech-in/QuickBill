@@ -37,8 +37,10 @@ class BaseTenantRepository:
         sort_by: str = "createdAt",
         sort_dir: int = -1
     ) -> (List[Dict[str, Any]], int):
-        query = filter_query or {}
-        query["$and"] = [self._biz_query(business_id)]
+        conditions: List[Dict[str, Any]] = [self._biz_query(business_id)]
+        if filter_query:
+            conditions.append(filter_query)
+        query = {"$and": conditions}
 
         skip = (page - 1) * page_size
         total = await self.collection.count_documents(query)

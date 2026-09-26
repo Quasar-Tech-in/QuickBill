@@ -12,17 +12,46 @@ router = APIRouter(prefix="/sales", tags=["Sales & Billing"])
 @router.get("", response_model=PaginatedResponse[SaleResponse], response_model_by_alias=True)
 async def list_sales(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
-    location_id: Optional[str] = Query(None),
+    page_size: int = Query(25, ge=1, le=200),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    location_id: Optional[str] = Query(None, alias="locationId"),
+    from_date: Optional[str] = Query(None, alias="fromDate"),
+    to_date: Optional[str] = Query(None, alias="toDate"),
     business_id: str = Depends(get_current_business_id),
 ):
     db = await get_tenant_db(business_id)
     b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
     skip = (page - 1) * page_size
     
-    query: dict = {"$or": [{"businessId": b_oid}, {"businessId": business_id}]}
+    conditions: list = [{"$or": [{"businessId": b_oid}, {"businessId": business_id}]}]
+    
     if location_id and location_id != "ALL":
-        query["locationId"] = location_id
+        conditions.append({"locationId": location_id})
+
+    if status and status != "ALL":
+        conditions.append({"paymentStatus": status})
+
+    if search and search.strip():
+        s = search.strip()
+        conditions.append({
+            "$or": [
+                {"invoiceNumber": {"$regex": s, "$options": "i"}},
+                {"customerName": {"$regex": s, "$options": "i"}},
+                {"customerPhone": {"$regex": s, "$options": "i"}},
+                {"customerGstin": {"$regex": s, "$options": "i"}},
+            ]
+        })
+
+    if from_date or to_date:
+        date_cond: dict = {}
+        if from_date:
+            date_cond["$gte"] = from_date
+        if to_date:
+            date_cond["$lte"] = f"{to_date}T23:59:59.999Z" if "T" not in to_date else to_date
+        conditions.append({"$or": [{"createdAt": date_cond}, {"date": date_cond}]})
+
+    query = {"$and": conditions}
 
     total = await db.invoices.count_documents(query)
     cursor = db.invoices.find(query).sort("createdAt", -1).skip(skip).limit(page_size)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Package, 
   Plus, 
@@ -33,6 +33,7 @@ import { store } from '../services/store';
 import { StatusBadge } from '../components/StatusBadge';
 import { QRModal } from '../components/QRModal';
 import { CustomSelect } from '../components/CustomSelect';
+import { Pagination } from '../components/Pagination';
 import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
 import { uploadItemImage, deleteItemImages } from '../services/supabaseStorage';
 
@@ -76,6 +77,16 @@ export const InventoryView: React.FC = () => {
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [editingCatName, setEditingCatName] = useState('');
   const [editingCatDesc, setEditingCatDesc] = useState('');
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [totalItems, setTotalItems] = useState<number>(0);
+
+  // Reset page when search or category filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCategories, selectedLocationId]);
 
   // Close Category Dropdown on Outside Click
   useEffect(() => {
@@ -203,12 +214,38 @@ export const InventoryView: React.FC = () => {
     }
   };
 
+  const loadPaginatedItems = useCallback(async (
+    page: number = currentPage,
+    size: number = pageSize,
+    locId: string = selectedLocationId,
+    search: string = searchQuery,
+    cats: string[] = selectedCategories
+  ) => {
+    try {
+      const catParam = cats.length === 1 ? cats[0] : undefined;
+      const res = await store.fetchItemsPaginated({
+        page,
+        pageSize: size,
+        search: search.trim() || undefined,
+        category: catParam,
+        locationId: locId,
+      });
+      setItems(res.data);
+      setTotalItems(res.total);
+      setRawItems(store.getRawItems());
+    } catch (e) {
+      console.error('Error fetching paginated items:', e);
+      const all = store.getItems(locId, true);
+      setItems(all.slice((page - 1) * size, page * size));
+      setTotalItems(all.length);
+    }
+  }, [currentPage, pageSize, selectedLocationId, searchQuery, selectedCategories]);
+
   useEffect(() => {
-    refreshData();
-    // Live reload items and categories from MongoDB
-    store.fetchItems(selectedLocationId).then(() => {
-      refreshData();
-    }).catch(() => {});
+    loadPaginatedItems(currentPage, pageSize, selectedLocationId, searchQuery, selectedCategories);
+  }, [currentPage, pageSize, selectedLocationId, searchQuery, selectedCategories, loadPaginatedItems]);
+
+  useEffect(() => {
     store.fetchCategories().then(() => {
       setCategoriesList(store.getCategories());
     }).catch(() => {});
@@ -878,7 +915,7 @@ export const InventoryView: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map((item) => {
+              {items.map((item) => {
                 const raw = rawItems.find(r => r.id === item.id) || item;
                 const branchInv = raw.locations?.find(l => l.locationId === selectedLocationId);
                 const isListed = branchInv ? branchInv.isListed !== false : true;
@@ -1036,6 +1073,14 @@ export const InventoryView: React.FC = () => {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={currentPage}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          itemLabel="products"
+        />
       </div>
 
       {/* QR Modal */}

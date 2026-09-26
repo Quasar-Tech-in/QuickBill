@@ -23,18 +23,29 @@ router = APIRouter(prefix="/items", tags=["Items"])
 @router.get("", response_model=PaginatedResponse[ItemResponse])
 async def list_items(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(25, ge=1, le=200),
     search: Optional[str] = None,
+    category: Optional[str] = None,
+    location_id: Optional[str] = Query(None, alias="locationId"),
     business_id: str = Depends(get_current_business_id),
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
-    query = {"isActive": True}
-    if search:
+    query: dict = {"isActive": True}
+    if search and search.strip():
+        s = search.strip()
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"sku": {"$regex": search, "$options": "i"}},
-            {"publicItemId": {"$regex": search, "$options": "i"}}
+            {"name": {"$regex": s, "$options": "i"}},
+            {"sku": {"$regex": s, "$options": "i"}},
+            {"barcode": {"$regex": s, "$options": "i"}},
+            {"publicItemId": {"$regex": s, "$options": "i"}}
+        ]
+    if category and category != "ALL":
+        query["category"] = category
+    if location_id and location_id != "ALL":
+        query["$or"] = [
+            {"locations.locationId": location_id},
+            {"locationId": location_id}
         ]
     
     docs, total = await repo.list_paginated(

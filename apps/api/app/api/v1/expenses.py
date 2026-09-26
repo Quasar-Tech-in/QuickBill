@@ -13,18 +13,38 @@ router = APIRouter(prefix="/expenses", tags=["Expenses"])
 @router.get("", response_model=PaginatedResponse[ExpenseResponse])
 async def list_expenses(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(25, ge=1, le=200),
+    search: Optional[str] = None,
     category: Optional[str] = None,
     location_id: Optional[str] = Query(None, alias="locationId"),
+    from_date: Optional[str] = Query(None, alias="fromDate"),
+    to_date: Optional[str] = Query(None, alias="toDate"),
     business_id: str = Depends(get_current_business_id)
 ):
     db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "expenses")
-    query = {}
-    if category:
+    query: dict = {}
+    if category and category != "ALL":
         query["category"] = category
-    if location_id:
+    if location_id and location_id != "ALL":
         query["locationId"] = location_id
+
+    if search and search.strip():
+        s = search.strip()
+        query["$or"] = [
+            {"payee": {"$regex": s, "$options": "i"}},
+            {"description": {"$regex": s, "$options": "i"}},
+            {"referenceNumber": {"$regex": s, "$options": "i"}},
+            {"category": {"$regex": s, "$options": "i"}},
+        ]
+
+    if from_date or to_date:
+        date_cond: dict = {}
+        if from_date:
+            date_cond["$gte"] = from_date
+        if to_date:
+            date_cond["$lte"] = f"{to_date}T23:59:59.999Z" if "T" not in to_date else to_date
+        query["createdAt"] = date_cond
 
     docs, total = await repo.list_paginated(
         business_id=business_id,

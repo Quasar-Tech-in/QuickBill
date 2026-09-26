@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, Expense, ExpenseCategory, LedgerEntry } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse } from '../types';
 import { INITIAL_ITEMS, INITIAL_PARTIES, INITIAL_INVOICES, INITIAL_PAYMENTS } from './mockData';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
@@ -733,6 +733,94 @@ class StoreService {
     return this.getItems(locationId);
   }
 
+  async fetchItemsPaginated(params: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    category?: string;
+    locationId?: string;
+  }): Promise<PaginatedApiResponse<Item>> {
+    const page = params.page || 1;
+    const pageSize = params.pageSize || 25;
+    const locId = params.locationId || this.getActiveLocation().id;
+
+    try {
+      const qParams: any = {
+        page,
+        page_size: pageSize,
+      };
+      if (params.search && params.search.trim()) {
+        qParams.search = params.search.trim();
+      }
+      if (params.category && params.category !== 'ALL') {
+        qParams.category = params.category;
+      }
+      if (locId && locId !== 'ALL') {
+        qParams.locationId = locId;
+      }
+
+      const res = await apiClient.get('/items', { params: qParams });
+      if (res.data && Array.isArray(res.data.data)) {
+        const liveItems: Item[] = res.data.data.map((d: any) => ({
+          id: d._id || d.id || d.publicItemId,
+          businessId: d.businessId || this.currentTenant.id,
+          publicItemId: d.publicItemId || d.sku || 'ITM-TEMP',
+          name: d.name,
+          sku: d.sku,
+          barcode: d.barcode,
+          category: d.category || 'General',
+          taxRate: Number(d.taxRate || 0),
+          unit: d.unit || 'pcs',
+          description: d.description,
+          mrp: d.mrp ? Number(d.mrp) : Number(d.salePrice || 0),
+          salePrice: Number(d.salePrice || 0),
+          purchasePrice: Number(d.purchasePrice || 0),
+          currentStock: Number(d.currentStock || 0),
+          minStockAlert: Number(d.minStockAlert || 5),
+          hasDiscount: d.hasDiscount,
+          discountType: d.discountType,
+          discountValue: d.discountValue ? Number(d.discountValue) : undefined,
+          locations: d.locations,
+          images: d.images,
+          imageUrl: d.imageUrl,
+          allowParts: !!d.allowParts,
+        }));
+
+        return {
+          data: liveItems,
+          page: res.data.page || page,
+          pageSize: res.data.page_size || pageSize,
+          total: res.data.total !== undefined ? res.data.total : liveItems.length,
+          totalPages: res.data.total_pages || Math.ceil((res.data.total || liveItems.length) / pageSize),
+        };
+      }
+    } catch (e) {
+      console.warn('Could not fetch paginated items from API, falling back to local:', e);
+    }
+
+    // Local fallback
+    const all = this.getItems(locId, true);
+    const filtered = all.filter(i => {
+      if (params.category && params.category !== 'ALL' && i.category !== params.category) return false;
+      if (params.search && params.search.trim()) {
+        const q = params.search.toLowerCase();
+        const m = i.name.toLowerCase().includes(q) || (i.sku && i.sku.toLowerCase().includes(q)) || (i.publicItemId && i.publicItemId.toLowerCase().includes(q));
+        if (!m) return false;
+      }
+      return true;
+    });
+
+    const total = filtered.length;
+    const slice = filtered.slice((page - 1) * pageSize, page * pageSize);
+    return {
+      data: slice,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize) || 1,
+    };
+  }
+
   getRawItems(): Item[] {
     const activeTenantId = this.currentTenant.id;
     return this.items.filter(i => (i.businessId || DEFAULT_TENANTS[0].id) === activeTenantId);
@@ -1055,6 +1143,82 @@ class StoreService {
       console.warn('Could not fetch parties/customers from backend API:', err);
     }
     return this.getParties(locationId);
+  }
+
+  async fetchPartiesPaginated(params: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    type?: 'ALL' | 'CUSTOMER' | 'SUPPLIER';
+    locationId?: string;
+  }): Promise<PaginatedApiResponse<Party>> {
+    const page = params.page || 1;
+    const pageSize = params.pageSize || 25;
+    const locId = params.locationId || 'ALL';
+
+    try {
+      const qParams: any = {
+        page,
+        page_size: pageSize,
+      };
+      if (params.search && params.search.trim()) {
+        qParams.search = params.search.trim();
+      }
+      if (params.type && params.type !== 'ALL') {
+        qParams.type = params.type;
+      }
+      if (locId && locId !== 'ALL') {
+        qParams.locationId = locId;
+      }
+
+      const res = await apiClient.get('/parties', { params: qParams });
+      if (res.data && Array.isArray(res.data.data)) {
+        const liveParties: Party[] = res.data.data.map((p: any) => ({
+          id: p._id || p.id,
+          businessId: p.businessId || this.currentTenant.id,
+          name: p.name,
+          type: Array.isArray(p.type) ? (p.type.includes('supplier') ? 'SUPPLIER' : 'CUSTOMER') : (p.type || 'CUSTOMER'),
+          phone: p.phone || undefined,
+          email: p.email || undefined,
+          address: p.billingAddress?.street || p.address || undefined,
+          gstin: p.taxId || p.gstin || undefined,
+          currentBalance: Number(p.currentReceivable !== undefined ? p.currentReceivable : (p.currentBalance || 0)),
+          locationIds: p.locationIds || []
+        }));
+
+        return {
+          data: liveParties,
+          page: res.data.page || page,
+          pageSize: res.data.page_size || pageSize,
+          total: res.data.total !== undefined ? res.data.total : liveParties.length,
+          totalPages: res.data.total_pages || Math.ceil((res.data.total || liveParties.length) / pageSize),
+        };
+      }
+    } catch (err) {
+      console.warn('Could not fetch paginated parties from backend API, falling back to local:', err);
+    }
+
+    // Local fallback
+    const all = this.getParties(locId === 'ALL' ? undefined : locId);
+    const filtered = all.filter(p => {
+      if (params.type && params.type !== 'ALL' && p.type !== params.type) return false;
+      if (params.search && params.search.trim()) {
+        const q = params.search.toLowerCase();
+        const m = p.name.toLowerCase().includes(q) || (p.phone && p.phone.includes(q)) || (p.email && p.email.toLowerCase().includes(q)) || (p.gstin && p.gstin.toLowerCase().includes(q));
+        if (!m) return false;
+      }
+      return true;
+    });
+
+    const total = filtered.length;
+    const slice = filtered.slice((page - 1) * pageSize, page * pageSize);
+    return {
+      data: slice,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize) || 1,
+    };
   }
 
   addParty(party: Omit<Party, 'id' | 'currentBalance' | 'businessId'>): Party {
@@ -1459,6 +1623,92 @@ class StoreService {
     return this.getExpenses(locationId);
   }
 
+  async fetchExpensesPaginated(params: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    category?: string;
+    locationId?: string;
+    fromDate?: string;
+    toDate?: string;
+  }): Promise<PaginatedApiResponse<Expense>> {
+    const page = params.page || 1;
+    const pageSize = params.pageSize || 25;
+    const locId = params.locationId || 'ALL';
+
+    try {
+      const qParams: any = {
+        page,
+        page_size: pageSize,
+      };
+      if (params.search && params.search.trim()) {
+        qParams.search = params.search.trim();
+      }
+      if (params.category && params.category !== 'ALL') {
+        qParams.category = params.category;
+      }
+      if (locId && locId !== 'ALL') {
+        qParams.locationId = locId;
+      }
+      if (params.fromDate) {
+        qParams.fromDate = params.fromDate;
+      }
+      if (params.toDate) {
+        qParams.toDate = params.toDate;
+      }
+
+      const res = await apiClient.get('/expenses', { params: qParams });
+      if (res.data && Array.isArray(res.data.data)) {
+        const liveExpenses: Expense[] = res.data.data.map((d: any) => ({
+          id: d._id || d.id,
+          businessId: d.businessId || this.currentTenant.id,
+          category: d.category,
+          amount: Number(d.amount || 0),
+          payee: d.payee || undefined,
+          paymentMode: d.paymentMode || 'CASH',
+          referenceNumber: d.referenceNumber || undefined,
+          description: d.description || undefined,
+          locationId: d.locationId || undefined,
+          locationName: d.locationName || undefined,
+          expenseDate: d.expenseDate ? new Date(d.expenseDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          createdAt: d.createdAt,
+        }));
+
+        return {
+          data: liveExpenses,
+          page: res.data.page || page,
+          pageSize: res.data.page_size || pageSize,
+          total: res.data.total !== undefined ? res.data.total : liveExpenses.length,
+          totalPages: res.data.total_pages || Math.ceil((res.data.total || liveExpenses.length) / pageSize),
+        };
+      }
+    } catch (err) {
+      console.warn('Could not fetch paginated expenses from backend API, falling back to local:', err);
+    }
+
+    // Local fallback
+    const all = this.getExpenses(locId === 'ALL' ? undefined : locId);
+    const filtered = all.filter(e => {
+      if (params.category && params.category !== 'ALL' && e.category !== params.category) return false;
+      if (params.search && params.search.trim()) {
+        const q = params.search.toLowerCase();
+        const m = (e.payee && e.payee.toLowerCase().includes(q)) || (e.description && e.description.toLowerCase().includes(q)) || (e.category && e.category.toLowerCase().includes(q)) || (e.referenceNumber && e.referenceNumber.toLowerCase().includes(q));
+        if (!m) return false;
+      }
+      return true;
+    });
+
+    const total = filtered.length;
+    const slice = filtered.slice((page - 1) * pageSize, page * pageSize);
+    return {
+      data: slice,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize) || 1,
+    };
+  }
+
   async addExpense(expenseData: Omit<Expense, 'id' | 'businessId'>): Promise<Expense> {
     const activeId = this.currentTenant.id;
     const activeLoc = this.getActiveLocation();
@@ -1667,6 +1917,85 @@ class StoreService {
       console.warn('Could not fetch live invoices from backend /sales:', err);
     }
     return this.getInvoices(locationId);
+  }
+
+  async fetchSalesPaginated(params: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: string;
+    locationId?: string;
+    fromDate?: string;
+    toDate?: string;
+  }): Promise<PaginatedApiResponse<Invoice>> {
+    const page = params.page || 1;
+    const pageSize = params.pageSize || 25;
+    const locId = params.locationId || 'ALL';
+
+    try {
+      const qParams: any = {
+        page,
+        page_size: pageSize,
+      };
+      if (params.search && params.search.trim()) {
+        qParams.search = params.search.trim();
+      }
+      if (params.status && params.status !== 'ALL') {
+        qParams.status = params.status;
+      }
+      if (locId && locId !== 'ALL') {
+        qParams.locationId = locId;
+      }
+      if (params.fromDate) {
+        qParams.fromDate = params.fromDate;
+      }
+      if (params.toDate) {
+        qParams.toDate = params.toDate;
+      }
+
+      const res = await apiClient.get('/sales', { params: qParams });
+      if (res.data && Array.isArray(res.data.data)) {
+        const liveInvoices: Invoice[] = res.data.data.map((d: any) => this.mapSaleDocToInvoice(d));
+
+        return {
+          data: liveInvoices,
+          page: res.data.page || page,
+          pageSize: res.data.page_size || pageSize,
+          total: res.data.total !== undefined ? res.data.total : liveInvoices.length,
+          totalPages: res.data.total_pages || Math.ceil((res.data.total || liveInvoices.length) / pageSize),
+        };
+      }
+    } catch (err) {
+      console.warn('Could not fetch paginated invoices from backend API, falling back to local:', err);
+    }
+
+    // Local fallback
+    const all = this.getInvoices(locId === 'ALL' ? undefined : locId);
+    const filtered = all.filter(inv => {
+      if (params.status && params.status !== 'ALL' && inv.status !== params.status) return false;
+      if (params.search && params.search.trim()) {
+        const q = params.search.toLowerCase();
+        const m = (inv.invoiceNumber && inv.invoiceNumber.toLowerCase().includes(q)) ||
+                  (inv.consumerName && inv.consumerName.toLowerCase().includes(q)) ||
+                  (inv.partyName && inv.partyName.toLowerCase().includes(q)) ||
+                  (inv.consumerPhone && inv.consumerPhone.includes(q)) ||
+                  (inv.partyPhone && inv.partyPhone.includes(q));
+        if (!m) return false;
+      }
+      if (params.fromDate && inv.date < params.fromDate) return false;
+      if (params.toDate && inv.date > params.toDate) return false;
+      return true;
+    });
+
+    const total = filtered.length;
+    const slice = filtered.slice((page - 1) * pageSize, page * pageSize);
+    return {
+      data: slice,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize) || 1,
+    };
   }
 
   async createInvoice(invoiceData: Omit<Invoice, 'id' | 'invoiceNumber' | 'businessId'>): Promise<Invoice> {

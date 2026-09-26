@@ -13,21 +13,36 @@ router = APIRouter(prefix="/parties", tags=["Parties (Customers & Suppliers)"])
 @router.get("", response_model=PaginatedResponse[PartyResponse])
 async def list_parties(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(25, ge=1, le=200),
     party_type: Optional[str] = Query(None, alias="type"),
     search: Optional[str] = None,
+    location_id: Optional[str] = Query(None, alias="locationId"),
     business_id: str = Depends(get_current_business_id)
 ):
     db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "parties")
-    query = {}
-    if party_type:
+    query: dict = {}
+    if party_type and party_type != "ALL":
         query["type"] = party_type
-    if search:
+    if location_id and location_id != "ALL":
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"phone": {"$regex": search, "$options": "i"}}
+            {"locationIds": location_id},
+            {"locationId": location_id},
+            {"locationIds": {"$size": 0}},
+            {"locationIds": {"$exists": False}},
         ]
+    if search and search.strip():
+        s = search.strip()
+        search_cond = [
+            {"name": {"$regex": s, "$options": "i"}},
+            {"phone": {"$regex": s, "$options": "i"}},
+            {"email": {"$regex": s, "$options": "i"}},
+            {"gstin": {"$regex": s, "$options": "i"}},
+        ]
+        if "$or" in query:
+            query = {"$and": [{"$or": query["$or"]}, {"$or": search_cond}]}
+        else:
+            query["$or"] = search_cond
     
     docs, total = await repo.list_paginated(
         business_id=business_id,

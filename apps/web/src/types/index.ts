@@ -282,3 +282,12 @@ export interface LedgerEntry {
   locationName?: string;
 }
 
+export interface PaginatedApiResponse<T> {
+  data: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+

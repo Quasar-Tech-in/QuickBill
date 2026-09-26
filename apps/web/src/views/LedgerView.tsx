@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   BookOpen, 
   Plus, 
@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { store } from '../services/store';
 import { Expense, ExpenseCategory, LedgerEntry, Party, Payment } from '../types';
+import { Pagination } from '../components/Pagination';
 
 export const LedgerView: React.FC = () => {
   const currentUser = store.getCurrentUser();
@@ -40,6 +41,16 @@ export const LedgerView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'PAYMENT_IN' | 'PAYMENT_OUT' | 'EXPENSE'>('ALL');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [totalItems, setTotalItems] = useState<number>(0);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterType, filterCategory, selectedLocationId]);
 
   // Modals
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
@@ -93,25 +104,67 @@ export const LedgerView: React.FC = () => {
 
   const [isSaving, setIsSaving] = useState(false);
 
-  const refreshData = () => {
+  const refreshData = useCallback(async () => {
     const loc = selectedLocationId === 'ALL' ? undefined : selectedLocationId;
-    setParties(store.getParties(loc));
-    setExpenses(store.getExpenses(loc));
-    setCategories(store.getExpenseCategories());
-    setLedgerEntries(store.getLedgerEntries(loc));
-  };
+    try {
+      if (filterType === 'EXPENSE') {
+        const res = await store.fetchExpensesPaginated({
+          page: currentPage,
+          pageSize,
+          search: searchQuery.trim() || undefined,
+          category: filterCategory !== 'ALL' ? filterCategory : undefined,
+          locationId: loc,
+        });
+        setExpenses(res.data);
+        setTotalItems(res.total);
+        setLedgerEntries(res.data.map(e => ({
+          id: e.id,
+          date: e.expenseDate,
+          type: 'EXPENSE',
+          title: e.category,
+          partyOrPayee: e.payee || 'Direct Expense',
+          category: e.category,
+          paymentMode: e.paymentMode,
+          referenceNumber: e.referenceNumber,
+          notes: e.description,
+          amount: e.amount,
+          locationName: e.locationName,
+        })));
+      } else {
+        await Promise.allSettled([
+          store.fetchExpenses(loc),
+          store.fetchParties(loc),
+          store.fetchExpenseCategories(),
+        ]);
+        const entries = store.getLedgerEntries(loc);
+        const filtered = entries.filter(entry => {
+          if (filterType !== 'ALL' && entry.type !== filterType) return false;
+          if (filterCategory !== 'ALL' && entry.category !== filterCategory) return false;
+          if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            const matchParty = entry.partyOrPayee.toLowerCase().includes(q);
+            const matchTitle = entry.title.toLowerCase().includes(q);
+            const matchRef = entry.referenceNumber ? entry.referenceNumber.toLowerCase().includes(q) : false;
+            const matchNotes = entry.notes ? entry.notes.toLowerCase().includes(q) : false;
+            if (!matchParty && !matchTitle && !matchRef && !matchNotes) return false;
+          }
+          return true;
+        });
+        setTotalItems(filtered.length);
+        setLedgerEntries(filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize));
+      }
+      setCategories(store.getExpenseCategories());
+    } catch (e) {
+      console.error('Error refreshing ledger data:', e);
+      const entries = store.getLedgerEntries(loc);
+      setTotalItems(entries.length);
+      setLedgerEntries(entries.slice((currentPage - 1) * pageSize, currentPage * pageSize));
+    }
+  }, [currentPage, pageSize, selectedLocationId, filterType, filterCategory, searchQuery]);
 
   useEffect(() => {
     refreshData();
-    const loc = selectedLocationId === 'ALL' ? undefined : selectedLocationId;
-    Promise.allSettled([
-      store.fetchExpenses(loc),
-      store.fetchParties(loc),
-      store.fetchExpenseCategories(),
-    ]).then(() => {
-      refreshData();
-    });
-  }, [selectedLocationId]);
+  }, [refreshData]);
 
   // Derived Financial Calculations
   const loc = selectedLocationId === 'ALL' ? undefined : selectedLocationId;
@@ -579,14 +632,14 @@ export const LedgerView: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredEntries.length === 0 ? (
+              {ledgerEntries.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--neutral-400)' }}>
                     No ledger transactions or expenses found matching filters.
                   </td>
                 </tr>
               ) : (
-                filteredEntries.map((entry) => {
+                ledgerEntries.map((entry) => {
                   const isInflow = entry.type === 'PAYMENT_IN';
                   const isOutflow = entry.type === 'PAYMENT_OUT';
                   const isExpense = entry.type === 'EXPENSE';
@@ -691,6 +744,14 @@ export const LedgerView: React.FC = () => {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={currentPage}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          itemLabel="transactions"
+        />
       </div>
 
       {/* Record Entry Modal (Tabs: Payment In / Payment Out / Shop Expense) */}

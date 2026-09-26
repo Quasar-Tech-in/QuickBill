@@ -9,6 +9,7 @@ import {
 import { Invoice } from '../types';
 import { store } from '../services/store';
 import { StatusBadge } from '../components/StatusBadge';
+import { Pagination } from '../components/Pagination';
 
 interface TransactionsViewProps {
   onViewInvoice: (invoice: Invoice) => void;
@@ -22,37 +23,49 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID'>('ALL');
 
-  const loadInvoices = useCallback(async (locId?: string) => {
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [totalItems, setTotalItems] = useState<number>(0);
+
+  const loadInvoices = useCallback(async (
+    page: number = currentPage,
+    size: number = pageSize,
+    locId: string = selectedLocationId,
+    search: string = searchQuery,
+    status: string = statusFilter
+  ) => {
     setIsLoading(true);
     try {
-      const data = await store.fetchInvoices(locId || selectedLocationId);
-      setInvoices(data);
+      const res = await store.fetchSalesPaginated({
+        page,
+        pageSize: size,
+        search: search.trim() || undefined,
+        status: status !== 'ALL' ? status : undefined,
+        locationId: locId !== 'ALL' ? locId : undefined,
+      });
+      setInvoices(res.data);
+      setTotalItems(res.total);
     } catch (e) {
-      console.error('Error fetching invoices:', e);
-      setInvoices(store.getInvoices(locId || selectedLocationId));
+      console.error('Error fetching paginated invoices:', e);
+      const local = store.getInvoices(locId !== 'ALL' ? locId : undefined);
+      setInvoices(local.slice((page - 1) * size, page * size));
+      setTotalItems(local.length);
     } finally {
       setIsLoading(false);
     }
-  }, [selectedLocationId]);
+  }, [currentPage, pageSize, selectedLocationId, searchQuery, statusFilter]);
 
+  // When filters or search query change, reset page to 1
   useEffect(() => {
-    loadInvoices(selectedLocationId);
-  }, [selectedLocationId, loadInvoices]);
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, selectedLocationId]);
 
-  const filteredInvoices = invoices.filter((inv) => {
-    if (selectedLocationId !== 'ALL' && inv.locationId !== selectedLocationId) {
-      return false;
-    }
-    const matchesSearch = 
-      inv.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      inv.partyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (inv.consumerName && inv.consumerName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (inv.locationName && inv.locationName.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesStatus = statusFilter === 'ALL' || inv.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  // Fetch when page, size, or filters change
+  useEffect(() => {
+    loadInvoices(currentPage, pageSize, selectedLocationId, searchQuery, statusFilter);
+  }, [currentPage, pageSize, selectedLocationId, searchQuery, statusFilter]);
 
-  const totalSalesAmount = filteredInvoices.reduce((sum, i) => sum + i.grandTotal, 0);
+  const totalSalesAmount = invoices.reduce((sum, i) => sum + i.grandTotal, 0);
 
   return (
     <div className="page-container">
@@ -69,7 +82,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
 
         <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
           <button
-            onClick={() => loadInvoices(selectedLocationId)}
+            onClick={() => loadInvoices(1, pageSize, selectedLocationId, searchQuery, statusFilter)}
             className="btn btn-secondary"
             disabled={isLoading}
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', fontSize: '0.82rem' }}
@@ -167,14 +180,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
               </tr>
             </thead>
             <tbody>
-              {filteredInvoices.length === 0 ? (
+              {invoices.length === 0 ? (
                 <tr>
                   <td colSpan={12} style={{ textAlign: 'center', padding: 28, color: 'var(--neutral-400)' }}>
                     No invoices match your search.
                   </td>
                 </tr>
               ) : (
-                filteredInvoices.map((inv) => (
+                invoices.map((inv) => (
                   <tr key={inv.id}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--neutral-900)' }}>
                       {inv.invoiceNumber}
@@ -231,6 +244,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Bar */}
+        <Pagination
+          currentPage={currentPage}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          itemLabel="invoices"
+        />
       </div>
     </div>
   );
