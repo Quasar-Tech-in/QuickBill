@@ -25,7 +25,8 @@ import {
   Star,
   Loader2,
   Sparkles,
-  Eye
+  Eye,
+  Check
 } from 'lucide-react';
 import { Item, StoreLocation, ItemLocationInventory, ItemCategory, ItemImage } from '../types';
 import { store } from '../services/store';
@@ -72,6 +73,9 @@ export const InventoryView: React.FC = () => {
   const [newCatName, setNewCatName] = useState('');
   const [newCatDesc, setNewCatDesc] = useState('');
   const [categorySearch, setCategorySearch] = useState('');
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editingCatName, setEditingCatName] = useState('');
+  const [editingCatDesc, setEditingCatDesc] = useState('');
 
   // Close Category Dropdown on Outside Click
   useEffect(() => {
@@ -201,9 +205,12 @@ export const InventoryView: React.FC = () => {
 
   useEffect(() => {
     refreshData();
-    // Live reload items from MongoDB
+    // Live reload items and categories from MongoDB
     store.fetchItems(selectedLocationId).then(() => {
       refreshData();
+    }).catch(() => {});
+    store.fetchCategories().then(() => {
+      setCategoriesList(store.getCategories());
     }).catch(() => {});
     setCategoriesList(store.getCategories());
 
@@ -246,28 +253,55 @@ export const InventoryView: React.FC = () => {
     return matchesSearch && matchesCategory;
   });
 
-  const handleCreateCategory = (e: React.FormEvent) => {
+  const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCatName.trim()) return;
 
-    store.addCategory({
+    await store.addCategory({
       name: newCatName.trim(),
       description: newCatDesc.trim() || undefined,
     });
     setNewCatName('');
     setNewCatDesc('');
     setCategoriesList(store.getCategories());
+    refreshData();
   };
 
-  const handleDeleteCategory = (catId: string, catName: string) => {
+  const handleStartEditCat = (cat: ItemCategory) => {
+    setEditingCatId(cat.id);
+    setEditingCatName(cat.name);
+    setEditingCatDesc(cat.description || '');
+  };
+
+  const handleCancelEditCat = () => {
+    setEditingCatId(null);
+    setEditingCatName('');
+    setEditingCatDesc('');
+  };
+
+  const handleSaveEditCat = async (catId: string) => {
+    if (!editingCatName.trim()) return;
+    await store.updateCategory(catId, {
+      name: editingCatName.trim(),
+      description: editingCatDesc.trim() || undefined,
+    });
+    setEditingCatId(null);
+    setEditingCatName('');
+    setEditingCatDesc('');
+    setCategoriesList(store.getCategories());
+    refreshData();
+  };
+
+  const handleDeleteCategory = async (catId: string, catName: string) => {
     const usageCount = rawItems.filter(i => i.category.toLowerCase() === catName.toLowerCase()).length;
     const confirmMsg = usageCount > 0
       ? `Category "${catName}" is currently used by ${usageCount} product(s). Are you sure you want to delete it?`
       : `Delete category "${catName}"?`;
 
     if (window.confirm(confirmMsg)) {
-      store.deleteCategory(catId);
+      await store.deleteCategory(catId);
       setCategoriesList(store.getCategories());
+      refreshData();
     }
   };
 
@@ -1912,40 +1946,97 @@ export const InventoryView: React.FC = () => {
                   <table className="table" style={{ margin: 0 }}>
                     <thead>
                       <tr>
-                        <th style={{ padding: '8px 12px', fontSize: '0.72rem' }}>Category Name</th>
+                        <th style={{ padding: '8px 12px', fontSize: '0.72rem', width: '220px' }}>Category Name</th>
                         <th style={{ padding: '8px 12px', fontSize: '0.72rem' }}>Description</th>
-                        <th style={{ padding: '8px 12px', fontSize: '0.72rem', width: '110px' }}>Tagged Items</th>
-                        {canManage && <th style={{ textAlign: 'right', padding: '8px 12px', fontSize: '0.72rem', width: '70px' }}>Action</th>}
+                        {canManage && <th style={{ textAlign: 'right', padding: '8px 12px', fontSize: '0.72rem', width: '150px' }}>Action</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {categoriesList
                         .filter(c => c.name.toLowerCase().includes(categorySearch.toLowerCase()) || (c.description && c.description.toLowerCase().includes(categorySearch.toLowerCase())))
                         .map((cat) => {
-                          const itemCount = rawItems.filter(i => i.category.toLowerCase() === cat.name.toLowerCase()).length;
+                          const isEditing = editingCatId === cat.id;
+
                           return (
                             <tr key={cat.id}>
                               <td style={{ padding: '10px 12px', fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.85rem' }}>
-                                📁 {cat.name}
+                                {isEditing ? (
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={editingCatName}
+                                    onChange={(e) => setEditingCatName(e.target.value)}
+                                    placeholder="Category Name"
+                                    style={{ padding: '4px 8px', fontSize: '0.82rem', width: '100%', boxSizing: 'border-box' }}
+                                    autoFocus
+                                  />
+                                ) : (
+                                  <span>📁 {cat.name}</span>
+                                )}
                               </td>
                               <td style={{ padding: '10px 12px', color: 'var(--neutral-600)', fontSize: '0.8rem' }}>
-                                {cat.description || <span style={{ color: 'var(--neutral-400)', fontStyle: 'italic' }}>No description</span>}
-                              </td>
-                              <td style={{ padding: '10px 12px' }}>
-                                <span style={{ padding: '2px 8px', borderRadius: 4, backgroundColor: itemCount > 0 ? 'var(--primary-50)' : 'var(--neutral-100)', color: itemCount > 0 ? 'var(--primary-700)' : 'var(--neutral-500)', fontSize: '0.75rem', fontWeight: 600 }}>
-                                  {itemCount} {itemCount === 1 ? 'item' : 'items'}
-                                </span>
+                                {isEditing ? (
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={editingCatDesc}
+                                    onChange={(e) => setEditingCatDesc(e.target.value)}
+                                    placeholder="Description (optional)"
+                                    style={{ padding: '4px 8px', fontSize: '0.82rem', width: '100%', boxSizing: 'border-box' }}
+                                  />
+                                ) : (
+                                  cat.description || <span style={{ color: 'var(--neutral-400)', fontStyle: 'italic' }}>No description</span>
+                                )}
                               </td>
                               {canManage && (
                                 <td style={{ textAlign: 'right', padding: '10px 12px' }}>
-                                  <button
-                                    className="btn btn-secondary btn-icon btn-sm"
-                                    title="Delete Category"
-                                    onClick={() => handleDeleteCategory(cat.id, cat.name)}
-                                    style={{ color: 'var(--danger-500)', padding: 4 }}
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
+                                  {isEditing ? (
+                                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                      <button
+                                        type="button"
+                                        className="btn btn-primary btn-sm"
+                                        title="Save Changes"
+                                        onClick={() => handleSaveEditCat(cat.id)}
+                                        style={{ padding: '4px 10px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                      >
+                                        <Check size={14} />
+                                        <span>Save</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        title="Cancel"
+                                        onClick={handleCancelEditCat}
+                                        style={{ padding: '4px 10px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                      >
+                                        <X size={14} />
+                                        <span>Cancel</span>
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        title="Edit Category"
+                                        onClick={() => handleStartEditCat(cat)}
+                                        style={{ padding: '4px 8px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                      >
+                                        <Edit3 size={13} />
+                                        <span>Edit</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        title="Delete Category"
+                                        onClick={() => handleDeleteCategory(cat.id, cat.name)}
+                                        style={{ padding: '4px 8px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--danger-600, #dc2626)' }}
+                                      >
+                                        <Trash2 size={13} />
+                                        <span>Delete</span>
+                                      </button>
+                                    </div>
+                                  )}
                                 </td>
                               )}
                             </tr>

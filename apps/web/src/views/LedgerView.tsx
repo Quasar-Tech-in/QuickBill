@@ -16,6 +16,7 @@ import {
   X, 
   MapPin, 
   CheckCircle,
+  Check,
   FolderPlus,
   TrendingUp,
   TrendingDown
@@ -85,6 +86,10 @@ export const LedgerView: React.FC = () => {
 
   // Category Manager Form
   const [newCatName, setNewCatName] = useState('');
+  const [newCatDesc, setNewCatDesc] = useState('');
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editingCatName, setEditingCatName] = useState<string>('');
+  const [editingCatDesc, setEditingCatDesc] = useState<string>('');
 
   const [isSaving, setIsSaving] = useState(false);
 
@@ -102,6 +107,7 @@ export const LedgerView: React.FC = () => {
     Promise.allSettled([
       store.fetchExpenses(loc),
       store.fetchParties(loc),
+      store.fetchExpenseCategories(),
     ]).then(() => {
       refreshData();
     });
@@ -157,7 +163,7 @@ export const LedgerView: React.FC = () => {
 
         let finalCategory = expenseForm.category;
         if (expenseForm.category === 'CUSTOM' && expenseForm.customCategoryName.trim()) {
-          const addedCat = store.addExpenseCategory(expenseForm.customCategoryName.trim());
+          const addedCat = await store.addExpenseCategory(expenseForm.customCategoryName.trim());
           finalCategory = addedCat.name;
         }
 
@@ -288,19 +294,57 @@ export const LedgerView: React.FC = () => {
   };
 
   // Category Manager: Add Category
-  const handleAddCategory = (e: React.FormEvent) => {
+  const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCatName.trim()) return;
 
-    store.addExpenseCategory(newCatName.trim());
+    await store.addExpenseCategory(newCatName.trim(), newCatDesc.trim() || undefined);
     setNewCatName('');
+    setNewCatDesc('');
     setCategories(store.getExpenseCategories());
   };
 
-  // Category Manager: Delete Category
-  const handleDeleteCategory = (catId: string) => {
-    store.deleteExpenseCategory(catId);
+  // Category Manager: Start Inline Edit
+  const handleStartEditCat = (cat: ExpenseCategory) => {
+    setEditingCatId(cat.id);
+    setEditingCatName(cat.name);
+    setEditingCatDesc(cat.description || '');
+  };
+
+  // Category Manager: Save Inline Edit
+  const handleSaveEditCat = async (catId: string) => {
+    if (!editingCatName.trim()) return;
+    await store.updateExpenseCategory(catId, editingCatName.trim(), editingCatDesc.trim() || undefined);
+    setEditingCatId(null);
+    setEditingCatName('');
+    setEditingCatDesc('');
     setCategories(store.getExpenseCategories());
+    refreshData();
+  };
+
+  // Category Manager: Cancel Inline Edit
+  const handleCancelEditCat = () => {
+    setEditingCatId(null);
+    setEditingCatName('');
+    setEditingCatDesc('');
+  };
+
+  // Category Manager: Delete Category
+  const handleDeleteCategory = async (catId: string) => {
+    const target = categories.find(c => c.id === catId);
+    const catName = target ? ` "${target.name}"` : '';
+    const isConfirmed = window.confirm(`Are you sure you want to delete expense category${catName}? This will permanently remove it from the database.`);
+    if (!isConfirmed) return;
+    await store.deleteExpenseCategory(catId);
+    setCategories(store.getExpenseCategories());
+    refreshData();
+  };
+
+  const openCategoriesModal = () => {
+    setIsCategoriesModalOpen(true);
+    store.fetchExpenseCategories().then(() => {
+      setCategories(store.getExpenseCategories());
+    }).catch(() => {});
   };
 
   // Export CSV
@@ -344,7 +388,7 @@ export const LedgerView: React.FC = () => {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button 
             className="btn btn-secondary" 
-            onClick={() => setIsCategoriesModalOpen(true)}
+            onClick={openCategoriesModal}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <FolderPlus size={16} />
@@ -1084,53 +1128,189 @@ export const LedgerView: React.FC = () => {
       {/* Manage Expense Categories Modal */}
       {isCategoriesModalOpen && (
         <div className="modal-overlay" onClick={() => setIsCategoriesModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
-            <div className="card-header">
-              <span className="card-title">Shop Expense Categories</span>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 680, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
+          >
+            <div className="card-header" style={{ flexShrink: 0, padding: '16px 24px', borderBottom: '1px solid var(--neutral-200)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: 'var(--primary-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-600)' }}>
+                  <FolderPlus size={20} />
+                </div>
+                <div>
+                  <h3 className="card-title" style={{ fontSize: '1.05rem', margin: 0 }}>Shop Expense Categories</h3>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                    Create and manage standard operating expense categories for your store
+                  </p>
+                </div>
+              </div>
               <button className="btn btn-secondary btn-icon" onClick={() => setIsCategoriesModalOpen(false)}>
                 <X size={16} />
               </button>
             </div>
-            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <form onSubmit={handleAddCategory} style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  placeholder="e.g. Generator Fuel, Water Filter..."
-                  value={newCatName}
-                  onChange={(e) => setNewCatName(e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                <button type="submit" className="btn btn-primary">
-                  <Plus size={16} />
-                  <span>Add</span>
-                </button>
-              </form>
 
-              <div style={{ maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--neutral-200)', borderRadius: 'var(--radius-md)', padding: 8 }}>
-                {categories.map(c => (
-                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: 'var(--neutral-50)', borderRadius: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Tag size={14} color="var(--primary-600)" />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--neutral-800)' }}>{c.name}</span>
-                      {!c.isCustom && <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)' }}>(Preset)</span>}
+            <div className="modal-body" style={{ overflowY: 'auto', flex: 1, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {/* Add New Category Form */}
+              <div style={{ background: 'var(--neutral-50)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                  <FolderPlus size={16} color="var(--primary-600)" />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--primary-700)' }}>
+                    Create New Category
+                  </span>
+                </div>
+
+                <form onSubmit={handleAddCategory} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
+                        Category Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        className="form-input"
+                        placeholder="e.g. Generator Fuel, Water Filter"
+                        value={newCatName}
+                        onChange={(e) => setNewCatName(e.target.value)}
+                        style={{ width: '100%', boxSizing: 'border-box', fontSize: '0.85rem' }}
+                      />
                     </div>
-                    {c.isCustom && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        style={{ padding: '2px 6px', color: 'var(--danger-600)' }}
-                        onClick={() => handleDeleteCategory(c.id)}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
+                        Description (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Brief description of expenses under this category"
+                        value={newCatDesc}
+                        onChange={(e) => setNewCatDesc(e.target.value)}
+                        style={{ width: '100%', boxSizing: 'border-box', fontSize: '0.85rem' }}
+                      />
+                    </div>
                   </div>
-                ))}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={!newCatName.trim()} style={{ padding: '6px 16px', fontSize: '0.8rem' }}>
+                      <Plus size={14} />
+                      <span>Add Category</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Categories Table */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--neutral-800)' }}>
+                    Registered Categories ({categories.length})
+                  </span>
+                </div>
+
+                <div style={{ border: '1px solid var(--neutral-200)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                  <table className="table" style={{ margin: 0 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '8px 12px', fontSize: '0.72rem', width: '220px' }}>Category Name</th>
+                        <th style={{ padding: '8px 12px', fontSize: '0.72rem' }}>Description</th>
+                        <th style={{ textAlign: 'right', padding: '8px 12px', fontSize: '0.72rem', width: '150px' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categories.map(c => {
+                        const isEditing = editingCatId === c.id;
+
+                        return (
+                          <tr key={c.id}>
+                            <td style={{ padding: '10px 12px', fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.85rem' }}>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  className="form-input"
+                                  value={editingCatName}
+                                  onChange={(e) => setEditingCatName(e.target.value)}
+                                  placeholder="Category Name"
+                                  style={{ padding: '4px 8px', fontSize: '0.82rem', width: '100%', boxSizing: 'border-box' }}
+                                  autoFocus
+                                />
+                              ) : (
+                                <span>📁 {c.name}</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 12px', color: 'var(--neutral-600)', fontSize: '0.8rem' }}>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  className="form-input"
+                                  value={editingCatDesc}
+                                  onChange={(e) => setEditingCatDesc(e.target.value)}
+                                  placeholder="Description (optional)"
+                                  style={{ padding: '4px 8px', fontSize: '0.82rem', width: '100%', boxSizing: 'border-box' }}
+                                />
+                              ) : (
+                                c.description || <span style={{ color: 'var(--neutral-400)', fontStyle: 'italic' }}>No description</span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'right', padding: '10px 12px' }}>
+                              {isEditing ? (
+                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    title="Save Changes"
+                                    onClick={() => handleSaveEditCat(c.id)}
+                                    style={{ padding: '4px 10px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                  >
+                                    <Check size={14} />
+                                    <span>Save</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    title="Cancel"
+                                    onClick={handleCancelEditCat}
+                                    style={{ padding: '4px 10px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                  >
+                                    <X size={14} />
+                                    <span>Cancel</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    title="Edit Category"
+                                    onClick={() => handleStartEditCat(c)}
+                                    style={{ padding: '4px 8px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                  >
+                                    <Edit3 size={13} />
+                                    <span>Edit</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    title="Delete Category"
+                                    onClick={() => handleDeleteCategory(c.id)}
+                                    style={{ padding: '4px 8px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--danger-600, #dc2626)' }}
+                                  >
+                                    <Trash2 size={13} />
+                                    <span>Delete</span>
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-            <div className="modal-footer">
+
+            <div className="modal-footer" style={{ flexShrink: 0, padding: '14px 24px', borderTop: '1px solid var(--neutral-200)', background: 'var(--neutral-50)' }}>
               <button type="button" className="btn btn-primary" onClick={() => setIsCategoriesModalOpen(false)}>
                 Done
               </button>

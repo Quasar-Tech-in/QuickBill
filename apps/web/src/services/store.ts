@@ -829,7 +829,62 @@ class StoreService {
     return this.categories.filter(c => (c.businessId || DEFAULT_TENANTS[0].id) === activeId);
   }
 
-  addCategory(data: { name: string; description?: string }): ItemCategory {
+  async fetchCategories(): Promise<ItemCategory[]> {
+    try {
+      const res = await apiClient.get('/categories', { params: { type: 'PRODUCT' } });
+      if (res.data && Array.isArray(res.data)) {
+        if (res.data.length > 0) {
+          const liveCats: ItemCategory[] = res.data.map((c: any) => ({
+            id: c.id || c._id,
+            businessId: c.businessId || this.currentTenant.id,
+            name: c.name,
+            type: 'PRODUCT',
+            description: c.description || undefined,
+            createdAt: c.createdAt || new Date().toISOString(),
+          }));
+          this.categories = liveCats;
+          this.saveToStorage();
+          return this.getCategories();
+        } else {
+          // If database is empty for this tenant, seed standard initial product categories into MongoDB
+          const seeded: ItemCategory[] = [];
+          for (const def of DEFAULT_CATEGORIES) {
+            try {
+              const createRes = await apiClient.post('/categories', {
+                name: def.name,
+                type: 'PRODUCT',
+                description: def.description,
+              });
+              seeded.push({
+                id: createRes.data?.id || createRes.data?._id || def.id,
+                businessId: this.currentTenant.id,
+                name: def.name,
+                type: 'PRODUCT',
+                description: def.description,
+                createdAt: new Date().toISOString(),
+              });
+            } catch {
+              seeded.push({
+                ...def,
+                businessId: this.currentTenant.id,
+                type: 'PRODUCT',
+              });
+            }
+          }
+          if (seeded.length > 0) {
+            this.categories = seeded;
+            this.saveToStorage();
+          }
+          return this.getCategories();
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch product categories from API:', e);
+    }
+    return this.getCategories();
+  }
+
+  async addCategory(data: { name: string; description?: string }): Promise<ItemCategory> {
     const activeId = this.currentTenant.id;
     const cleanName = data.name.trim();
     
@@ -845,32 +900,74 @@ class StoreService {
       id: `cat_${Date.now()}`,
       businessId: activeId,
       name: cleanName,
+      type: 'PRODUCT',
       description: data.description?.trim() || undefined,
       createdAt: new Date().toISOString(),
     };
+
+    // Attempt backend sync
+    try {
+      const res = await apiClient.post('/categories', {
+        name: newCategory.name,
+        type: 'PRODUCT',
+        description: newCategory.description,
+      });
+      if (res.data?.id || res.data?._id) {
+        newCategory.id = res.data.id || res.data._id;
+      }
+    } catch (err) {
+      console.warn('Could not sync product category to backend API:', err);
+    }
 
     this.categories.push(newCategory);
     this.saveToStorage();
     return newCategory;
   }
 
-  updateCategory(id: string, updates: Partial<ItemCategory>): ItemCategory | null {
+  async updateCategory(id: string, updates: Partial<ItemCategory>): Promise<ItemCategory | null> {
     const activeId = this.currentTenant.id;
     const idx = this.categories.findIndex(
       c => (c.businessId || DEFAULT_TENANTS[0].id) === activeId && c.id === id
     );
     if (idx === -1) return null;
 
+    const oldName = this.categories[idx].name;
+    const newName = updates.name ? updates.name.trim() : oldName;
+
     this.categories[idx] = {
       ...this.categories[idx],
       ...updates,
+      name: newName,
       businessId: activeId,
     };
+
+    // Cascade category rename to tagged inventory items
+    if (newName !== oldName) {
+      this.items.forEach(item => {
+        if (item.category === oldName) {
+          item.category = newName;
+        }
+      });
+    }
+
     this.saveToStorage();
+
+    if (!id.startsWith('cat_')) {
+      try {
+        await apiClient.put(`/categories/${id}`, {
+          name: newName,
+          type: 'PRODUCT',
+          description: updates.description,
+        });
+      } catch (err) {
+        console.warn('Could not sync product category update to backend API:', err);
+      }
+    }
+
     return this.categories[idx];
   }
 
-  deleteCategory(id: string): boolean {
+  async deleteCategory(id: string): Promise<boolean> {
     const activeId = this.currentTenant.id;
     const target = this.categories.find(
       c => (c.businessId || DEFAULT_TENANTS[0].id) === activeId && c.id === id
@@ -881,6 +978,15 @@ class StoreService {
       c => !((c.businessId || DEFAULT_TENANTS[0].id) === activeId && c.id === id)
     );
     this.saveToStorage();
+
+    if (!id.startsWith('cat_')) {
+      try {
+        await apiClient.delete(`/categories/${id}`);
+      } catch (err) {
+        console.warn('Could not sync product category deletion to backend API:', err);
+      }
+    }
+
     return true;
   }
 
@@ -1174,25 +1280,143 @@ class StoreService {
     return this.expenseCategories;
   }
 
-  addExpenseCategory(name: string): ExpenseCategory {
+  async fetchExpenseCategories(): Promise<ExpenseCategory[]> {
+    try {
+      const res = await apiClient.get('/categories', { params: { type: 'EXPENSE' } });
+      if (res.data && Array.isArray(res.data)) {
+        if (res.data.length > 0) {
+          const liveCats: ExpenseCategory[] = res.data.map((c: any) => ({
+            id: c.id || c._id,
+            businessId: c.businessId || this.currentTenant.id,
+            name: c.name,
+            type: 'EXPENSE',
+            description: c.description || undefined,
+            isCustom: true,
+          }));
+          this.expenseCategories = liveCats;
+          this.saveToStorage();
+          return this.getExpenseCategories();
+        } else {
+          // If database is empty for this tenant, seed standard initial expense categories into MongoDB
+          const seeded: ExpenseCategory[] = [];
+          for (const def of DEFAULT_EXPENSE_CATEGORIES) {
+            try {
+              const createRes = await apiClient.post('/categories', {
+                name: def.name,
+                type: 'EXPENSE',
+              });
+              seeded.push({
+                id: createRes.data?.id || createRes.data?._id || def.id,
+                businessId: this.currentTenant.id,
+                name: def.name,
+                type: 'EXPENSE',
+                isCustom: true,
+              });
+            } catch {
+              seeded.push({
+                ...def,
+                businessId: this.currentTenant.id,
+                type: 'EXPENSE',
+                isCustom: true,
+              });
+            }
+          }
+          if (seeded.length > 0) {
+            this.expenseCategories = seeded;
+            this.saveToStorage();
+          }
+          return this.getExpenseCategories();
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch expense categories from API:', e);
+    }
+    return this.getExpenseCategories();
+  }
+
+  async addExpenseCategory(name: string, description?: string): Promise<ExpenseCategory> {
     const cleanName = name.trim();
+    const cleanDesc = description?.trim() || undefined;
     const existing = this.expenseCategories.find(c => c.name.toLowerCase() === cleanName.toLowerCase());
     if (existing) return existing;
 
     const newCat: ExpenseCategory = {
       id: `exp_cat_${Date.now()}`,
+      businessId: this.currentTenant.id,
       name: cleanName,
+      type: 'EXPENSE',
+      description: cleanDesc,
       isCustom: true,
     };
+
+    // Attempt backend sync
+    try {
+      const res = await apiClient.post('/categories', {
+        name: newCat.name,
+        type: 'EXPENSE',
+        description: cleanDesc,
+      });
+      if (res.data?.id || res.data?._id) {
+        newCat.id = res.data.id || res.data._id;
+      }
+    } catch (err) {
+      console.warn('Could not sync expense category to backend API:', err);
+    }
+
     this.expenseCategories.push(newCat);
     this.saveToStorage();
     return newCat;
   }
 
-  deleteExpenseCategory(id: string): boolean {
+  async updateExpenseCategory(id: string, newName: string, description?: string): Promise<ExpenseCategory | null> {
+    const cleanName = newName.trim();
+    if (!cleanName) return null;
+    const cleanDesc = description !== undefined ? (description.trim() || undefined) : undefined;
+
+    const target = this.expenseCategories.find(c => c.id === id);
+    if (!target) return null;
+
+    const oldName = target.name;
+    target.name = cleanName;
+    if (description !== undefined) {
+      target.description = cleanDesc;
+    }
+
+    // Cascade category rename to existing expense records
+    if (oldName !== cleanName) {
+      this.expenses.forEach(e => {
+        if (e.category === oldName) {
+          e.category = cleanName;
+        }
+      });
+    }
+
+    this.saveToStorage();
+
+    try {
+      await apiClient.put(`/categories/${id}`, {
+        name: cleanName,
+        type: 'EXPENSE',
+        description: cleanDesc,
+      });
+    } catch (err) {
+      console.warn('Could not sync expense category update to backend API:', err);
+    }
+
+    return target;
+  }
+
+  async deleteExpenseCategory(id: string): Promise<boolean> {
     const prevLen = this.expenseCategories.length;
     this.expenseCategories = this.expenseCategories.filter(c => c.id !== id);
     this.saveToStorage();
+
+    try {
+      await apiClient.delete(`/categories/${id}`);
+    } catch (err) {
+      console.warn('Could not sync expense category deletion to backend API:', err);
+    }
+
     return this.expenseCategories.length < prevLen;
   }
 

@@ -179,3 +179,50 @@ async def test_customers_crm_and_marketing_isolation(superadmin_token):
         exports = export_res_a.json()
         assert any(c["id"] == cust_id for c in exports)
 
+
+@pytest.mark.asyncio
+async def test_category_crud_and_expense_type_isolation(superadmin_token):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        headers_tenant_a = {
+            "Authorization": f"Bearer {superadmin_token}",
+            "X-Business-ID": TENANT_A_ID
+        }
+
+        # 1. Create an EXPENSE category in Store A
+        create_res = await ac.post("/api/v1/categories", json={
+            "name": "Shop Electricity Bill",
+            "type": "EXPENSE",
+            "description": "Monthly utility power expenses"
+        }, headers=headers_tenant_a)
+        assert create_res.status_code == 201
+        created_cat = create_res.json()
+        cat_id = created_cat["_id"]
+        assert created_cat["name"] == "Shop Electricity Bill"
+        assert created_cat["type"] == "EXPENSE"
+
+        # 2. Filter by type=EXPENSE returns it, filter by type=PRODUCT does not
+        list_exp = await ac.get("/api/v1/categories?type=EXPENSE", headers=headers_tenant_a)
+        assert list_exp.status_code == 200
+        assert any(c["_id"] == cat_id for c in list_exp.json())
+
+        list_prod = await ac.get("/api/v1/categories?type=PRODUCT", headers=headers_tenant_a)
+        assert list_prod.status_code == 200
+        assert not any(c["_id"] == cat_id for c in list_prod.json())
+
+        # 3. Update category name
+        update_res = await ac.put(f"/api/v1/categories/{cat_id}", json={
+            "name": "Shop Electricity & Power Bill",
+            "type": "EXPENSE"
+        }, headers=headers_tenant_a)
+        assert update_res.status_code == 200
+        assert update_res.json()["name"] == "Shop Electricity & Power Bill"
+
+        # 4. Delete category from database
+        del_res = await ac.delete(f"/api/v1/categories/{cat_id}", headers=headers_tenant_a)
+        assert del_res.status_code == 204
+
+        # 5. Verify it is gone from database
+        verify_res = await ac.get("/api/v1/categories?type=EXPENSE", headers=headers_tenant_a)
+        assert not any(c["_id"] == cat_id for c in verify_res.json())
+
+

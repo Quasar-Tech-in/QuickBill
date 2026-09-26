@@ -53,6 +53,7 @@ export interface ItemCategory {
   id: string;
   businessId?: string;
   name: string;
+  type?: 'PRODUCT' | 'EXPENSE';
   description?: string;
   createdAt: string;
 }
@@ -260,7 +261,10 @@ export interface Expense {
 
 export interface ExpenseCategory {
   id: string;
+  businessId?: string;
   name: string;
+  type?: 'PRODUCT' | 'EXPENSE';
+  description?: string;
   isCustom?: boolean;
 }
 
