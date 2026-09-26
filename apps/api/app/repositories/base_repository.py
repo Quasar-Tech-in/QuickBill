@@ -59,7 +59,7 @@ class BaseTenantRepository:
             {"$set": update_fields},
             session=session
         )
-        return result.modified_count > 0
+        return result.matched_count > 0
 
     async def delete_by_id(self, business_id: str, document_id: str, session=None) -> bool:
         result = await self.collection.delete_one(

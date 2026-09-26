@@ -697,7 +697,8 @@ class StoreService {
 
   async fetchItems(locationId?: string): Promise<Item[]> {
     try {
-      const res = await apiClient.get('/items', { params: { page: 1, page_size: 100 } });
+      const locId = locationId || this.getActiveLocation().id;
+      const res = await apiClient.get('/items', { params: { page: 1, page_size: 500, locationId: locId } });
       if (res.data?.data && Array.isArray(res.data.data)) {
         const liveItems: Item[] = res.data.data.map((d: any) => ({
           id: d._id || d.id || d.publicItemId,
@@ -725,6 +726,7 @@ class StoreService {
         }));
         if (liveItems.length > 0) {
           this.items = liveItems;
+          this.saveToStorage();
         }
       }
     } catch (e) {
@@ -831,7 +833,7 @@ class StoreService {
     return items.find(i => i.id === id || i.publicItemId === id);
   }
 
-  addItem(item: Omit<Item, 'id' | 'publicItemId' | 'businessId'>): Item {
+  async addItem(item: Omit<Item, 'id' | 'publicItemId' | 'businessId'>): Promise<Item> {
     const activeId = this.currentTenant.id;
     const storeItems = this.getRawItems();
     
@@ -853,6 +855,64 @@ class StoreService {
       }));
     }
 
+    try {
+      const payload = {
+        name: item.name,
+        sku: item.sku || undefined,
+        barcode: item.barcode || undefined,
+        category: item.category || 'General',
+        unit: item.unit || 'pcs',
+        purchasePrice: item.purchasePrice || 0,
+        salePrice: item.salePrice || 0,
+        mrp: item.mrp || item.salePrice,
+        taxRate: item.taxRate || 0,
+        currentStock: item.currentStock || 0,
+        minStockAlert: item.minStockAlert || 5,
+        allowParts: !!item.allowParts,
+        description: item.description || undefined,
+        hasDiscount: !!item.hasDiscount,
+        discountType: item.discountType || 'PERCENT',
+        discountValue: item.discountValue || 0,
+        locations: locs,
+        images: item.images || [],
+        imageUrl: item.imageUrl || undefined,
+      };
+
+      const res = await apiClient.post('/items', payload);
+      if (res.data && (res.data.id || res.data._id)) {
+        const d = res.data;
+        const created: Item = {
+          id: d._id || d.id,
+          businessId: d.businessId || activeId,
+          publicItemId: d.publicItemId || `ITM-${1000 + storeItems.length + 1}`,
+          name: d.name,
+          sku: d.sku,
+          barcode: d.barcode,
+          category: d.category || 'General',
+          taxRate: Number(d.taxRate || 0),
+          unit: d.unit || 'pcs',
+          description: d.description,
+          mrp: d.mrp ? Number(d.mrp) : Number(d.salePrice || 0),
+          salePrice: Number(d.salePrice || 0),
+          purchasePrice: Number(d.purchasePrice || 0),
+          currentStock: Number(d.currentStock || 0),
+          minStockAlert: Number(d.minStockAlert || 5),
+          hasDiscount: !!d.hasDiscount,
+          discountType: d.discountType,
+          discountValue: d.discountValue ? Number(d.discountValue) : undefined,
+          locations: d.locations || locs,
+          images: d.images,
+          imageUrl: d.imageUrl,
+          allowParts: !!d.allowParts,
+        };
+        this.items.unshift(created);
+        this.saveToStorage();
+        return created;
+      }
+    } catch (e) {
+      console.warn('Backend /items creation failed, fallback local:', e);
+    }
+
     const newItem: Item = {
       ...item,
       id: `item_${Date.now()}`,
@@ -865,21 +925,106 @@ class StoreService {
     return newItem;
   }
 
-  updateItem(id: string, updates: Partial<Item>): Item | null {
+  async updateItem(id: string, updates: Partial<Item>): Promise<Item | null> {
     const activeId = this.currentTenant.id;
     const idx = this.items.findIndex(
       i => (i.businessId || DEFAULT_TENANTS[0].id) === activeId && i.id === id
     );
-    if (idx === -1) return null;
 
+    try {
+      const payload: any = { ...updates };
+      if (payload.id) delete payload.id;
+      if (payload.businessId) delete payload.businessId;
+      if (payload.publicItemId) delete payload.publicItemId;
+
+      const res = await apiClient.put(`/items/${id}`, payload);
+      if (res.data && (res.data.id || res.data._id)) {
+        const d = res.data;
+        const updated: Item = {
+          id: d._id || d.id || id,
+          businessId: d.businessId || activeId,
+          publicItemId: d.publicItemId,
+          name: d.name,
+          sku: d.sku,
+          barcode: d.barcode,
+          category: d.category || 'General',
+          taxRate: Number(d.taxRate || 0),
+          unit: d.unit || 'pcs',
+          description: d.description,
+          mrp: d.mrp ? Number(d.mrp) : Number(d.salePrice || 0),
+          salePrice: Number(d.salePrice || 0),
+          purchasePrice: Number(d.purchasePrice || 0),
+          currentStock: Number(d.currentStock || 0),
+          minStockAlert: Number(d.minStockAlert || 5),
+          hasDiscount: !!d.hasDiscount,
+          discountType: d.discountType,
+          discountValue: d.discountValue ? Number(d.discountValue) : undefined,
+          locations: d.locations,
+          images: d.images,
+          imageUrl: d.imageUrl,
+          allowParts: !!d.allowParts,
+        };
+        if (idx !== -1) {
+          this.items[idx] = updated;
+        } else {
+          this.items.unshift(updated);
+        }
+        this.saveToStorage();
+        return updated;
+      }
+    } catch (e) {
+      console.warn(`Backend /items/${id} update failed, fallback local:`, e);
+    }
+
+    if (idx === -1) return null;
     this.items[idx] = { ...this.items[idx], ...updates, businessId: activeId };
     this.saveToStorage();
     return this.items[idx];
   }
 
-  adjustStock(id: string, delta: number, locationId?: string): Item | null {
+  async adjustStock(id: string, delta: number, locationId?: string): Promise<Item | null> {
     const activeId = this.currentTenant.id;
     const targetLocId = locationId || this.getActiveLocation().id;
+
+    try {
+      const res = await apiClient.post(`/items/${id}/adjust-stock`, { delta, locationId: targetLocId });
+      if (res.data && (res.data.id || res.data._id)) {
+        const d = res.data;
+        const updated: Item = {
+          id: d._id || d.id || id,
+          businessId: d.businessId || activeId,
+          publicItemId: d.publicItemId,
+          name: d.name,
+          sku: d.sku,
+          barcode: d.barcode,
+          category: d.category || 'General',
+          taxRate: Number(d.taxRate || 0),
+          unit: d.unit || 'pcs',
+          description: d.description,
+          mrp: d.mrp ? Number(d.mrp) : Number(d.salePrice || 0),
+          salePrice: Number(d.salePrice || 0),
+          purchasePrice: Number(d.purchasePrice || 0),
+          currentStock: Number(d.currentStock || 0),
+          minStockAlert: Number(d.minStockAlert || 5),
+          hasDiscount: !!d.hasDiscount,
+          discountType: d.discountType,
+          discountValue: d.discountValue ? Number(d.discountValue) : undefined,
+          locations: d.locations,
+          images: d.images,
+          imageUrl: d.imageUrl,
+          allowParts: !!d.allowParts,
+        };
+        const idx = this.items.findIndex(i => i.id === id);
+        if (idx !== -1) {
+          this.items[idx] = updated;
+        }
+        this.saveToStorage();
+        return updated;
+      }
+    } catch (e) {
+      console.warn(`Backend /items/${id}/adjust-stock failed, fallback local:`, e);
+    }
+
     const item = this.items.find(
       i => (i.businessId || DEFAULT_TENANTS[0].id) === activeId && i.id === id
     );
@@ -901,8 +1046,13 @@ class StoreService {
     return item;
   }
 
-  deleteItem(id: string): boolean {
+  async deleteItem(id: string): Promise<boolean> {
     const activeId = this.currentTenant.id;
+    try {
+      await apiClient.delete(`/items/${id}`);
+    } catch (e) {
+      console.warn(`Backend /items/${id} delete failed:`, e);
+    }
     const prevLen = this.items.length;
     this.items = this.items.filter(
       i => !((i.businessId || DEFAULT_TENANTS[0].id) === activeId && i.id === id)

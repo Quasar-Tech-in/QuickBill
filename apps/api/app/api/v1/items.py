@@ -6,6 +6,7 @@ import urllib.request
 import urllib.error
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional, List
 from pydantic import BaseModel
 from bson import ObjectId
@@ -79,19 +80,48 @@ async def create_item(
     public_id = f"itm_{secrets.token_hex(6)}"
     now = datetime.now(timezone.utc)
 
+    # Determine initial stock
+    initial_stock = payload.current_stock if payload.current_stock is not None else (payload.opening_stock or Decimal("0.0"))
+
+    # Convert locations
+    locations_data = []
+    if payload.locations:
+        for loc in payload.locations:
+            loc_dict = loc.model_dump(by_alias=True)
+            for float_field in ["mrp", "salePrice", "purchasePrice", "currentStock", "minStockAlert", "discountValue"]:
+                if float_field in loc_dict and loc_dict[float_field] is not None:
+                    loc_dict[float_field] = float(loc_dict[float_field])
+            locations_data.append(loc_dict)
+
+    # Convert images
+    images_data = []
+    if payload.images:
+        for img in payload.images:
+            images_data.append(img.model_dump(by_alias=True))
+
     item_doc = {
         "businessId": ObjectId(business_id),
         "publicItemId": public_id,
         "name": payload.name,
         "sku": payload.sku,
+        "barcode": payload.barcode,
+        "category": payload.category or "General",
         "unit": payload.unit,
         "purchasePrice": float(payload.purchase_price),
         "salePrice": float(payload.sale_price),
+        "mrp": float(payload.mrp) if payload.mrp is not None else float(payload.sale_price),
         "taxRate": float(payload.tax_rate),
         "categoryId": payload.category_id,
-        "currentStock": float(payload.opening_stock),
+        "currentStock": float(initial_stock),
         "minStockAlert": float(payload.min_stock_alert),
         "allowParts": bool(payload.allow_parts),
+        "description": payload.description,
+        "hasDiscount": bool(payload.has_discount),
+        "discountType": payload.discount_type or "PERCENT",
+        "discountValue": float(payload.discount_value or 0),
+        "locations": locations_data,
+        "images": images_data,
+        "imageUrl": payload.image_url,
         "qrPayload": f"ITEM:{public_id}",
         "isActive": True,
         "createdAt": now,
@@ -146,27 +176,78 @@ async def update_item(
     if not existing:
         raise HTTPException(status_code=404, detail="Item not found in current business catalog")
 
-    update_data = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
-    if "purchase_price" in update_data:
-        update_data["purchasePrice"] = float(update_data.pop("purchase_price"))
-    if "sale_price" in update_data:
-        update_data["salePrice"] = float(update_data.pop("sale_price"))
-    if "tax_rate" in update_data:
-        update_data["taxRate"] = float(update_data.pop("tax_rate"))
-    if "min_stock_alert" in update_data:
-        update_data["minStockAlert"] = float(update_data.pop("min_stock_alert"))
-    if "allow_parts" in update_data:
-        update_data["allowParts"] = bool(update_data.pop("allow_parts"))
-    if "category_id" in update_data:
-        update_data["categoryId"] = update_data.pop("category_id")
+    update_data = {}
+    dumped = payload.model_dump(by_alias=True, exclude_unset=True)
+    for k, v in dumped.items():
+        if v is not None:
+            if isinstance(v, Decimal):
+                update_data[k] = float(v)
+            else:
+                update_data[k] = v
 
-    
+    # Float conversion for monetary / numeric fields
+    for float_field in ["purchasePrice", "salePrice", "mrp", "taxRate", "minStockAlert", "currentStock", "discountValue"]:
+        if float_field in update_data and update_data[float_field] is not None:
+            update_data[float_field] = float(update_data[float_field])
+
+    if "locations" in update_data and update_data["locations"]:
+        for loc in update_data["locations"]:
+            for float_field in ["mrp", "salePrice", "purchasePrice", "currentStock", "minStockAlert", "discountValue"]:
+                if float_field in loc and loc[float_field] is not None:
+                    loc[float_field] = float(loc[float_field])
+
     update_data["updatedAt"] = datetime.now(timezone.utc)
 
     success = await repo.update_by_id(business_id, item_id, update_data)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to update item")
 
+    updated = await repo.get_by_id(business_id, item_id)
+    updated["_id"] = str(updated["_id"])
+    updated["businessId"] = str(updated["businessId"])
+    return ItemResponse(**updated)
+
+@router.post("/{item_id}/adjust-stock", response_model=ItemResponse)
+async def adjust_item_stock(
+    item_id: str,
+    payload: dict,
+    business_id: str = Depends(get_current_business_id),
+):
+    db = await get_tenant_db(business_id)
+    repo = ItemRepository(db)
+    existing = await repo.get_by_id(business_id, item_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Item not found in current business catalog")
+
+    delta = float(payload.get("delta", 0))
+    location_id = payload.get("locationId")
+
+    current_stock = max(0.0, float(existing.get("currentStock", 0)) + delta)
+    update_fields: dict = {
+        "currentStock": current_stock,
+        "updatedAt": datetime.now(timezone.utc)
+    }
+
+    if location_id and existing.get("locations"):
+        locs = list(existing["locations"])
+        found = False
+        for loc in locs:
+            if loc.get("locationId") == location_id:
+                loc["currentStock"] = max(0.0, float(loc.get("currentStock", 0)) + delta)
+                found = True
+                break
+        if not found:
+            locs.append({
+                "locationId": location_id,
+                "currentStock": max(0.0, delta),
+                "salePrice": float(existing.get("salePrice", 0)),
+                "purchasePrice": float(existing.get("purchasePrice", 0)),
+                "minStockAlert": float(existing.get("minStockAlert", 5)),
+                "isListed": True,
+            })
+        update_fields["locations"] = locs
+
+    await repo.update_by_id(business_id, item_id, update_fields)
     updated = await repo.get_by_id(business_id, item_id)
     updated["_id"] = str(updated["_id"])
     updated["businessId"] = str(updated["businessId"])
@@ -179,7 +260,6 @@ async def delete_item(
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
-    # Soft delete / deactivation within tenant context
     existing = await repo.get_by_id(business_id, item_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Item not found in current business catalog")

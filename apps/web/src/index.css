@@ -644,37 +644,35 @@ body {
 
 .item-catalog-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 12px;
   overflow-y: auto;
   overflow-x: hidden;
   flex: 1 1 0;
   min-height: 0;
-  padding-right: 4px;
+  padding: 2px 4px 12px 2px;
   align-content: start;
 }
 
 .pos-item-card {
   background: #ffffff;
   border: 1px solid var(--neutral-200);
-  border-radius: var(--radius-md);
-  padding: 12px;
+  border-radius: 12px;
+  padding: 0;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.18s ease;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: 188px;
-  min-height: 188px;
-  max-height: 188px;
+  min-height: 200px;
   box-sizing: border-box;
   overflow: hidden;
 }
 
 .pos-item-card:hover {
-  border-color: var(--primary-500);
+  border-color: var(--primary-400);
   transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
 }
 
 .pos-cart-panel {
@@ -2517,4 +2515,13 @@ body {
 .cart-qty-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }

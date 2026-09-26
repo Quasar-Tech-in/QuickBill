@@ -33,6 +33,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const [, setRawItems] = useState<Item[]>([]);
   const [categoriesList, setCategoriesList] = useState<ItemCategory[]>(store.getCategories());
   const [parties, setParties] = useState<Party[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -92,32 +93,33 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   }, []);
 
   // Data Refresh / Location Sync
-  const refreshData = () => {
-    const currentLoc = store.getActiveLocation();
-    // Strictly retrieve only listed items for this branch
-    const branchItems = store.getItems(currentLoc.id, false);
-    setItems(branchItems);
-    setRawItems(store.getRawItems());
-    setCategoriesList(store.getCategories());
-    setParties(store.getParties(currentLoc.id).filter(p => p.type === 'CUSTOMER'));
-    if (selectedLocationId !== currentLoc.id) {
-      setSelectedLocationId(currentLoc.id);
-      updateCart([]);
+  const refreshData = async (showLoadingState = false) => {
+    if (showLoadingState) setIsRefreshing(true);
+    try {
+      const currentLoc = store.getActiveLocation();
+      // Fetch latest live stocks, categories, and parties from backend MongoDB
+      await Promise.allSettled([
+        store.fetchItems(currentLoc.id),
+        store.fetchCategories(),
+        store.fetchParties(),
+      ]);
+
+      const branchItems = store.getItems(currentLoc.id, false);
+      setItems(branchItems);
+      setRawItems(store.getRawItems());
+      setCategoriesList(store.getCategories());
+      setParties(store.getParties(currentLoc.id).filter(p => p.type === 'CUSTOMER'));
+      if (selectedLocationId !== currentLoc.id) {
+        setSelectedLocationId(currentLoc.id);
+        updateCart([]);
+      }
+    } finally {
+      if (showLoadingState) setIsRefreshing(false);
     }
   };
 
   useEffect(() => {
     refreshData();
-    // Live reload items and categories from backend MongoDB
-    store.fetchItems(store.getActiveLocation().id).then(() => {
-      refreshData();
-    }).catch(() => {});
-    // Fetch live customers and parties from backend MongoDB
-    store.fetchParties().then(fetched => {
-      setParties(fetched.filter(p => p.type === 'CUSTOMER'));
-    }).catch(() => {});
-    setCategoriesList(store.getCategories());
-
     const interval = setInterval(() => {
       const currentLocId = store.getActiveLocation().id;
       if (currentLocId !== selectedLocationId) {
@@ -569,25 +571,27 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
               {/* Manual Refresh Stocks Button */}
               <button
                 type="button"
-                onClick={refreshData}
+                onClick={() => refreshData(true)}
+                disabled={isRefreshing}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 5,
-                  padding: '3px 8px',
+                  gap: 6,
+                  padding: '4px 10px',
                   borderRadius: 'var(--radius-sm)',
-                  backgroundColor: 'var(--neutral-100)',
+                  backgroundColor: isRefreshing ? 'var(--neutral-200)' : 'var(--neutral-100)',
                   border: '1px solid var(--neutral-300)',
-                  fontSize: '0.72rem',
+                  fontSize: '0.74rem',
                   fontWeight: 600,
-                  color: 'var(--neutral-700)',
-                  cursor: 'pointer',
+                  color: 'var(--neutral-800)',
+                  cursor: isRefreshing ? 'not-allowed' : 'pointer',
                   transition: 'all 0.15s ease',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
                 }}
-                title="Refresh product list and real-time stock levels"
+                title="Refresh product list and real-time stock levels from server"
               >
-                <RotateCw size={12} />
-                <span>Refresh Stocks</span>
+                <RotateCw size={13} style={{ animation: isRefreshing ? 'spin 0.75s linear infinite' : 'none' }} />
+                <span>{isRefreshing ? 'Refreshing...' : 'Refresh Stocks'}</span>
               </button>
             </div>
 
@@ -907,167 +911,185 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                     className="pos-item-card" 
                     onClick={() => handleAddToCart(item)}
                     style={{
-                      height: 188,
-                      minHeight: 188,
-                      maxHeight: 188,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      backgroundColor: '#ffffff',
+                      border: isOutOfStock ? '1.5px dashed var(--danger-300)' : '1px solid var(--neutral-200)',
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      padding: 0,
+                      cursor: 'pointer',
+                      transition: 'all 0.18s ease-in-out',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                      opacity: isOutOfStock ? 0.75 : 1,
+                      minHeight: 205,
                       boxSizing: 'border-box',
-                      opacity: isOutOfStock ? 0.7 : 1,
-                      border: isOutOfStock ? '1px dashed var(--danger-300)' : '1px solid var(--neutral-200)',
                     }}
                   >
-                    {/* Card Top: Image + Header Info (Fixed Height Segment) */}
-                    <div>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 6 }}>
-                        {/* 48x48 Product Image Thumbnail */}
-                        <div style={{
-                          width: 48,
-                          height: 48,
-                          borderRadius: 8,
-                          backgroundColor: 'var(--neutral-100)',
-                          border: '1px solid var(--neutral-200)',
-                          overflow: 'hidden',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}>
-                          {imageUrl ? (
-                            <img
-                              src={imageUrl}
-                              alt={item.name}
-                              loading="lazy"
-                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              onError={(e) => {
-                                (e.target as HTMLElement).style.display = 'none';
-                              }}
-                            />
-                          ) : (
-                            <Package size={20} color="var(--neutral-400)" />
-                          )}
+                    {/* Top Segment: Product Image Banner */}
+                    <div style={{
+                      position: 'relative',
+                      width: '100%',
+                      height: 105,
+                      backgroundColor: 'var(--neutral-50)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderBottom: '1px solid var(--neutral-100)',
+                      overflow: 'hidden',
+                    }}>
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt={item.name}
+                          loading="lazy"
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'contain',
+                            padding: 6,
+                            boxSizing: 'border-box',
+                          }}
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--neutral-400)' }}>
+                          <Package size={34} strokeWidth={1.5} />
                         </div>
+                      )}
 
-                        {/* Public ID & Tax */}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.66rem', color: 'var(--neutral-500)', fontWeight: 600 }}>
-                              {item.publicItemId}
-                            </span>
-                            <span style={{ fontSize: '0.64rem', backgroundColor: 'var(--neutral-100)', padding: '1px 4px', borderRadius: 4, color: 'var(--neutral-600)', fontWeight: 600 }}>
-                              GST {item.taxRate}%
-                            </span>
-                          </div>
-                          {/* Title with exact 2-line clamp height */}
-                          <p style={{
-                            fontWeight: 700,
-                            fontSize: '0.84rem',
-                            color: 'var(--neutral-900)',
-                            lineHeight: '1.2em',
-                            height: '2.4em',
-                            margin: 0,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                          }}>
-                            {item.name}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Category & Parts Tag (Single Line) */}
-                      <div style={{ height: 18, overflow: 'hidden', display: 'flex', gap: 4, alignItems: 'center' }}>
+                      {/* Category Pill Top-Left */}
+                      <div style={{ position: 'absolute', top: 6, left: 6, zIndex: 1 }}>
                         <span style={{
-                          fontSize: '0.66rem',
-                          color: 'var(--neutral-500)',
-                          backgroundColor: 'var(--neutral-50)',
-                          border: '1px solid var(--neutral-200)',
-                          padding: '1px 5px',
+                          fontSize: '0.65rem',
+                          color: 'var(--neutral-700)',
+                          backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                          backdropFilter: 'blur(4px)',
+                          border: '1px solid rgba(0, 0, 0, 0.08)',
+                          padding: '2px 6px',
                           borderRadius: 4,
-                          fontWeight: 500,
+                          fontWeight: 600,
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                           display: 'inline-block',
-                          maxWidth: '70%',
+                          maxWidth: 100,
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                         }}>
-                          {item.category}
+                          {item.category || 'General'}
                         </span>
-                        {item.allowParts && (
-                          <span style={{
-                            fontSize: '0.62rem',
-                            color: 'var(--primary-700)',
-                            backgroundColor: 'var(--primary-50)',
-                            border: '1px solid var(--primary-200)',
-                            padding: '1px 4px',
-                            borderRadius: 4,
-                            fontWeight: 700,
-                            whiteSpace: 'nowrap',
-                          }}>
-                            ⚖️ Loose / Parts
-                          </span>
-                        )}
+                      </div>
+
+                      {/* GST Pill Top-Right */}
+                      <div style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}>
+                        <span style={{
+                          fontSize: '0.62rem',
+                          backgroundColor: 'rgba(238, 242, 255, 0.95)',
+                          backdropFilter: 'blur(4px)',
+                          border: '1px solid var(--primary-200)',
+                          padding: '2px 5px',
+                          borderRadius: 4,
+                          color: 'var(--primary-700)',
+                          fontWeight: 700,
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                        }}>
+                          GST {item.taxRate}%
+                        </span>
                       </div>
                     </div>
 
-                    {/* Card Bottom: Pricing, Stock Alert & Add Trigger (Fixed Height Segment) */}
-                    <div style={{ paddingTop: 6, borderTop: '1px solid var(--neutral-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                          <span style={{ fontSize: '1.02rem', fontWeight: 800, color: 'var(--primary-600)' }}>
+                    {/* Card Body: Full Product Title, Parts info & Price Footer */}
+                    <div style={{
+                      padding: '10px 12px 12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      flex: 1,
+                    }}>
+                      <div>
+                        {/* Full Product Name (100% width, no clamping, natural wrapping) */}
+                        <h4 style={{
+                          margin: '0 0 6px 0',
+                          fontWeight: 700,
+                          fontSize: '0.88rem',
+                          color: 'var(--neutral-900)',
+                          lineHeight: '1.35',
+                          wordBreak: 'normal',
+                          overflowWrap: 'break-word',
+                        }}>
+                          {item.name}
+                        </h4>
+
+                        {/* Loose / Parts Tag if enabled */}
+                        {item.allowParts && (
+                          <div style={{ marginBottom: 6 }}>
+                            <span style={{
+                              fontSize: '0.64rem',
+                              color: '#047857',
+                              backgroundColor: '#ecfdf5',
+                              border: '1px solid #a7f3d0',
+                              padding: '1px 5px',
+                              borderRadius: 4,
+                              fontWeight: 700,
+                              display: 'inline-block',
+                            }}>
+                              ⚖️ Loose / Parts
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Card Bottom: Price & Quick Add Button */}
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        paddingTop: 8,
+                        marginTop: 6,
+                        borderTop: '1px solid var(--neutral-100)',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+                          <span style={{ fontSize: '1.10rem', fontWeight: 800, color: 'var(--primary-700)' }}>
                             ₹{item.salePrice.toFixed(2)}
                           </span>
                           {item.hasDiscount && item.discountValue && item.discountValue > 0 && (
-                            <del style={{ fontSize: '0.7rem', color: 'var(--neutral-400)' }}>
+                            <del style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
                               ₹{(item.mrp || item.salePrice).toFixed(2)}
                             </del>
                           )}
                         </div>
 
-                        {/* Stock Status Badge */}
-                        <div style={{ marginTop: 2, height: 16 }}>
-                          {isOutOfStock ? (
-                            <span style={{ fontSize: '0.68rem', color: 'var(--danger-600)', fontWeight: 700, backgroundColor: 'var(--danger-50)', padding: '0 4px', borderRadius: 3 }}>
-                              Out of Stock
-                            </span>
-                          ) : isLowStock ? (
-                            <span style={{ fontSize: '0.68rem', color: 'var(--warning-700)', fontWeight: 700, backgroundColor: 'var(--warning-50)', padding: '0 4px', borderRadius: 3 }}>
-                              Low: {item.currentStock} {item.unit}
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', fontWeight: 600 }}>
-                              Stock: {item.currentStock} {item.unit}
-                            </span>
-                          )}
-                        </div>
+                        {/* Quick Add Button */}
+                        <button
+                          type="button"
+                          aria-label={`Add ${item.name} to cart`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddToCart(item);
+                          }}
+                          style={{
+                            width: 30,
+                            height: 30,
+                            borderRadius: 8,
+                            backgroundColor: 'var(--primary-600)',
+                            border: 'none',
+                            color: '#ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 4px rgba(79, 70, 229, 0.25)',
+                            transition: 'all 0.15s ease',
+                            flexShrink: 0,
+                          }}
+                          title="Add to Bill"
+                        >
+                          <Plus size={16} strokeWidth={2.5} />
+                        </button>
                       </div>
-
-                      {/* Quick Add Button */}
-                      <button
-                        type="button"
-                        aria-label={`Add ${item.name} to cart`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAddToCart(item);
-                        }}
-                        style={{
-                          width: 30,
-                          height: 30,
-                          borderRadius: 6,
-                          backgroundColor: 'var(--primary-50)',
-                          border: '1px solid var(--primary-300)',
-                          color: 'var(--primary-700)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          flexShrink: 0,
-                        }}
-                        title="Add to Bill"
-                      >
-                        <Plus size={15} strokeWidth={2.5} />
-                      </button>
                     </div>
                   </div>
                 );

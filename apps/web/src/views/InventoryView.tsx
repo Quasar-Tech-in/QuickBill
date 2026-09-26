@@ -516,7 +516,7 @@ export const InventoryView: React.FC = () => {
       const masterMinAlert = currentLocInv ? currentLocInv.minStockAlert : 5;
 
       if (editingItem) {
-        store.updateItem(editingItem.id, {
+        await store.updateItem(editingItem.id, {
           name: formName.trim(),
           sku: formSku.trim() || undefined,
           barcode: formBarcode.trim() || undefined,
@@ -535,7 +535,7 @@ export const InventoryView: React.FC = () => {
           imageUrl: primaryImageUrl,
         });
       } else {
-        store.addItem({
+        await store.addItem({
           name: formName.trim(),
           sku: formSku.trim() || undefined,
           barcode: formBarcode.trim() || undefined,
@@ -561,6 +561,7 @@ export const InventoryView: React.FC = () => {
         setPendingDeletedImageUrls([]);
       }
 
+      await loadPaginatedItems();
       refreshData();
       setIsAddModalOpen(false);
       setEditingItem(null);
@@ -574,17 +575,18 @@ export const InventoryView: React.FC = () => {
     }
   };
 
-  const handleStockAdjustment = (e: React.FormEvent) => {
+  const handleStockAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedItemForAdjust) return;
     const delta = adjustType === 'ADD' ? Math.abs(adjustDelta) : -Math.abs(adjustDelta);
-    store.adjustStock(selectedItemForAdjust.id, delta, adjustLocationId);
+    await store.adjustStock(selectedItemForAdjust.id, delta, adjustLocationId);
+    await loadPaginatedItems();
     refreshData();
     setIsAdjustModalOpen(false);
     setSelectedItemForAdjust(null);
   };
 
-  const handleDeleteItem = (id: string, name: string) => {
+  const handleDeleteItem = async (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to delete product "${name}"?`)) {
       const itemToDelete = rawItems.find(r => r.id === id) || items.find(i => i.id === id);
       if (itemToDelete) {
@@ -600,7 +602,8 @@ export const InventoryView: React.FC = () => {
         }
       }
 
-      store.deleteItem(id);
+      await store.deleteItem(id);
+      await loadPaginatedItems();
       refreshData();
     }
   };
