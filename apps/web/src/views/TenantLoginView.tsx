@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, 
   Lock, 
@@ -8,13 +8,17 @@ import {
   ShieldCheck, 
   CheckCircle2, 
   AlertCircle, 
+  AlertTriangle,
+  WifiOff,
+  RefreshCw,
   Eye, 
   EyeOff, 
   ReceiptText, 
   Package, 
   BarChart3, 
   Zap,
-  Layers
+  Layers,
+  X
 } from 'lucide-react';
 import { store } from '../services/store';
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +29,13 @@ interface TenantLoginViewProps {
   onNavigateToSuperAdmin?: () => void;
 }
 
+interface ClassifiedError {
+  type: 'danger' | 'warning' | 'network' | 'info';
+  title: string;
+  message: string;
+  actionHint?: string;
+}
+
 export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
   onLoginSuccess,
   onNavigateToSuperAdmin,
@@ -33,23 +44,109 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<ClassifiedError | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [loading, setLoading] = useState<boolean>(false);
+  const [isBackendOnline, setIsBackendOnline] = useState<boolean | null>(null);
+  const [isCheckingHealth, setIsCheckingHealth] = useState<boolean>(false);
+
+  // Check backend server readiness on mount
+  const checkBackendStatus = async () => {
+    setIsCheckingHealth(true);
+    try {
+      const online = await store.checkHealth();
+      setIsBackendOnline(online);
+      if (!online) {
+        setAuthError({
+          type: 'network',
+          title: 'Backend Server Offline',
+          message: 'The billing server is currently unreachable. If running locally, ensure the API is running on port 8000.',
+          actionHint: 'Check server connection or contact system administrator.'
+        });
+      } else if (authError?.type === 'network') {
+        setAuthError(null);
+      }
+    } catch {
+      setIsBackendOnline(false);
+    } finally {
+      setIsCheckingHealth(false);
+    }
+  };
+
+  useEffect(() => {
+    checkBackendStatus();
+  }, []);
+
+  const validateForm = (): boolean => {
+    const errors: { email?: string; password?: string } = {};
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      errors.email = 'Work email address is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      errors.email = 'Please enter a valid email address (e.g. name@company.com).';
+    }
+
+    if (!password) {
+      errors.password = 'Password is required.';
+    } else if (password.length < 4) {
+      errors.password = 'Password must be at least 4 characters.';
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setAuthError(null);
+
+    if (!validateForm()) {
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const result = await store.login(email, password, undefined, false);
+      const result = await store.login(email.trim().toLowerCase(), password, undefined, false);
       if (result.success && result.user) {
         onLoginSuccess(result.user);
       } else {
-        setError(result.error || 'Failed to authenticate. Please check your credentials.');
+        const rawError = result.error || 'Authentication failed.';
+        
+        // Categorize error for distinct user guidance
+        if (rawError.toLowerCase().includes('deactivated') || rawError.toLowerCase().includes('suspended')) {
+          setAuthError({
+            type: 'warning',
+            title: 'Account Inactive / Suspended',
+            message: rawError,
+            actionHint: 'Please contact your Store Administrator or Owner to reactivate access.'
+          });
+        } else if (rawError.toLowerCase().includes('network') || rawError.toLowerCase().includes('service unavailable') || rawError.toLowerCase().includes('failed to connect')) {
+          setAuthError({
+            type: 'network',
+            title: 'Connection Failure',
+            message: 'Could not communicate with the authentication server. Please check your internet or local API server.',
+            actionHint: 'Click retry or ensure backend server is online.'
+          });
+        } else {
+          setAuthError({
+            type: 'danger',
+            title: 'Invalid Email or Password',
+            message: rawError.includes('401') || rawError.includes('Invalid') 
+              ? 'The email or password you entered does not match our records. Please double check and try again.' 
+              : rawError,
+            actionHint: 'Ensure Caps Lock is off and your email spelling is correct.'
+          });
+        }
       }
-    } catch {
-      setError('An error occurred during sign in. Please try again.');
+    } catch (err: any) {
+      setAuthError({
+        type: 'danger',
+        title: 'Sign In Error',
+        message: err.message || 'An unexpected error occurred during sign in.',
+        actionHint: 'Please refresh the page and try again.'
+      });
     } finally {
       setLoading(false);
     }
@@ -170,25 +267,65 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
           
           {/* Header */}
           <div className="login-form-header">
-            <div className="login-header-icon-box">
-              <Store size={22} color="var(--primary-600)" />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: 12 }}>
+              <div className="login-header-icon-box">
+                <Store size={22} color="var(--primary-600)" />
+              </div>
+
+              {/* Backend Health Status Pill */}
+              <div className={`backend-health-pill ${isBackendOnline === true ? 'online' : isBackendOnline === false ? 'offline' : 'checking'}`}>
+                <span className="health-dot" />
+                <span>
+                  {isCheckingHealth ? 'Checking API...' : isBackendOnline ? 'API Connected' : 'API Offline'}
+                </span>
+                <button 
+                  type="button" 
+                  onClick={checkBackendStatus} 
+                  className="health-refresh-btn" 
+                  title="Refresh Server Connection"
+                >
+                  <RefreshCw size={12} className={isCheckingHealth ? 'spin-animation' : ''} />
+                </button>
+              </div>
             </div>
+
             <h2 className="login-form-title">Store Sign In</h2>
             <p className="login-form-sub">
               Sign in with your work email and password to access your terminal
             </p>
           </div>
 
-          {/* Error Message */}
-          {error && (
-            <div className="auth-alert error">
-              <AlertCircle size={18} />
-              <span>{error}</span>
+          {/* Contextual Error / Warning Banner */}
+          {authError && (
+            <div className={`auth-alert ${authError.type} animate-shake`}>
+              <div className="auth-alert-icon-box">
+                {authError.type === 'danger' && <AlertCircle size={20} />}
+                {authError.type === 'warning' && <AlertTriangle size={20} />}
+                {authError.type === 'network' && <WifiOff size={20} />}
+                {authError.type === 'info' && <AlertCircle size={20} />}
+              </div>
+              <div className="auth-alert-body">
+                <div className="auth-alert-title">{authError.title}</div>
+                <div className="auth-alert-message">{authError.message}</div>
+                {authError.actionHint && (
+                  <div className="auth-alert-hint">
+                    💡 <span>{authError.actionHint}</span>
+                  </div>
+                )}
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setAuthError(null)} 
+                className="auth-alert-close-btn"
+                title="Dismiss message"
+              >
+                <X size={16} />
+              </button>
             </div>
           )}
 
           {/* Form */}
-          <form onSubmit={handleLogin} className="login-styled-form">
+          <form onSubmit={handleLogin} className="login-styled-form" noValidate>
 
             {/* Work Email */}
             <div className="form-input-group">
@@ -196,7 +333,7 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
                 <Mail size={15} color="var(--primary-600)" />
                 <span>Work Email Address</span>
               </label>
-              <div className="input-with-icon-wrapper">
+              <div className={`input-with-icon-wrapper ${fieldErrors.email ? 'input-error-border' : ''}`}>
                 <input
                   type="email"
                   required
@@ -204,9 +341,19 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
                   className="modern-input"
                   placeholder="name@company.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (fieldErrors.email) setFieldErrors(prev => ({ ...prev, email: undefined }));
+                    if (authError) setAuthError(null);
+                  }}
                 />
               </div>
+              {fieldErrors.email && (
+                <div className="field-error-text">
+                  <AlertCircle size={13} />
+                  <span>{fieldErrors.email}</span>
+                </div>
+              )}
             </div>
 
             {/* Password */}
@@ -216,16 +363,20 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
                   <Lock size={15} color="var(--primary-600)" />
                   <span>Password</span>
                 </label>
-                <span className="password-hint">Min 6 characters</span>
+                <span className="password-hint">Min 4 characters</span>
               </div>
-              <div className="input-with-icon-wrapper password-wrapper">
+              <div className={`input-with-icon-wrapper password-wrapper ${fieldErrors.password ? 'input-error-border' : ''}`}>
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
                   className="modern-input"
                   placeholder="••••••••••••"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (fieldErrors.password) setFieldErrors(prev => ({ ...prev, password: undefined }));
+                    if (authError) setAuthError(null);
+                  }}
                 />
                 <button
                   type="button"
@@ -236,6 +387,12 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              {fieldErrors.password && (
+                <div className="field-error-text">
+                  <AlertCircle size={13} />
+                  <span>{fieldErrors.password}</span>
+                </div>
+              )}
             </div>
 
             {/* Sign In Submit */}

@@ -5,15 +5,15 @@ import {
   Mail, 
   ArrowLeft, 
   KeyRound, 
-  Server, 
-  CheckCircle2, 
   ShieldAlert, 
   Terminal, 
   Cpu, 
   Database,
   ArrowRight,
   Eye,
-  EyeOff
+  EyeOff,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { store } from '../services/store';
@@ -22,6 +22,13 @@ import { User } from '../types';
 interface SuperAdminLoginViewProps {
   onLoginSuccess: (user: User) => void;
   onNavigateToTenantLogin?: () => void;
+}
+
+interface ClassifiedError {
+  type: 'danger' | 'warning' | 'network' | 'info';
+  title: string;
+  message: string;
+  actionHint?: string;
 }
 
 export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
@@ -33,23 +40,75 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
   const [password, setPassword] = useState<string>('superadmin123');
   const [securityKey, setSecurityKey] = useState<string>('QB-ROOT-AUTH-99');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<ClassifiedError | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [loading, setLoading] = useState<boolean>(false);
+
+  const validateForm = (): boolean => {
+    const errors: { email?: string; password?: string } = {};
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      errors.email = 'Master root email is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      errors.email = 'Enter a valid administrator email address.';
+    }
+
+    if (!password) {
+      errors.password = 'Master root password is required.';
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
   const handleSuperAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setAuthError(null);
+
+    if (!validateForm()) {
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const result = await store.login(email, password, undefined, true);
+      const result = await store.login(email.trim().toLowerCase(), password, undefined, true);
       if (result.success && result.user) {
         onLoginSuccess(result.user);
       } else {
-        setError(result.error || 'Authentication rejected: Invalid Super Admin Master credentials.');
+        const rawError = result.error || 'Authentication rejected: Invalid Super Admin Master credentials.';
+        
+        if (rawError.includes('Super Administrator role required')) {
+          setAuthError({
+            type: 'warning',
+            title: 'Unauthorized Privilege Level',
+            message: 'This account does not have Super Administrator (Root) privileges. Please use the standard Store Login for tenant accounts.',
+            actionHint: 'Click "Return to Standard Store Login" below.'
+          });
+        } else if (rawError.toLowerCase().includes('network') || rawError.toLowerCase().includes('connect')) {
+          setAuthError({
+            type: 'network',
+            title: 'Cluster Communication Error',
+            message: 'Failed to connect to the central authentication database gateway.',
+            actionHint: 'Ensure the backend server is running and reachable.'
+          });
+        } else {
+          setAuthError({
+            type: 'danger',
+            title: 'Root Authorization Failed',
+            message: rawError,
+            actionHint: 'Check your Master email, Root password, and cluster security key.'
+          });
+        }
       }
-    } catch {
-      setError('Root authentication gateway failure. Please retry.');
+    } catch (err: any) {
+      setAuthError({
+        type: 'danger',
+        title: 'Gateway Failure',
+        message: err.message || 'Root authentication gateway failure. Please retry.',
+        actionHint: 'Please refresh the page and verify credentials.'
+      });
     } finally {
       setLoading(false);
     }
@@ -59,7 +118,8 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
     setEmail('superadmin@quickbill.local');
     setPassword('superadmin123');
     setSecurityKey('QB-ROOT-AUTH-99');
-    setError(null);
+    setFieldErrors({});
+    setAuthError(null);
   };
 
   return (
@@ -80,7 +140,7 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
             </div>
             <div className="telemetry-clusters">
               <Database size={12} color="#c084fc" />
-              <span>3 CLUSTERS ACTIVE</span>
+              <span>MULTI-CLUSTER ROUTING ACTIVE</span>
             </div>
           </div>
 
@@ -104,15 +164,33 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
           </div>
 
           {/* Error Alert */}
-          {error && (
-            <div className="superadmin-alert error">
-              <ShieldAlert size={18} />
-              <span>{error}</span>
+          {authError && (
+            <div className={`superadmin-alert ${authError.type} animate-shake`}>
+              <div className="superadmin-alert-icon">
+                {authError.type === 'warning' ? <ShieldAlert size={20} color="#f59e0b" /> : <AlertCircle size={20} color="#ef4444" />}
+              </div>
+              <div className="superadmin-alert-body">
+                <div className="superadmin-alert-title">{authError.title}</div>
+                <div className="superadmin-alert-msg">{authError.message}</div>
+                {authError.actionHint && (
+                  <div className="superadmin-alert-hint">
+                    💡 <span>{authError.actionHint}</span>
+                  </div>
+                )}
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setAuthError(null)} 
+                className="superadmin-alert-close"
+                title="Dismiss message"
+              >
+                <X size={16} />
+              </button>
             </div>
           )}
 
           {/* Super Admin Form */}
-          <form onSubmit={handleSuperAdminLogin} className="superadmin-form">
+          <form onSubmit={handleSuperAdminLogin} className="superadmin-form" noValidate>
             <div className="superadmin-input-group">
               <label className="superadmin-label">
                 <Mail size={14} color="#c084fc" />
@@ -121,11 +199,21 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
               <input
                 type="email"
                 required
-                className="superadmin-input"
+                className={`superadmin-input ${fieldErrors.email ? 'input-error-border' : ''}`}
                 placeholder="superadmin@quickbill.local"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (fieldErrors.email) setFieldErrors(prev => ({ ...prev, email: undefined }));
+                  if (authError) setAuthError(null);
+                }}
               />
+              {fieldErrors.email && (
+                <div className="field-error-text" style={{ color: '#fca5a5' }}>
+                  <AlertCircle size={12} />
+                  <span>{fieldErrors.email}</span>
+                </div>
+              )}
             </div>
 
             <div className="superadmin-input-group">
@@ -140,25 +228,36 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
-                  className="superadmin-input"
+                  className={`superadmin-input ${fieldErrors.password ? 'input-error-border' : ''}`}
                   placeholder="••••••••••••"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (fieldErrors.password) setFieldErrors(prev => ({ ...prev, password: undefined }));
+                    if (authError) setAuthError(null);
+                  }}
                 />
                 <button
                   type="button"
                   className="superadmin-eye-btn"
                   onClick={() => setShowPassword(!showPassword)}
+                  title={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff size={16} color="#c084fc" /> : <Eye size={16} color="#c084fc" />}
                 </button>
               </div>
+              {fieldErrors.password && (
+                <div className="field-error-text" style={{ color: '#fca5a5' }}>
+                  <AlertCircle size={12} />
+                  <span>{fieldErrors.password}</span>
+                </div>
+              )}
             </div>
 
             <div className="superadmin-input-group">
               <label className="superadmin-label">
                 <KeyRound size={14} color="#c084fc" />
-                <span>Cluster Access Token / MFA Code</span>
+                <span>Cluster Access Token / Security PIN</span>
               </label>
               <input
                 type="text"
@@ -187,18 +286,18 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
             </button>
           </form>
 
-          {/* Demo Root Credentials Quick Autofill */}
+          {/* Dev Test Helper Auto-Fill */}
           <div className="superadmin-demo-box">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '0.76rem', color: '#e9d5ff', fontWeight: 600 }}>
-                ⚡ One-Click Master Test Key:
+                ⚡ Development Master Test Key:
               </span>
               <button
                 type="button"
                 onClick={handleFillSuperAdminDemo}
                 className="superadmin-fill-btn"
               >
-                Auto-Fill Master Credentials
+                Auto-Fill Master Test Key
               </button>
             </div>
             <div className="superadmin-creds-preview">
@@ -219,7 +318,7 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
               className="superadmin-back-btn"
             >
               <ArrowLeft size={16} />
-              <span>Return to Standard Store / Tenant Login</span>
+              <span>Return to Standard Store Login</span>
             </button>
           </div>
 
