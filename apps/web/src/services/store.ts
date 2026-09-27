@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -140,6 +140,7 @@ class StoreService {
   private invoices: Invoice[] = [];
   private payments: Payment[] = [];
   private expenses: Expense[] = [];
+  private purchaseOrders: PurchaseOrder[] = [];
   private expenseCategories: ExpenseCategory[] = [];
   private tenants: Tenant[] = [];
   private locations: StoreLocation[] = [];
@@ -223,12 +224,9 @@ class StoreService {
         this.currentUser = DEFAULT_USERS[0];
       }
 
-      // Sync businessIds to single tenant
-      this.items.forEach(i => { i.businessId = this.currentTenant.id; });
-      this.parties.forEach(p => { p.businessId = this.currentTenant.id; });
-      this.payments.forEach(pay => { pay.businessId = this.currentTenant.id; });
-      this.expenses.forEach(exp => { exp.businessId = this.currentTenant.id; });
-      this.categories.forEach(c => { c.businessId = this.currentTenant.id; });
+      const savedPOs = localStorage.getItem('qb_purchase_orders');
+      this.purchaseOrders = savedPOs ? JSON.parse(savedPOs) : [];
+      this.purchaseOrders.forEach(po => { po.businessId = this.currentTenant.id; });
 
     } catch {
       this.items = [];
@@ -2729,6 +2727,436 @@ class StoreService {
       netProfit,
     };
   }
+
+  // --- Purchase Orders Management ---
+  private mapPoDocToPurchaseOrder(doc: any): PurchaseOrder {
+    const rawItems = doc.items || doc.orderItems || [];
+    return {
+      id: String(doc.id || doc._id || ''),
+      poNumber: doc.poNumber || doc.po_number || '',
+      businessId: String(doc.businessId || doc.business_id || this.currentTenant.id),
+      supplierId: String(doc.supplierId || doc.supplier_id || ''),
+      supplierName: doc.supplierName || doc.supplier_name || '',
+      supplierPhone: doc.supplierPhone || doc.supplier_phone,
+      supplierGstin: doc.supplierGstin || doc.supplier_gstin,
+      supplierAddress: doc.supplierAddress || doc.supplier_address,
+      locationId: String(doc.locationId || doc.location_id || ''),
+      locationName: doc.locationName || doc.location_name,
+      orderDate: doc.orderDate || doc.order_date || (doc.createdAt ? String(doc.createdAt).split('T')[0] : new Date().toISOString().split('T')[0]),
+      expectedDeliveryDate: doc.expectedDeliveryDate || doc.expected_delivery_date,
+      status: (doc.status === 'FULLY_RECEIVED' ? 'RECEIVED' : (doc.status || 'ORDERED')),
+      items: Array.isArray(rawItems) ? rawItems.map((it: any) => {
+        const catItem = this.items.find(i => i.id === (it.itemId || it.item_id));
+        const itemName = it.name || it.itemName || it.item_name || catItem?.name || 'Item';
+        const orderedQty = Number(it.orderedQty ?? it.ordered_qty ?? it.orderedQuantity ?? it.quantity ?? 0);
+        const receivedQty = Number(it.receivedQty ?? it.received_qty ?? it.receivedQuantity ?? 0);
+        const unitPrice = Number(it.unitPrice ?? it.unit_price ?? it.unitCost ?? it.unit_cost ?? catItem?.purchasePrice ?? 0);
+        const taxRate = Number(it.taxRate ?? it.tax_rate ?? catItem?.taxRate ?? 0);
+        const lineSub = orderedQty * unitPrice;
+        const lineTax = (lineSub * taxRate) / 100;
+        const taxAmount = Number(it.taxAmount ?? it.tax_amount ?? lineTax);
+        const totalAmount = Number(it.totalAmount ?? it.total_amount ?? it.totalCost ?? it.total_cost ?? (lineSub + taxAmount));
+
+        return {
+          itemId: String(it.itemId || it.item_id || ''),
+          name: itemName,
+          sku: it.sku || catItem?.sku,
+          barcode: it.barcode || catItem?.barcode,
+          unit: it.unit || catItem?.unit || 'pcs',
+          orderedQty,
+          receivedQty,
+          unitPrice,
+          taxRate,
+          taxAmount: Number(taxAmount.toFixed(2)),
+          totalAmount: Number(totalAmount.toFixed(2)),
+          updateItemPurchasePrice: it.updateItemPurchasePrice || it.update_item_purchase_price,
+        };
+      }) : [],
+      subtotal: Number(doc.subtotal || 0),
+      taxTotal: Number(doc.taxTotal ?? doc.tax_total ?? doc.taxAmount ?? doc.tax_amount ?? 0),
+      grandTotal: Number(doc.grandTotal ?? doc.grand_total ?? 0),
+      notes: doc.notes,
+      terms: doc.terms,
+      cancellationReason: doc.cancellationReason || doc.cancellation_reason,
+      receiptHistory: Array.isArray(doc.receiptHistory || doc.receipt_history || doc.receipts) ? (doc.receiptHistory || doc.receipt_history || doc.receipts).map((rh: any) => ({
+        id: rh.id || rh._id || rh.receiptId,
+        receivedAt: rh.receivedAt || rh.received_at,
+        receivedBy: rh.receivedBy || rh.received_by || rh.receivedByUserId,
+        receivedByName: rh.receivedByName || rh.received_by_name,
+        locationId: rh.locationId || rh.location_id,
+        locationName: rh.locationName || rh.location_name,
+        notes: rh.notes,
+        itemsReceived: Array.isArray(rh.itemsReceived || rh.items_received || rh.items) ? (rh.itemsReceived || rh.items_received || rh.items).map((ir: any) => ({
+          itemId: ir.itemId || ir.item_id,
+          name: ir.name || ir.itemName || ir.item_name || 'Item',
+          qty: Number(ir.qty ?? ir.quantityReceived ?? ir.quantity_received ?? 0),
+        })) : [],
+        paymentRecorded: (rh.paymentRecorded || rh.payment_recorded || (rh.amountPaid > 0 ? { amount: rh.amountPaid, paymentMode: rh.paymentMode } : null)) ? {
+          amount: Number((rh.paymentRecorded || rh.payment_recorded)?.amount ?? rh.amountPaid ?? 0),
+          paymentMode: (rh.paymentRecorded || rh.payment_recorded)?.paymentMode || (rh.paymentRecorded || rh.payment_recorded)?.payment_mode || rh.paymentMode || 'CASH',
+          referenceNumber: (rh.paymentRecorded || rh.payment_recorded)?.referenceNumber || (rh.paymentRecorded || rh.payment_recorded)?.reference_number,
+        } : undefined,
+      })) : [],
+      createdAt: doc.createdAt || doc.created_at || new Date().toISOString(),
+      updatedAt: doc.updatedAt || doc.updated_at,
+      createdBy: doc.createdBy || doc.created_by || doc.createdByUserId,
+      createdByName: doc.createdByName || doc.created_by_name,
+    };
+  }
+
+  getPurchaseOrders(locationId?: string): PurchaseOrder[] {
+    const activeId = this.currentTenant.id;
+    const list = this.purchaseOrders.filter(po => (po.businessId || DEFAULT_TENANTS[0].id) === activeId);
+    if (!locationId || locationId === 'ALL') return list;
+    return list.filter(po => po.locationId === locationId);
+  }
+
+  async fetchPurchaseOrders(params: { search?: string; status?: string; supplier_id?: string; location_id?: string; page?: number; page_size?: number } = {}): Promise<PaginatedApiResponse<PurchaseOrder>> {
+    const page = params.page || 1;
+    const pageSize = params.page_size || 20;
+
+    try {
+      const qParams: Record<string, any> = { page, page_size: pageSize };
+      if (params.search) qParams.search = params.search;
+      if (params.status && params.status !== 'ALL') qParams.status = params.status;
+      if (params.supplier_id && params.supplier_id !== 'ALL') qParams.supplier_id = params.supplier_id;
+      if (params.location_id && params.location_id !== 'ALL') qParams.location_id = params.location_id;
+
+      const res = await apiClient.get('/purchase-orders', { params: qParams });
+      if (res.data && Array.isArray(res.data.data)) {
+        const livePOs = res.data.data.map((d: any) => this.mapPoDocToPurchaseOrder(d));
+        // Merge into local state
+        const liveIds = new Set(livePOs.map((p: PurchaseOrder) => p.id));
+        this.purchaseOrders = [...livePOs, ...this.purchaseOrders.filter(p => !liveIds.has(p.id))];
+        try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+
+        return {
+          data: livePOs,
+          page: res.data.page || page,
+          pageSize: res.data.page_size || pageSize,
+          total: res.data.total !== undefined ? res.data.total : livePOs.length,
+          totalPages: res.data.total_pages || Math.ceil((res.data.total || livePOs.length) / pageSize),
+        };
+      }
+    } catch (err) {
+      console.warn('Could not fetch purchase orders from API, falling back to local state:', err);
+    }
+
+    // Local fallback filter
+    const all = this.getPurchaseOrders(params.location_id);
+    const filtered = all.filter(po => {
+      if (params.status && params.status !== 'ALL') {
+        const queryStatus = params.status === 'FULLY_RECEIVED' ? 'RECEIVED' : params.status;
+        const currentStatus = po.status === 'FULLY_RECEIVED' ? 'RECEIVED' : po.status;
+        if (currentStatus !== queryStatus) return false;
+      }
+      if (params.supplier_id && params.supplier_id !== 'ALL' && po.supplierId !== params.supplier_id) return false;
+      if (params.search && params.search.trim()) {
+        const q = params.search.toLowerCase();
+        const m = (po.poNumber && po.poNumber.toLowerCase().includes(q)) ||
+                  (po.supplierName && po.supplierName.toLowerCase().includes(q)) ||
+                  (po.supplierPhone && po.supplierPhone.includes(q)) ||
+                  (po.notes && po.notes.toLowerCase().includes(q));
+        if (!m) return false;
+      }
+      return true;
+    });
+
+    const total = filtered.length;
+    const slice = filtered.slice((page - 1) * pageSize, page * pageSize);
+    return {
+      data: slice,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize) || 1,
+    };
+  }
+
+  async getPurchaseOrder(id: string): Promise<PurchaseOrder> {
+    try {
+      const res = await apiClient.get(`/purchase-orders/${id}`);
+      if (res.data) {
+        const po = this.mapPoDocToPurchaseOrder(res.data);
+        this.purchaseOrders = [po, ...this.purchaseOrders.filter(p => p.id !== po.id)];
+        return po;
+      }
+    } catch (err) {
+      console.warn(`Could not get PO ${id} from API:`, err);
+    }
+
+    const localPo = this.purchaseOrders.find(p => p.id === id);
+    if (!localPo) throw new Error('Purchase Order not found');
+    return localPo;
+  }
+
+  async createPurchaseOrder(poData: {
+    supplierId: string;
+    locationId: string;
+    expectedDeliveryDate?: string;
+    items: { itemId: string; orderedQty: number; unitPrice: number; taxRate?: number; updateItemPurchasePrice?: boolean }[];
+    notes?: string;
+    terms?: string;
+  }): Promise<PurchaseOrder> {
+    const activeLoc = this.locations.find(l => l.id === poData.locationId) || this.activeLocation;
+    const supplier = this.parties.find(p => p.id === poData.supplierId);
+
+    const payload = {
+      supplierId: poData.supplierId,
+      supplier_id: poData.supplierId,
+      supplierName: supplier?.name,
+      supplierPhone: supplier?.phone,
+      locationId: poData.locationId || activeLoc?.id,
+      location_id: poData.locationId || activeLoc?.id,
+      locationName: activeLoc?.name,
+      expectedDeliveryDate: poData.expectedDeliveryDate || undefined,
+      expected_delivery_date: poData.expectedDeliveryDate || undefined,
+      items: poData.items.map(it => {
+        const catItem = this.items.find(i => i.id === it.itemId);
+        return {
+          itemId: it.itemId,
+          item_id: it.itemId,
+          itemName: catItem?.name || 'Item',
+          item_name: catItem?.name || 'Item',
+          sku: catItem?.sku,
+          unit: catItem?.unit || 'pcs',
+          orderedQuantity: it.orderedQty,
+          ordered_qty: it.orderedQty,
+          unitCost: it.unitPrice,
+          unit_cost: it.unitPrice,
+          unitPrice: it.unitPrice,
+          unit_price: it.unitPrice,
+          taxRate: it.taxRate || catItem?.taxRate || 0,
+          tax_rate: it.taxRate || catItem?.taxRate || 0,
+          updateMasterPurchasePrice: it.updateItemPurchasePrice || false,
+          update_item_purchase_price: it.updateItemPurchasePrice || false,
+        };
+      }),
+      notes: poData.notes,
+      terms: poData.terms,
+    };
+
+    try {
+      const res = await apiClient.post('/purchase-orders', payload);
+      if (res.data) {
+        const createdPO = this.mapPoDocToPurchaseOrder(res.data);
+        this.purchaseOrders = [createdPO, ...this.purchaseOrders.filter(p => p.id !== createdPO.id)];
+        try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+        return createdPO;
+      }
+    } catch (err: any) {
+      console.error('Backend PO creation failed:', err?.response?.data || err);
+      // If server returned 422 or 400 validation error, rethrow so the UI displays the exact reason
+      if (err?.response?.data?.detail) {
+        const detailMsg = typeof err.response.data.detail === 'string' 
+          ? err.response.data.detail 
+          : JSON.stringify(err.response.data.detail);
+        throw new Error(`Validation Error: ${detailMsg}`);
+      }
+    }
+
+    // Local fallback
+    let subtotal = 0;
+    let taxTotal = 0;
+    const items = poData.items.map(it => {
+      const catItem = this.items.find(i => i.id === it.itemId);
+      const lineSub = it.orderedQty * it.unitPrice;
+      const taxRate = it.taxRate || catItem?.taxRate || 0;
+      const lineTax = (lineSub * taxRate) / 100;
+      subtotal += lineSub;
+      taxTotal += lineTax;
+      return {
+        itemId: it.itemId,
+        name: catItem?.name || 'Item',
+        sku: catItem?.sku,
+        barcode: catItem?.barcode,
+        unit: catItem?.unit || 'pcs',
+        orderedQty: it.orderedQty,
+        receivedQty: 0,
+        unitPrice: it.unitPrice,
+        taxRate,
+        taxAmount: Number(lineTax.toFixed(2)),
+        totalAmount: Number((lineSub + lineTax).toFixed(2)),
+        updateItemPurchasePrice: it.updateItemPurchasePrice,
+      };
+    });
+
+    const localPO: PurchaseOrder = {
+      id: `po_${Date.now()}`,
+      poNumber: `PO-${new Date().getFullYear()}-${String(this.purchaseOrders.length + 1).padStart(4, '0')}`,
+      businessId: this.currentTenant.id,
+      supplierId: poData.supplierId,
+      supplierName: supplier?.name || 'Unknown Supplier',
+      supplierPhone: supplier?.phone,
+      supplierGstin: supplier?.gstin,
+      supplierAddress: supplier?.address,
+      locationId: activeLoc.id,
+      locationName: activeLoc.name,
+      orderDate: new Date().toISOString().split('T')[0],
+      expectedDeliveryDate: poData.expectedDeliveryDate,
+      status: 'ORDERED',
+      items,
+      subtotal: Number(subtotal.toFixed(2)),
+      taxTotal: Number(taxTotal.toFixed(2)),
+      grandTotal: Number((subtotal + taxTotal).toFixed(2)),
+      notes: poData.notes,
+      terms: poData.terms,
+      receiptHistory: [],
+      createdAt: new Date().toISOString(),
+      createdBy: this.currentUser?.id,
+      createdByName: this.currentUser?.name,
+    };
+
+    this.purchaseOrders = [localPO, ...this.purchaseOrders];
+    try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+    return localPO;
+  }
+
+  async receivePurchaseOrder(id: string, receiveData: {
+    items: { itemId: string; qty: number }[];
+    notes?: string;
+    payment?: {
+      amount: number;
+      paymentMode: string;
+      referenceNumber?: string;
+      notes?: string;
+    };
+  }): Promise<PurchaseOrder> {
+    const payload = {
+      receivedItems: receiveData.items.map(it => ({
+        itemId: it.itemId,
+        item_id: it.itemId,
+        quantityReceived: it.qty,
+        quantity_received: it.qty,
+        qty: it.qty,
+      })),
+      items: receiveData.items.map(it => ({
+        itemId: it.itemId,
+        item_id: it.itemId,
+        quantityReceived: it.qty,
+        quantity_received: it.qty,
+        qty: it.qty,
+      })),
+      receiptNotes: receiveData.notes,
+      receipt_notes: receiveData.notes,
+      notes: receiveData.notes,
+      paymentDetails: receiveData.payment ? {
+        amountPaid: receiveData.payment.amount,
+        amount_paid: receiveData.payment.amount,
+        amount: receiveData.payment.amount,
+        paymentMode: receiveData.payment.paymentMode,
+        payment_mode: receiveData.payment.paymentMode,
+        referenceNumber: receiveData.payment.referenceNumber,
+        reference_number: receiveData.payment.referenceNumber,
+        notes: receiveData.payment.notes,
+      } : undefined,
+    };
+
+    try {
+      const res = await apiClient.post(`/purchase-orders/${id}/receive`, payload);
+      if (res.data) {
+        const updatedPO = this.mapPoDocToPurchaseOrder(res.data);
+        this.purchaseOrders = this.purchaseOrders.map(p => p.id === id ? updatedPO : p);
+        try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+        // Refresh items/parties cache
+        this.fetchItems().catch(() => {});
+        this.fetchParties().catch(() => {});
+        return updatedPO;
+      }
+    } catch (err: any) {
+      console.error('Backend PO receive failed:', err?.response?.data || err);
+      if (err?.response?.data?.detail) {
+        const detailMsg = typeof err.response.data.detail === 'string' 
+          ? err.response.data.detail 
+          : JSON.stringify(err.response.data.detail);
+        throw new Error(`Receive Error: ${detailMsg}`);
+      }
+    }
+
+    // Local fallback receiving
+    const po = this.purchaseOrders.find(p => p.id === id);
+    if (!po) throw new Error('Purchase order not found');
+
+    const receiptItems: { itemId: string; name: string; qty: number }[] = [];
+    let allCompleted = true;
+
+    po.items = po.items.map(item => {
+      const rec = receiveData.items.find(r => r.itemId === item.itemId);
+      const addQty = rec ? rec.qty : 0;
+      if (addQty > 0) {
+        receiptItems.push({ itemId: item.itemId, name: item.name, qty: addQty });
+        // Adjust stock
+        this.adjustStock(item.itemId, addQty, po.locationId);
+      }
+      const newRecQty = item.receivedQty + addQty;
+      if (newRecQty < item.orderedQty) allCompleted = false;
+      return { ...item, receivedQty: newRecQty };
+    });
+
+    const anyReceived = po.items.some(it => it.receivedQty > 0);
+    po.status = allCompleted ? 'RECEIVED' : (anyReceived ? 'PARTIALLY_RECEIVED' : po.status);
+
+    po.receiptHistory = po.receiptHistory || [];
+    po.receiptHistory.push({
+      id: `rec_${Date.now()}`,
+      receivedAt: new Date().toISOString(),
+      receivedBy: this.currentUser?.id || 'usr_staff',
+      receivedByName: this.currentUser?.name || 'Staff',
+      locationId: po.locationId,
+      locationName: po.locationName,
+      notes: receiveData.notes,
+      itemsReceived: receiptItems,
+      paymentRecorded: receiveData.payment ? {
+        amount: receiveData.payment.amount,
+        paymentMode: receiveData.payment.paymentMode,
+        referenceNumber: receiveData.payment.referenceNumber,
+      } : undefined,
+    });
+
+    this.purchaseOrders = this.purchaseOrders.map(p => p.id === id ? po : p);
+    try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+    return po;
+  }
+
+  async cancelPurchaseOrder(id: string, cancellationReason: string): Promise<PurchaseOrder> {
+    try {
+      const res = await apiClient.post(`/purchase-orders/${id}/cancel`, {
+        cancellation_reason: cancellationReason,
+      });
+      if (res.data) {
+        const cancelledPO = this.mapPoDocToPurchaseOrder(res.data);
+        this.purchaseOrders = this.purchaseOrders.map(p => p.id === id ? cancelledPO : p);
+        try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+        return cancelledPO;
+      }
+    } catch (err) {
+      console.warn('Backend PO cancel failed, applying local fallback:', err);
+    }
+
+    const po = this.purchaseOrders.find(p => p.id === id);
+    if (!po) throw new Error('Purchase order not found');
+
+    po.status = 'CANCELLED';
+    po.cancellationReason = cancellationReason;
+    this.purchaseOrders = this.purchaseOrders.map(p => p.id === id ? po : p);
+    try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+    return po;
+  }
+
+  async deletePurchaseOrder(id: string): Promise<boolean> {
+    try {
+      await apiClient.delete(`/purchase-orders/${id}`);
+      this.purchaseOrders = this.purchaseOrders.filter(p => p.id !== id);
+      try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+      return true;
+    } catch (err) {
+      console.warn('Backend PO delete failed, applying local fallback:', err);
+      this.purchaseOrders = this.purchaseOrders.filter(p => p.id !== id);
+      try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+      return true;
+    }
+  }
 }
 
 export const store = new StoreService();
+

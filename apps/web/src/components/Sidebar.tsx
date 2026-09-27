@@ -4,6 +4,7 @@ import {
   LayoutDashboard, 
   ReceiptText, 
   Package, 
+  ShoppingBag,
   Users, 
   BookOpen, 
   FileText, 
@@ -51,6 +52,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
       path: '/inventory',
       label: 'Inventory & Items', 
       icon: Package, 
+      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
+    },
+    { 
+      id: 'purchase-orders', 
+      path: '/purchase-orders',
+      label: 'Purchase Orders', 
+      icon: ShoppingBag, 
       roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
     },
     { 

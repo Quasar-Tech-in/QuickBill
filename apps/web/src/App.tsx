@@ -13,6 +13,7 @@ import { Header } from './components/Header';
 import { DashboardView } from './views/DashboardView';
 import { PosBillingView } from './views/PosBillingView';
 import { InventoryView } from './views/InventoryView';
+import { PurchaseOrdersView } from './views/PurchaseOrdersView';
 import { PartiesView } from './views/PartiesView';
 import { LedgerView } from './views/LedgerView';
 import { TransactionsView } from './views/TransactionsView';
@@ -366,6 +367,7 @@ export const App: React.FC = () => {
               } 
             />
             <Route path="/inventory" element={<InventoryView />} />
+            <Route path="/purchase-orders" element={<PurchaseOrdersView />} />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="/ledger" element={<LedgerView />} />
             <Route 

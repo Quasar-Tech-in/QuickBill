@@ -237,6 +237,7 @@ export interface Tenant {
   adminEmail: string;
   phone?: string;
   gstin?: string;
+  address?: string;
   createdAt: string;
   databaseConfig: TenantDatabaseConfig;
   stats: {
@@ -301,5 +302,71 @@ export interface PaginatedApiResponse<T> {
   total: number;
   totalPages: number;
 }
+
+export type PurchaseOrderStatus = 'DRAFT' | 'ORDERED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'FULLY_RECEIVED' | 'CANCELLED';
+
+export interface PurchaseOrderItem {
+  itemId: string;
+  name: string;
+  sku?: string;
+  barcode?: string;
+  unit?: string;
+  orderedQty: number;
+  receivedQty: number;
+  unitPrice: number;
+  taxRate: number;
+  taxAmount: number;
+  totalAmount: number;
+  updateItemPurchasePrice?: boolean;
+}
+
+export interface PurchaseReceiptRecord {
+  id: string;
+  receivedAt: string;
+  receivedBy: string;
+  receivedByName?: string;
+  locationId: string;
+  locationName?: string;
+  notes?: string;
+  itemsReceived: {
+    itemId: string;
+    name: string;
+    qty: number;
+  }[];
+  paymentRecorded?: {
+    amount: number;
+    paymentMode: string;
+    referenceNumber?: string;
+  };
+}
+
+export interface PurchaseOrder {
+  id: string;
+  poNumber: string;
+  businessId: string;
+  supplierId: string;
+  supplierName: string;
+  supplierPhone?: string;
+  supplierGstin?: string;
+  supplierAddress?: string;
+  locationId: string;
+  locationName?: string;
+  orderDate: string;
+  expectedDeliveryDate?: string;
+  status: PurchaseOrderStatus;
+  items: PurchaseOrderItem[];
+  subtotal: number;
+  taxTotal: number;
+  grandTotal: number;
+  notes?: string;
+  terms?: string;
+  cancellationReason?: string;
+  receiptHistory?: PurchaseReceiptRecord[];
+  createdAt: string;
+  updatedAt?: string;
+  createdBy?: string;
+  createdByName?: string;
+}
+
 
 

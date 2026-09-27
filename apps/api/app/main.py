@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection
-from app.api.v1 import auth, items, sales, parties, customers, payments, expenses, reports, tenants, users, locations, categories
+from app.api.v1 import auth, items, sales, parties, customers, payments, expenses, reports, tenants, users, locations, categories, purchase_orders
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,6 +48,7 @@ app.include_router(locations.router, prefix=settings.API_V1_STR)
 app.include_router(categories.router, prefix=settings.API_V1_STR)
 app.include_router(items.router, prefix=settings.API_V1_STR)
 app.include_router(sales.router, prefix=settings.API_V1_STR)
+app.include_router(purchase_orders.router, prefix=settings.API_V1_STR)
 app.include_router(parties.router, prefix=settings.API_V1_STR)
 app.include_router(customers.router, prefix=settings.API_V1_STR)
 app.include_router(payments.router, prefix=settings.API_V1_STR)
