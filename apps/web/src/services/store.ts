@@ -404,26 +404,79 @@ class StoreService {
   // --- Locations & Branches ---
   getLocations(): StoreLocation[] {
     const user = this.currentUser;
-    // Store Admin & Super Admin see all locations
+    // Store Admin & Super Admin see all locations (including inactive for administration)
     if (!user || user.role === 'SUPER_ADMIN' || user.role === 'TENANT_ADMIN') {
       return this.locations;
     }
-    // Managers and Cashiers see only their assigned locations
+    // Managers and Cashiers see only their assigned ACTIVE locations
     const assignedIds = user.assignedLocationIds || [];
-    if (assignedIds.length === 0) return this.locations.slice(0, 1);
-    return this.locations.filter(loc => assignedIds.includes(loc.id));
+    const activeLocations = this.locations.filter(loc => loc.isActive !== false);
+    if (assignedIds.length === 0) {
+      return activeLocations.slice(0, 1);
+    }
+    return activeLocations.filter(loc => assignedIds.includes(loc.id));
   }
 
   getAllLocations(): StoreLocation[] {
     return this.locations;
   }
 
+  async fetchLocations(): Promise<StoreLocation[]> {
+    try {
+      const res = await apiClient.get('/locations');
+      if (res.data && Array.isArray(res.data)) {
+        const liveLocs: StoreLocation[] = res.data.map((l: any) => ({
+          id: l.id || l._id,
+          businessId: l.businessId || this.currentTenant.id,
+          name: l.name,
+          code: l.code,
+          address: l.address || '',
+          phone: l.phone || '',
+          isDefault: !!l.isDefault,
+          isActive: l.isActive !== undefined ? !!l.isActive : true,
+          createdAt: l.createdAt || new Date().toISOString(),
+        }));
+        if (liveLocs.length > 0) {
+          this.locations = liveLocs;
+          this.saveToStorage();
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch locations from backend API, using local:', e);
+    }
+    return this.locations;
+  }
+
   getActiveLocation(): StoreLocation {
-    return this.activeLocation || this.locations[0] || DEFAULT_LOCATIONS[0];
+    const user = this.currentUser;
+    const available = this.getLocations();
+
+    // For Managers and Cashiers, ensure the active location is strictly active and in available list
+    if (user && user.role !== 'SUPER_ADMIN' && user.role !== 'TENANT_ADMIN') {
+      if (!this.activeLocation || this.activeLocation.isActive === false || !available.some(l => l.id === this.activeLocation.id)) {
+        if (available.length > 0) {
+          this.activeLocation = available[0];
+          this.saveToStorage();
+        }
+      }
+    }
+
+    return this.activeLocation || available[0] || this.locations.find(l => l.isActive !== false) || this.locations[0] || DEFAULT_LOCATIONS[0];
   }
 
   setActiveLocation(locationOrId: string | StoreLocation): StoreLocation {
     const locId = typeof locationOrId === 'string' ? locationOrId : locationOrId.id;
+    const user = this.currentUser;
+    const available = this.getLocations();
+    
+    // If non-admin, only allow switching to an active, assigned location
+    if (user && user.role !== 'SUPER_ADMIN' && user.role !== 'TENANT_ADMIN') {
+      const isAllowed = available.some(l => l.id === locId && l.isActive !== false);
+      if (!isAllowed) {
+        return this.getActiveLocation();
+      }
+    }
+
     const found = this.locations.find(l => l.id === locId);
     if (found) {
       this.activeLocation = found;
@@ -450,16 +503,224 @@ class StoreService {
         phone: locData.phone,
         isDefault: locData.isDefault || false,
       });
-      if (res.data?.id) {
-        newLoc.id = res.data.id;
+      if (res.data?.id || res.data?._id) {
+        newLoc.id = res.data.id || res.data._id;
       }
-    } catch {
-      // offline fallback
+    } catch (err) {
+      console.warn('Backend /locations creation failed, fallback local:', err);
     }
 
     this.locations.push(newLoc);
+
+    // Sync local items: ensure every item has a location entry for this new branch (isListed: false, stock: 0)
+    this.items = this.items.map(item => {
+      if (item.businessId === this.currentTenant.id || !item.businessId) {
+        const itemLocs = item.locations ? [...item.locations] : [];
+        if (!itemLocs.some(l => l.locationId === newLoc.id || l.locationId === newLoc.code)) {
+          itemLocs.push({
+            locationId: newLoc.id,
+            locationName: newLoc.name,
+            mrp: item.mrp ?? item.salePrice,
+            salePrice: item.salePrice,
+            purchasePrice: item.purchasePrice || 0,
+            currentStock: 0,
+            minStockAlert: item.minStockAlert || 5,
+            isListed: false, // Tagged as deactivated/unlisted for new branch
+            hasDiscount: item.hasDiscount || false,
+            discountType: item.discountType || 'PERCENT',
+            discountValue: item.discountValue || 0,
+          });
+          return { ...item, locations: itemLocs };
+        }
+      }
+      return item;
+    });
+
     this.saveToStorage();
     return newLoc;
+  }
+
+  async updateLocation(locationId: string, updates: Partial<StoreLocation>): Promise<StoreLocation | null> {
+    const idx = this.locations.findIndex(l => l.id === locationId);
+    if (idx === -1) return null;
+
+    try {
+      const res = await apiClient.put(`/locations/${locationId}`, updates);
+      if (res.data) {
+        const live: StoreLocation = {
+          id: res.data.id || res.data._id || locationId,
+          businessId: res.data.businessId || this.currentTenant.id,
+          name: res.data.name || this.locations[idx].name,
+          code: res.data.code || this.locations[idx].code,
+          address: res.data.address !== undefined ? res.data.address : (this.locations[idx].address || ''),
+          phone: res.data.phone !== undefined ? res.data.phone : (this.locations[idx].phone || ''),
+          isDefault: res.data.isDefault !== undefined ? !!res.data.isDefault : !!this.locations[idx].isDefault,
+          isActive: res.data.isActive !== undefined ? !!res.data.isActive : (this.locations[idx].isActive !== false),
+          createdAt: res.data.createdAt || this.locations[idx].createdAt,
+        };
+        this.locations[idx] = live;
+        if (this.activeLocation?.id === locationId) {
+          this.activeLocation = live;
+        }
+        this.saveToStorage();
+        return live;
+      }
+    } catch (err) {
+      console.warn(`Backend /locations/${locationId} update failed, applying fallback:`, err);
+    }
+
+    this.locations[idx] = { ...this.locations[idx], ...updates };
+    
+    // If active location was updated, update reference
+    if (this.activeLocation?.id === locationId) {
+      this.activeLocation = this.locations[idx];
+    }
+
+    this.saveToStorage();
+    return this.locations[idx];
+  }
+
+  async deleteLocation(locationId: string): Promise<boolean> {
+    const locToDelete = this.locations.find(l => l.id === locationId || l.code === locationId);
+    const locKeys = [locationId];
+    if (locToDelete) {
+      locKeys.push(locToDelete.id, locToDelete.code);
+    }
+
+    try {
+      await apiClient.delete(`/locations/${locationId}`);
+    } catch (err) {
+      console.warn(`Backend /locations/${locationId} delete failed:`, err);
+    }
+
+    const prevLen = this.locations.length;
+    this.locations = this.locations.filter(l => l.id !== locationId && l.code !== locationId);
+    
+    // Clean up local items: pull this location entity from all items
+    this.items = this.items.map(item => {
+      if (item.locations && item.locations.length > 0) {
+        return {
+          ...item,
+          locations: item.locations.filter(l => !locKeys.includes(l.locationId))
+        };
+      }
+      return item;
+    });
+
+    // Clean up local users: pull location from assignedLocationIds
+    this.users = this.users.map(u => {
+      if (u.assignedLocationIds && u.assignedLocationIds.length > 0) {
+        return {
+          ...u,
+          assignedLocationIds: u.assignedLocationIds.filter(id => !locKeys.includes(id))
+        };
+      }
+      return u;
+    });
+
+    // If active location was deleted, fallback to first available active or default
+    if (locKeys.includes(this.activeLocation?.id) || locKeys.includes(this.activeLocation?.code)) {
+      this.activeLocation = this.locations.find(l => l.isDefault) || this.locations[0] || DEFAULT_LOCATIONS[0];
+    }
+
+    this.saveToStorage();
+    return this.locations.length < prevLen;
+  }
+
+  async syncLocationInventory(
+    locationId: string,
+    options: {
+      mode: 'ALL_ENABLED' | 'ALL_DISABLED' | 'SELECTIVE';
+      itemIds?: string[];
+      defaultStock?: number;
+    }
+  ): Promise<{ success: boolean; message?: string; syncedCount: number }> {
+    const loc = this.locations.find(l => l.id === locationId || l.code === locationId);
+    const locId = loc?.id || locationId;
+    const locName = loc?.name || 'Branch Outlet';
+    const locCode = loc?.code || '';
+    const selectedSet = new Set(options.itemIds || []);
+    const defaultStock = options.defaultStock || 0;
+
+    let apiSuccess = false;
+    let apiCount = 0;
+    let apiMsg = '';
+
+    try {
+      const res = await apiClient.post(`/locations/${locId}/sync-inventory`, {
+        mode: options.mode,
+        itemIds: options.itemIds,
+        defaultStock: options.defaultStock,
+      });
+      if (res.data?.success) {
+        apiSuccess = true;
+        apiCount = res.data.syncedCount;
+        apiMsg = res.data.message;
+      }
+    } catch (err) {
+      console.warn(`Backend sync for location ${locId} failed, applying local sync:`, err);
+    }
+
+    // Local sync on in-memory items
+    const tenantId = this.currentTenant.id;
+    let localSyncedCount = 0;
+
+    this.items = this.items.map(item => {
+      if (item.businessId === tenantId || !item.businessId) {
+        localSyncedCount++;
+        const itemLocs = item.locations ? [...item.locations] : [];
+        const itemId = item.id || item.publicItemId || '';
+        
+        let isListed = false;
+        if (options.mode === 'ALL_ENABLED') {
+          isListed = true;
+        } else if (options.mode === 'ALL_DISABLED') {
+          isListed = false;
+        } else {
+          isListed = selectedSet.has(itemId) || selectedSet.has(item.publicItemId || '') || selectedSet.has(item.sku || '');
+        }
+
+        const existingIdx = itemLocs.findIndex(l => l.locationId === locId || (locCode && l.locationId === locCode));
+        if (existingIdx !== -1) {
+          itemLocs[existingIdx] = {
+            ...itemLocs[existingIdx],
+            locationName: locName,
+            isListed: isListed,
+            currentStock: (defaultStock > 0 && !itemLocs[existingIdx].currentStock) ? defaultStock : itemLocs[existingIdx].currentStock,
+          };
+        } else {
+          itemLocs.push({
+            locationId: locId,
+            locationName: locName,
+            mrp: item.mrp ?? item.salePrice,
+            salePrice: item.salePrice,
+            purchasePrice: item.purchasePrice || 0,
+            currentStock: defaultStock,
+            minStockAlert: item.minStockAlert || 5,
+            isListed: isListed,
+            hasDiscount: item.hasDiscount || false,
+            discountType: item.discountType || 'PERCENT',
+            discountValue: item.discountValue || 0,
+          });
+        }
+
+        return { ...item, locations: itemLocs };
+      }
+      return item;
+    });
+
+    this.saveToStorage();
+    
+    // Refresh live items from backend if online
+    if (this.isOnline) {
+      await this.fetchItems().catch(() => {});
+    }
+
+    return {
+      success: true,
+      message: apiMsg || `Successfully synced ${localSyncedCount} items to branch ${locName}.`,
+      syncedCount: apiCount || localSyncedCount,
+    };
   }
 
   // --- Team & Staff Users Management ---
@@ -551,6 +812,46 @@ class StoreService {
   }
 
   getActiveTenant(): Tenant {
+    return this.currentTenant;
+  }
+
+  async updateTenantProfile(updates: {
+    name?: string;
+    gstin?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    currency?: string;
+  }): Promise<Tenant> {
+    const updatedTenant: Tenant = {
+      ...this.currentTenant,
+      name: updates.name ? updates.name.trim() : this.currentTenant.name,
+      gstin: updates.gstin !== undefined ? updates.gstin.trim() : this.currentTenant.gstin,
+      phone: updates.phone !== undefined ? updates.phone.trim() : this.currentTenant.phone,
+      adminEmail: updates.email !== undefined ? updates.email.trim().toLowerCase() : this.currentTenant.adminEmail,
+    };
+
+    // Update in local array
+    const idx = this.tenants.findIndex(t => t.id === this.currentTenant.id);
+    if (idx !== -1) {
+      this.tenants[idx] = updatedTenant;
+    }
+    this.currentTenant = updatedTenant;
+    this.saveToStorage();
+
+    // Sync to backend if online
+    try {
+      await apiClient.put(`/tenants/${this.currentTenant.id}`, {
+        name: updates.name,
+        gstin: updates.gstin,
+        phone: updates.phone,
+        admin_email: updates.email,
+        address: updates.address,
+      });
+    } catch (e) {
+      console.warn('Backend tenant profile update error:', e);
+    }
+
     return this.currentTenant;
   }
 

@@ -1,10 +1,12 @@
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.core.security import TokenPayload, get_current_user
 from app.core.config import settings
+from app.core.database import get_database
 
 router = APIRouter(prefix="/tenants", tags=["Super Admin Multi-Tenancy"])
 
@@ -118,6 +120,54 @@ async def test_db_connection(req: TestConnectionRequest):
             "message": f"Connection failed: {str(e)}",
             "status": "UNREACHABLE"
         }
+
+class TenantUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    gstin: Optional[str] = None
+    phone: Optional[str] = None
+    admin_email: Optional[str] = None
+    address: Optional[str] = None
+
+@router.put("/{tenant_id}")
+async def update_tenant_profile(
+    tenant_id: str,
+    req: TenantUpdateRequest,
+    user: TokenPayload = Depends(get_current_user)
+):
+    if "SUPER_ADMIN" not in user.roles and "TENANT_ADMIN" not in user.roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Store Administrators can update the business profile."
+        )
+
+    # If not Super Admin, ensure tenant user can only update their own tenant
+    if "SUPER_ADMIN" not in user.roles and user.default_business_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Unauthorized access to modify this store profile.")
+
+    primary_db = get_database()
+    t_oid = ObjectId(tenant_id) if ObjectId.is_valid(tenant_id) else None
+    
+    update_data = {}
+    if req.name is not None:
+        update_data["name"] = req.name.strip()
+    if req.gstin is not None:
+        update_data["gstin"] = req.gstin.strip()
+    if req.phone is not None:
+        update_data["phone"] = req.phone.strip()
+    if req.admin_email is not None:
+        update_data["adminEmail"] = req.admin_email.strip()
+    if req.address is not None:
+        update_data["address"] = req.address.strip()
+
+    if update_data and t_oid:
+        await primary_db.tenants.update_one({"_id": t_oid}, {"$set": update_data})
+
+    return {
+        "success": True,
+        "message": "Store profile updated successfully",
+        "tenantId": tenant_id,
+        "profile": update_data
+    }
 
 @router.post("", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
 async def create_tenant(req: TenantCreateRequest, user: TokenPayload = Depends(get_current_user)):

@@ -260,38 +260,49 @@ export const Header: React.FC<HeaderProps> = ({
                   Switch Active Branch
                 </div>
                 <div style={{ maxHeight: 200, overflowY: 'auto', padding: 4 }}>
-                  {locations.map((loc) => {
-                    const isCurrent = loc.id === activeLocation.id;
-                    return (
-                      <button
-                        key={loc.id}
-                        type="button"
-                        onClick={() => handleSwitchLocation(loc)}
-                        style={{
-                          width: '100%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '8px 10px',
-                          border: 'none',
-                          background: isCurrent ? 'var(--primary-50)' : 'transparent',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          textAlign: 'left'
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontSize: '0.82rem', fontWeight: isCurrent ? 700 : 500, color: isCurrent ? 'var(--primary-700)' : 'var(--neutral-800)' }}>
-                            {loc.name}
+                  {locations
+                    .filter((loc) => isSuperAdmin || isStoreAdmin || loc.isActive !== false)
+                    .map((loc) => {
+                      const isCurrent = loc.id === activeLocation.id;
+                      const isLocInactive = loc.isActive === false;
+                      return (
+                        <button
+                          key={loc.id}
+                          type="button"
+                          onClick={() => handleSwitchLocation(loc)}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 10px',
+                            border: 'none',
+                            background: isCurrent ? 'var(--primary-50)' : 'transparent',
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            opacity: isLocInactive ? 0.7 : 1
+                          }}
+                        >
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontSize: '0.82rem', fontWeight: isCurrent ? 700 : 500, color: isCurrent ? 'var(--primary-700)' : 'var(--neutral-800)' }}>
+                                {loc.name}
+                              </span>
+                              {isLocInactive && (
+                                <span style={{ fontSize: '0.65rem', padding: '1px 5px', borderRadius: 4, background: 'var(--danger-100)', color: 'var(--danger-700)', fontWeight: 600 }}>
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', fontFamily: 'var(--font-mono)' }}>
+                              {loc.code}
+                            </div>
                           </div>
-                          <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', fontFamily: 'var(--font-mono)' }}>
-                            {loc.code}
-                          </div>
-                        </div>
-                        {isCurrent && <Check size={14} color="var(--primary-600)" />}
-                      </button>
-                    );
-                  })}
+                          {isCurrent && <Check size={14} color="var(--primary-600)" />}
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
             )}

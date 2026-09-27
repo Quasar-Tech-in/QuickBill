@@ -786,4 +786,10 @@ async def cleanup_and_init_db():
     print("\nDatabase architecture cleanup and 32-item catalog initialization COMPLETED!")
 
 if __name__ == "__main__":
-    asyncio.run(cleanup_and_init_db())
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ["sync", "--sync", "migrate"]:
+        from scripts.sync_db_schema import run_db_schema_sync
+        asyncio.run(run_db_schema_sync())
+    else:
+        asyncio.run(cleanup_and_init_db())
+

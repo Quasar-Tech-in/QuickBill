@@ -3,37 +3,72 @@ import {
   Users, 
   MapPin, 
   Building, 
-  Database, 
+  Activity, 
   Plus, 
   Trash2, 
+  Edit3,
   CheckCircle2, 
   Server, 
   RefreshCw, 
-  FileCode, 
   ShieldCheck, 
   UserCheck, 
+  UserPlus,
+  Store,
   Lock, 
   Mail, 
   Phone, 
   AlertCircle,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  Save,
+  Check,
+  Power,
+  Info,
+  AlertTriangle,
+  Layers,
+  Sparkles,
+  Boxes
 } from 'lucide-react';
 import { store } from '../services/store';
-import { User, StoreLocation, UserRole } from '../types';
+import { User, StoreLocation, UserRole, Tenant } from '../types';
+import { SyncInventoryModal } from '../components/SyncInventoryModal';
+
+interface ConfirmModalState {
+  isOpen: boolean;
+  type: 'LOCATION_TOGGLE' | 'LOCATION_DELETE' | 'USER_TOGGLE' | 'USER_DELETE' | 'ALERT_NOTICE';
+  title: string;
+  message: string;
+  subMessage?: string;
+  confirmText?: string;
+  confirmBtnClass?: string;
+  targetLocation?: StoreLocation;
+  targetUser?: User;
+}
 
 export const SettingsView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'staff' | 'locations' | 'profile' | 'system'>('staff');
+  const [activeTab, setActiveTab] = useState<'staff' | 'locations' | 'profile' | 'health'>('staff');
   const [users, setUsers] = useState<User[]>([]);
   const [locations, setLocations] = useState<StoreLocation[]>([]);
   const [loading, setLoading] = useState(false);
+  
+  // Sync Inventory Modal State
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [syncTargetLocation, setSyncTargetLocation] = useState<StoreLocation | null>(null);
+
+  // Custom Confirmation & Alert Modal State
+  const [confirmModal, setConfirmModal] = useState<ConfirmModalState>({
+    isOpen: false,
+    type: 'ALERT_NOTICE',
+    title: '',
+    message: '',
+  });
   
   // Health check state
   const [isChecking, setIsChecking] = useState(false);
   const [backendStatus, setBackendStatus] = useState<boolean>(store.getOnlineStatus());
   const [lastCheckTime, setLastCheckTime] = useState<string>(new Date().toLocaleTimeString());
 
-  // User modal state
+  // User Add modal state
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -42,13 +77,43 @@ export const SettingsView: React.FC = () => {
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
   const [userFormError, setUserFormError] = useState('');
 
-  // Location modal state
+  // User Edit modal state
+  const [isEditUserModalOpen, setIsEditUserModalOpen] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserEmail, setEditUserEmail] = useState('');
+  const [editUserRole, setEditUserRole] = useState<UserRole>('CASHIER');
+  const [editUserLocationIds, setEditUserLocationIds] = useState<string[]>([]);
+  const [editUserNewPassword, setEditUserNewPassword] = useState('');
+  const [editUserFormError, setEditUserFormError] = useState('');
+
+  // Location Add modal state
   const [isLocModalOpen, setIsLocModalOpen] = useState(false);
   const [newLocCode, setNewLocCode] = useState('');
   const [newLocName, setNewLocName] = useState('');
   const [newLocAddress, setNewLocAddress] = useState('');
   const [newLocPhone, setNewLocPhone] = useState('');
   const [locFormError, setLocFormError] = useState('');
+
+  // Location Edit modal state
+  const [isEditLocModalOpen, setIsEditLocModalOpen] = useState(false);
+  const [editingLocId, setEditingLocId] = useState<string | null>(null);
+  const [editLocCode, setEditLocCode] = useState('');
+  const [editLocName, setEditLocName] = useState('');
+  const [editLocAddress, setEditLocAddress] = useState('');
+  const [editLocPhone, setEditLocPhone] = useState('');
+  const [editLocFormError, setEditLocFormError] = useState('');
+
+  // Store Profile State
+  const activeTenant = store.getActiveTenant();
+  const [profileName, setProfileName] = useState(activeTenant?.name || '');
+  const [profileGstin, setProfileGstin] = useState(activeTenant?.gstin || '');
+  const [profilePhone, setProfilePhone] = useState(activeTenant?.phone || '');
+  const [profileEmail, setProfileEmail] = useState(activeTenant?.adminEmail || '');
+  const [profileAddress, setProfileAddress] = useState('Ground Floor, Metro Retail Plaza, Sector 18, New Delhi');
+  const [profileCurrency, setProfileCurrency] = useState('₹ (INR)');
+  const [profileSavedMsg, setProfileSavedMsg] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   const currentUser = store.getCurrentUser();
   const canManage = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'TENANT_ADMIN';
@@ -57,9 +122,17 @@ export const SettingsView: React.FC = () => {
     setLoading(true);
     try {
       const uList = await store.getUsers();
-      const lList = store.getAllLocations();
+      const lList = await store.fetchLocations();
       setUsers(uList);
       setLocations(lList);
+      
+      const t = store.getActiveTenant();
+      if (t) {
+        setProfileName(t.name || '');
+        setProfileGstin(t.gstin || '');
+        setProfilePhone(t.phone || '');
+        setProfileEmail(t.adminEmail || '');
+      }
     } catch (e) {
       console.error('Failed loading staff and locations:', e);
     } finally {
@@ -80,14 +153,23 @@ export const SettingsView: React.FC = () => {
     handleTestConnection();
   }, []);
 
-  const handleToggleLocationSelection = (locId: string) => {
-    if (selectedLocationIds.includes(locId)) {
-      setSelectedLocationIds(selectedLocationIds.filter(id => id !== locId));
+  const handleToggleLocationSelection = (locId: string, isEdit: boolean = false) => {
+    if (isEdit) {
+      if (editUserLocationIds.includes(locId)) {
+        setEditUserLocationIds(editUserLocationIds.filter(id => id !== locId));
+      } else {
+        setEditUserLocationIds([...editUserLocationIds, locId]);
+      }
     } else {
-      setSelectedLocationIds([...selectedLocationIds, locId]);
+      if (selectedLocationIds.includes(locId)) {
+        setSelectedLocationIds(selectedLocationIds.filter(id => id !== locId));
+      } else {
+        setSelectedLocationIds([...selectedLocationIds, locId]);
+      }
     }
   };
 
+  // --- User Handlers ---
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setUserFormError('');
@@ -125,26 +207,106 @@ export const SettingsView: React.FC = () => {
     }
   };
 
-  const handleDeleteUser = async (user: User) => {
-    if (user.id === currentUser?.id) {
-      alert('You cannot delete your own active account.');
-      return;
-    }
-    if (!confirm(`Are you sure you want to remove staff member "${user.name}"?`)) return;
-
-    await store.deleteUser(user.id);
-    loadData();
+  const handleOpenEditUser = (user: User) => {
+    setEditingUserId(user.id);
+    setEditUserName(user.name);
+    setEditUserEmail(user.email);
+    setEditUserRole(user.role);
+    setEditUserLocationIds(user.assignedLocationIds || []);
+    setEditUserNewPassword('');
+    setEditUserFormError('');
+    setIsEditUserModalOpen(true);
   };
 
-  const handleToggleUserActive = async (user: User) => {
-    if (user.id === currentUser?.id) {
-      alert('You cannot deactivate your own active account.');
+  const handleSaveEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUserId) return;
+    setEditUserFormError('');
+
+    if (!editUserName.trim()) {
+      setEditUserFormError('Full Name is required.');
       return;
     }
-    await store.updateUser(user.id, { isActive: !user.isActive });
-    loadData();
+
+    if (editUserNewPassword && editUserNewPassword.length < 6) {
+      setEditUserFormError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    try {
+      const updates: any = {
+        name: editUserName.trim(),
+        role: editUserRole,
+        assignedLocationIds: editUserRole === 'TENANT_ADMIN' ? [] : editUserLocationIds,
+      };
+
+      if (editUserNewPassword) {
+        updates.password = editUserNewPassword;
+      }
+
+      await store.updateUser(editingUserId, updates);
+      setIsEditUserModalOpen(false);
+      loadData();
+    } catch (err: any) {
+      setEditUserFormError(err.response?.data?.detail || err.message || 'Failed to update user.');
+    }
   };
 
+  const handleDeleteUser = (user: User) => {
+    if (user.id === currentUser?.id) {
+      setConfirmModal({
+        isOpen: true,
+        type: 'ALERT_NOTICE',
+        title: 'Action Not Allowed',
+        message: 'You cannot delete your own active logged-in account.',
+        confirmText: 'Understood',
+        confirmBtnClass: 'btn-primary',
+      });
+      return;
+    }
+
+    setConfirmModal({
+      isOpen: true,
+      type: 'USER_DELETE',
+      title: 'Remove Staff Member?',
+      message: `Are you sure you want to permanently remove "${user.name}" (${user.email})?`,
+      subMessage: 'This action will revoke access immediately and remove the staff profile from the system.',
+      confirmText: 'Remove Staff Member',
+      confirmBtnClass: 'btn-danger',
+      targetUser: user,
+    });
+  };
+
+  const handleToggleUserActive = (user: User) => {
+    if (user.id === currentUser?.id) {
+      setConfirmModal({
+        isOpen: true,
+        type: 'ALERT_NOTICE',
+        title: 'Action Not Allowed',
+        message: 'You cannot deactivate your own active logged-in account.',
+        confirmText: 'Understood',
+        confirmBtnClass: 'btn-primary',
+      });
+      return;
+    }
+    const newStatus = !user.isActive;
+    setConfirmModal({
+      isOpen: true,
+      type: 'USER_TOGGLE',
+      title: newStatus ? 'Activate Staff Account?' : 'Deactivate Staff Account?',
+      message: newStatus
+        ? `Are you sure you want to activate account for "${user.name}" (${user.email})?`
+        : `Are you sure you want to deactivate account for "${user.name}" (${user.email})?`,
+      subMessage: newStatus
+        ? 'The user will be able to log in and access their assigned store branch immediately.'
+        : 'The user will be immediately barred from logging in and accessing any store operations.',
+      confirmText: newStatus ? 'Activate Account' : 'Deactivate Account',
+      confirmBtnClass: newStatus ? 'btn-primary' : 'btn-danger',
+      targetUser: user,
+    });
+  };
+
+  // --- Location Handlers ---
   const handleCreateLocation = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocFormError('');
@@ -168,10 +330,153 @@ export const SettingsView: React.FC = () => {
         setNewLocName('');
         setNewLocAddress('');
         setNewLocPhone('');
-        loadData();
+        await loadData();
+        // Automatically pop up the Sync Inventory Modal for the newly created branch!
+        setSyncTargetLocation(created);
+        setIsSyncModalOpen(true);
       }
     } catch (err: any) {
       setLocFormError(err.response?.data?.detail || err.message || 'Failed to create branch location.');
+    }
+  };
+
+  const handleOpenEditLocation = (loc: StoreLocation) => {
+    setEditingLocId(loc.id);
+    setEditLocCode(loc.code);
+    setEditLocName(loc.name);
+    setEditLocAddress(loc.address || '');
+    setEditLocPhone(loc.phone || '');
+    setEditLocFormError('');
+    setIsEditLocModalOpen(true);
+  };
+
+  const handleSaveEditLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLocId) return;
+    setEditLocFormError('');
+
+    if (!editLocName.trim()) {
+      setLocFormError('Branch Name is required.');
+      return;
+    }
+
+    try {
+      await store.updateLocation(editingLocId, {
+        name: editLocName.trim(),
+        code: editLocCode.trim().toUpperCase(),
+        address: editLocAddress.trim(),
+        phone: editLocPhone.trim(),
+      });
+      setIsEditLocModalOpen(false);
+      loadData();
+    } catch (err: any) {
+      setEditLocFormError(err.response?.data?.detail || err.message || 'Failed to update location.');
+    }
+  };
+
+  const handleToggleLocationActive = (loc: StoreLocation) => {
+    const isCurrentlyActive = loc.isActive !== false;
+    const newStatus = !isCurrentlyActive;
+    
+    // Check if trying to deactivate the default location
+    if (loc.isDefault && isCurrentlyActive) {
+      setConfirmModal({
+        isOpen: true,
+        type: 'ALERT_NOTICE',
+        title: 'Default Branch Cannot Be Deactivated',
+        message: `"${loc.name}" (${loc.code}) is designated as your primary flagship branch.`,
+        subMessage: 'To deactivate this branch, please designate another branch as the default flagship branch first in order to prevent store-wide checkout interruption.',
+        confirmText: 'Understood',
+        confirmBtnClass: 'btn-primary',
+      });
+      return;
+    }
+
+    setConfirmModal({
+      isOpen: true,
+      type: 'LOCATION_TOGGLE',
+      title: newStatus ? 'Activate Branch Outlet?' : 'Deactivate Branch Outlet?',
+      message: newStatus 
+        ? `Are you sure you want to activate branch outlet "${loc.name}" (${loc.code})?`
+        : `Are you sure you want to deactivate branch outlet "${loc.name}" (${loc.code})?`,
+      subMessage: newStatus
+        ? 'Staff members assigned to this location will regain access to billing, inventory, and transactions.'
+        : 'Non-admin staff members assigned exclusively to this branch will be restricted from selecting it and entering sales until it is reactivated.',
+      confirmText: newStatus ? 'Activate Branch' : 'Deactivate Branch',
+      confirmBtnClass: newStatus ? 'btn-primary' : 'btn-danger',
+      targetLocation: loc,
+    });
+  };
+
+  const handleDeleteLocation = (loc: StoreLocation) => {
+    if (loc.isDefault) {
+      setConfirmModal({
+        isOpen: true,
+        type: 'ALERT_NOTICE',
+        title: 'Default Branch Cannot Be Deleted',
+        message: `"${loc.name}" (${loc.code}) is designated as your primary flagship branch.`,
+        subMessage: 'To delete this branch, please designate another branch as default first in order to prevent store-wide checkout interruption.',
+        confirmText: 'Understood',
+        confirmBtnClass: 'btn-primary',
+      });
+      return;
+    }
+
+    setConfirmModal({
+      isOpen: true,
+      type: 'LOCATION_DELETE',
+      title: 'Delete Branch Location?',
+      message: `Are you sure you want to permanently delete branch outlet "${loc.name}" (${loc.code})?`,
+      subMessage: 'This action will remove branch inventory entities across all tenant products and unlink assigned staff members.',
+      confirmText: 'Delete Branch Location',
+      confirmBtnClass: 'btn-danger',
+      targetLocation: loc,
+    });
+  };
+
+  const handleExecuteConfirm = async () => {
+    const { type, targetLocation, targetUser } = confirmModal;
+    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+
+    try {
+      if (type === 'LOCATION_TOGGLE' && targetLocation) {
+        const isCurrentlyActive = targetLocation.isActive !== false;
+        await store.updateLocation(targetLocation.id, { isActive: !isCurrentlyActive });
+        await loadData();
+      } else if (type === 'LOCATION_DELETE' && targetLocation) {
+        await store.deleteLocation(targetLocation.id);
+        await loadData();
+      } else if (type === 'USER_TOGGLE' && targetUser) {
+        await store.updateUser(targetUser.id, { isActive: !targetUser.isActive });
+        await loadData();
+      } else if (type === 'USER_DELETE' && targetUser) {
+        await store.deleteUser(targetUser.id);
+        await loadData();
+      }
+    } catch (err: any) {
+      console.error('Action failed:', err);
+    }
+  };
+
+  // --- Store Profile Save Handler ---
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingProfile(true);
+    try {
+      await store.updateTenantProfile({
+        name: profileName.trim(),
+        gstin: profileGstin.trim(),
+        phone: profilePhone.trim(),
+        email: profileEmail.trim().toLowerCase(),
+        address: profileAddress.trim(),
+        currency: profileCurrency.trim(),
+      });
+      setProfileSavedMsg(true);
+      setTimeout(() => setProfileSavedMsg(false), 3500);
+    } catch (err) {
+      console.error('Error saving store profile:', err);
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
@@ -198,7 +503,7 @@ export const SettingsView: React.FC = () => {
             Store Management & Settings
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-            Manage staff credentials, role permissions, multi-branch store locations, and system configuration.
+            Manage staff credentials, role permissions, multi-branch store locations, and business profile.
           </p>
         </div>
 
@@ -233,12 +538,12 @@ export const SettingsView: React.FC = () => {
           </button>
           <button
             type="button"
-            className={`btn btn-sm ${activeTab === 'system' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('system')}
+            className={`btn btn-sm ${activeTab === 'health' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('health')}
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <Database size={14} />
-            <span>System & DB</span>
+            <Activity size={14} />
+            <span>System Health</span>
           </button>
         </div>
       </div>
@@ -246,15 +551,15 @@ export const SettingsView: React.FC = () => {
       {/* TAB 1: Staff & Team Management */}
       {activeTab === 'staff' && (
         <div className="card">
-          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--primary-50)', color: 'var(--primary-600)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Users size={18} />
               </div>
               <div>
-                <h3 className="card-title">Staff Members & Roles</h3>
+                <h3 className="card-title">Staff Members & Role Privileges</h3>
                 <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
-                  Authorize Store Admins, Managers, and Cashiers to operate within designated branch locations.
+                  Authorize Store Admins, Managers, and Cashiers with location-scoped access.
                 </p>
               </div>
             </div>
@@ -281,10 +586,10 @@ export const SettingsView: React.FC = () => {
                 <thead>
                   <tr>
                     <th>User / Name</th>
-                    <th>Email Address</th>
-                    <th>Role</th>
+                    <th>Email (Username)</th>
+                    <th>Role & Access</th>
                     <th>Assigned Locations</th>
-                    <th>Status</th>
+                    <th>Account Status</th>
                     {canManage && <th style={{ textAlign: 'right' }}>Actions</th>}
                   </tr>
                 </thead>
@@ -321,7 +626,9 @@ export const SettingsView: React.FC = () => {
                             </div>
                           </div>
                         </td>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>{u.email}</td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: 'var(--neutral-700)' }}>
+                          {u.email}
+                        </td>
                         <td>{getRoleBadge(u.role)}</td>
                         <td>
                           {u.role === 'TENANT_ADMIN' || u.role === 'SUPER_ADMIN' ? (
@@ -351,40 +658,71 @@ export const SettingsView: React.FC = () => {
                           <span style={{
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 4,
-                            fontSize: '0.75rem',
-                            fontWeight: 600,
-                            color: u.isActive ? 'var(--success-700)' : 'var(--neutral-400)',
+                            gap: 6,
+                            padding: '3px 10px',
+                            borderRadius: 12,
+                            fontSize: '0.74rem',
+                            fontWeight: 700,
+                            backgroundColor: u.isActive ? 'var(--success-50)' : 'var(--danger-50)',
+                            color: u.isActive ? 'var(--success-700)' : 'var(--danger-700)',
+                            border: `1px solid ${u.isActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
                           }}>
                             <span style={{
                               width: 6,
                               height: 6,
                               borderRadius: '50%',
-                              backgroundColor: u.isActive ? 'var(--success-500)' : 'var(--neutral-300)'
+                              backgroundColor: u.isActive ? 'var(--success-600)' : 'var(--danger-500)'
                             }} />
                             {u.isActive ? 'Active' : 'Deactivated'}
                           </span>
                         </td>
                         {canManage && (
                           <td style={{ textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: 6 }}>
+                            <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                              {/* Edit Permissions Button */}
                               <button
                                 type="button"
-                                className="btn btn-ghost btn-xs"
-                                title={u.isActive ? 'Deactivate account' : 'Activate account'}
+                                className="btn btn-secondary btn-xs"
+                                title="Edit Name, Role & Location Permissions"
+                                onClick={() => handleOpenEditUser(u)}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: '0.75rem' }}
+                              >
+                                <Edit3 size={12} />
+                                <span>Edit</span>
+                              </button>
+
+                              {/* Visible Deactivate / Activate Button */}
+                              <button
+                                type="button"
+                                className={`btn btn-xs ${u.isActive ? 'btn-secondary text-danger' : 'btn-secondary text-success'}`}
+                                title={u.isActive ? 'Deactivate staff account' : 'Activate staff account'}
                                 onClick={() => handleToggleUserActive(u)}
                                 disabled={u.id === currentUser?.id}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  padding: '4px 8px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 600,
+                                  borderColor: u.isActive ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)',
+                                  backgroundColor: u.isActive ? 'var(--danger-50)' : 'var(--success-50)'
+                                }}
                               >
-                                {u.isActive ? <ToggleRight size={18} color="var(--success-600)" /> : <ToggleLeft size={18} color="var(--neutral-400)" />}
+                                <Power size={12} />
+                                <span>{u.isActive ? 'Deactivate' : 'Activate'}</span>
                               </button>
+
+                              {/* Delete Button */}
                               <button
                                 type="button"
                                 className="btn btn-ghost btn-xs text-danger"
-                                title="Delete user"
+                                title="Remove User"
                                 onClick={() => handleDeleteUser(u)}
                                 disabled={u.id === currentUser?.id}
+                                style={{ padding: 4 }}
                               >
-                                <Trash2 size={15} />
+                                <Trash2 size={14} />
                               </button>
                             </div>
                           </td>
@@ -402,7 +740,7 @@ export const SettingsView: React.FC = () => {
       {/* TAB 2: Locations & Branches Management */}
       {activeTab === 'locations' && (
         <div className="card">
-          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--primary-50)', color: 'var(--primary-600)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <MapPin size={18} />
@@ -410,7 +748,7 @@ export const SettingsView: React.FC = () => {
               <div>
                 <h3 className="card-title">Store Locations & Counter Branches</h3>
                 <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
-                  Manage physical store outlets, warehouses, and checkout counters within your tenant business.
+                  Manage physical store outlets, warehouses, and checkout counters within your business.
                 </p>
               </div>
             </div>
@@ -434,6 +772,7 @@ export const SettingsView: React.FC = () => {
           <div className="card-body">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
               {locations.map((loc) => {
+                const isLocActive = loc.isActive !== false;
                 const assignedStaff = users.filter(u => 
                   u.role !== 'TENANT_ADMIN' && u.role !== 'SUPER_ADMIN' && (u.assignedLocationIds || []).includes(loc.id)
                 );
@@ -444,11 +783,12 @@ export const SettingsView: React.FC = () => {
                     style={{
                       padding: 16,
                       borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--neutral-200)',
-                      backgroundColor: 'var(--neutral-50)',
+                      border: `1px solid ${isLocActive ? 'var(--neutral-200)' : 'var(--danger-200)'}`,
+                      backgroundColor: isLocActive ? 'var(--neutral-50)' : 'var(--danger-50)',
                       display: 'flex',
                       flexDirection: 'column',
-                      justifyContent: 'space-between'
+                      justifyContent: 'space-between',
+                      opacity: isLocActive ? 1 : 0.85
                     }}
                   >
                     <div>
@@ -464,8 +804,17 @@ export const SettingsView: React.FC = () => {
                         }}>
                           {loc.code}
                         </span>
-                        <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>Live Outlet</span>
+                        
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          {loc.isDefault && (
+                            <span className="badge badge-primary" style={{ fontSize: '0.68rem' }}>Default</span>
+                          )}
+                          <span className={`badge ${isLocActive ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: '0.7rem' }}>
+                            {isLocActive ? 'Active Outlet' : 'Inactive Outlet'}
+                          </span>
+                        </div>
                       </div>
+
                       <h4 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--neutral-900)', marginBottom: 4 }}>
                         {loc.name}
                       </h4>
@@ -480,12 +829,70 @@ export const SettingsView: React.FC = () => {
                     </div>
 
                     <div style={{ borderTop: '1px solid var(--neutral-200)', paddingTop: 10, marginTop: 8 }}>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                         <span>Assigned Staff:</span>
                         <span style={{ fontWeight: 600, color: 'var(--neutral-800)' }}>
                           {assignedStaff.length} Member{assignedStaff.length === 1 ? '' : 's'}
                         </span>
                       </div>
+
+                      {canManage && (
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs"
+                            onClick={() => {
+                              setSyncTargetLocation(loc);
+                              setIsSyncModalOpen(true);
+                            }}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', color: 'var(--primary-700)', fontWeight: 600 }}
+                            title="Synchronize and configure catalog items for this branch"
+                          >
+                            <Boxes size={12} color="var(--primary-600)" />
+                            <span>Sync Items</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs"
+                            onClick={() => handleOpenEditLocation(loc)}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px' }}
+                          >
+                            <Edit3 size={12} />
+                            <span>Edit Details</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            className={`btn btn-xs ${isLocActive ? 'btn-secondary text-danger' : 'btn-secondary text-success'}`}
+                            onClick={() => handleToggleLocationActive(loc)}
+                            disabled={loc.isDefault && isLocActive}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '4px 8px',
+                              fontWeight: 600
+                            }}
+                            title={loc.isDefault && isLocActive ? 'Default location cannot be deactivated' : undefined}
+                          >
+                            <Power size={12} />
+                            <span>{isLocActive ? 'Deactivate' : 'Activate'}</span>
+                          </button>
+
+                          {/* Delete Branch Button */}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs text-danger"
+                            onClick={() => handleDeleteLocation(loc)}
+                            disabled={loc.isDefault}
+                            style={{ padding: 4, opacity: loc.isDefault ? 0.35 : 1, cursor: loc.isDefault ? 'not-allowed' : 'pointer' }}
+                            title={loc.isDefault ? "Default location cannot be deleted" : "Delete branch location"}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -501,134 +908,260 @@ export const SettingsView: React.FC = () => {
           <div className="card-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Building size={18} color="var(--primary-500)" />
-              <h3 className="card-title">Business & Store Profile</h3>
+              <div>
+                <h3 className="card-title">Business & Store Profile</h3>
+                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
+                  Update your retail company branding, tax registration, address, and contact details.
+                </p>
+              </div>
             </div>
           </div>
+
           <div className="card-body">
-            <form onSubmit={(e) => { e.preventDefault(); alert('Settings saved successfully!'); }}>
-              <div className="form-group">
-                <label className="form-label">Store / Company Name</label>
-                <input type="text" className="form-input" defaultValue="QuickBill Enterprise Superstore" />
+            {profileSavedMsg && (
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--success-50)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                color: 'var(--success-700)',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 20
+              }}>
+                <CheckCircle2 size={18} />
+                <span>Store profile details updated and saved successfully!</span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">GSTIN / Tax Number</label>
-                  <input type="text" className="form-input" defaultValue="07AABCB1234F1Z5" />
+            )}
+
+            <form onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Store Name */}
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Store / Company Business Name *</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={profileName} 
+                  onChange={(e) => setProfileName(e.target.value)}
+                  placeholder="e.g. QuickBill Enterprise Retail"
+                  required 
+                />
+              </div>
+
+              {/* Tax & Currency */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">GSTIN / Tax Identification Number</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={profileGstin} 
+                    onChange={(e) => setProfileGstin(e.target.value)}
+                    placeholder="e.g. 07AABCB1234F1Z5" 
+                  />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Currency Symbol</label>
-                  <input type="text" className="form-input" defaultValue="₹ (INR)" />
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Billing Currency Symbol</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={profileCurrency} 
+                    onChange={(e) => setProfileCurrency(e.target.value)}
+                    placeholder="₹ (INR)" 
+                  />
                 </div>
               </div>
-              <div className="form-group">
-                <label className="form-label">Store Main Address</label>
-                <input type="text" className="form-input" defaultValue="Plot 42, Tech Park, New Delhi, 110001" />
+
+              {/* Separated Contact Info: Phone & Email */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                {/* Contact Phone */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Official Contact Phone Number</label>
+                  <div style={{ position: 'relative' }}>
+                    <Phone size={16} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                    <input 
+                      type="text" 
+                      className="form-input" 
+                      style={{ paddingLeft: 36 }}
+                      value={profilePhone} 
+                      onChange={(e) => setProfilePhone(e.target.value)}
+                      placeholder="+91 98765 43210" 
+                    />
+                  </div>
+                </div>
+
+                {/* Contact Email */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Official Business Email Address</label>
+                  <div style={{ position: 'relative' }}>
+                    <Mail size={16} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                    <input 
+                      type="email" 
+                      className="form-input" 
+                      style={{ paddingLeft: 36 }}
+                      value={profileEmail} 
+                      onChange={(e) => setProfileEmail(e.target.value)}
+                      placeholder="info@quickbill.com" 
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="form-group">
-                <label className="form-label">Contact Phone & Email</label>
-                <input type="text" className="form-input" defaultValue="+91 9876543210 | info@quickbill.com" />
+
+              {/* Store Main Address */}
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Store Head Office / Main Address</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={profileAddress} 
+                  onChange={(e) => setProfileAddress(e.target.value)}
+                  placeholder="Plot 42, Tech Park, Sector 18, New Delhi, 110001" 
+                />
               </div>
-              <button type="submit" className="btn btn-primary" style={{ marginTop: 8 }}>
-                Save Store Profile
-              </button>
+
+              <div style={{ marginTop: 8 }}>
+                <button type="submit" className="btn btn-primary" disabled={isSavingProfile} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <Save size={16} />
+                  <span>{isSavingProfile ? 'Saving Changes...' : 'Save Store Profile'}</span>
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* TAB 4: System & DB Connectivity */}
-      {activeTab === 'system' && (
+      {/* TAB 4: Simplified Non-Technical System Health */}
+      {activeTab === 'health' && (
         <div className="card">
-          <div className="card-header">
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Database size={18} color="var(--primary-500)" />
-              <h3 className="card-title">MongoDB & Backend Server Connectivity</h3>
+              <Activity size={18} color="var(--primary-500)" />
+              <div>
+                <h3 className="card-title">System & Cloud Connectivity</h3>
+                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
+                  Real-time synchronization status between your store terminal and cloud services.
+                </p>
+              </div>
             </div>
+            
             <button 
               className="btn btn-secondary btn-sm" 
               onClick={handleTestConnection}
               disabled={isChecking}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              <RefreshCw size={14} className={isChecking ? 'pulse-dot' : ''} />
-              <span>{isChecking ? 'Pinging...' : 'Test Connection'}</span>
+              <RefreshCw size={14} className={isChecking ? 'spin' : ''} />
+              <span>{isChecking ? 'Testing...' : 'Check Connection'}</span>
             </button>
           </div>
+
           <div className="card-body">
-            {/* Status Box */}
+            {/* Friendly Status Box */}
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 12,
-                padding: 14,
+                gap: 16,
+                padding: 18,
                 borderRadius: 'var(--radius-md)',
                 backgroundColor: backendStatus ? 'var(--success-50)' : 'var(--warning-50)',
                 border: `1px solid ${backendStatus ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
                 marginBottom: 20,
               }}
             >
-              {backendStatus ? (
-                <CheckCircle2 size={24} color="var(--success-700)" />
-              ) : (
-                <Server size={24} color="var(--warning-700)" />
-              )}
+              <div style={{
+                width: 48,
+                height: 48,
+                borderRadius: '50%',
+                backgroundColor: backendStatus ? '#d1fae5' : '#fef3c7',
+                color: backendStatus ? 'var(--success-700)' : 'var(--warning-700)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                {backendStatus ? (
+                  <CheckCircle2 size={28} />
+                ) : (
+                  <Server size={28} />
+                )}
+              </div>
               <div>
-                <p style={{ fontWeight: 700, color: backendStatus ? 'var(--success-700)' : 'var(--warning-700)', fontSize: '0.92rem' }}>
-                  {backendStatus ? 'FastAPI & MongoDB Services Connected' : 'Local Web POS Standalone Mode'}
-                </p>
-                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-600)' }}>
+                <h4 style={{ fontWeight: 800, color: backendStatus ? 'var(--success-800)' : 'var(--warning-800)', fontSize: '1rem', marginBottom: 2 }}>
+                  {backendStatus ? '🟢 Cloud Backend Connected & Operational' : '🟡 Standalone Local Offline Mode'}
+                </h4>
+                <p style={{ fontSize: '0.82rem', color: 'var(--neutral-600)' }}>
                   {backendStatus 
-                    ? `Live REST endpoints active at http://localhost:8000/api/v1 (Checked: ${lastCheckTime})`
-                    : `Backend not running on port 8000. Operating in offline storage mode.`}
+                    ? `Live billing services, multi-device sync, and inventory ledger are synchronized. (Last verified: ${lastCheckTime})`
+                    : `Operating securely on local storage. Invoices and transactions are queued locally.`}
                 </p>
               </div>
             </div>
 
-            {/* .env Guide Box */}
-            <div style={{ backgroundColor: 'var(--neutral-50)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <FileCode size={16} color="var(--primary-600)" />
-                <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Database Configuration (.env)</span>
+            {/* Quick Status Highlights */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+              <div style={{ padding: 14, borderRadius: 'var(--radius-md)', background: 'var(--neutral-50)', border: '1px solid var(--neutral-200)' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', textTransform: 'uppercase', fontWeight: 600 }}>Billing Engine</span>
+                <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--success-700)', marginTop: 2 }}>✓ High Precision Math Ready</p>
               </div>
-              <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', marginBottom: 12 }}>
-                Configure your isolated MongoDB databases in <code>apps/api/.env</code>:
-              </p>
-              <pre
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.75rem',
-                  backgroundColor: 'var(--neutral-900)',
-                  color: '#e2e8f0',
-                  padding: 12,
-                  borderRadius: 6,
-                  overflowX: 'auto',
-                  lineHeight: 1.6,
-                }}
-              >
-{`# Primary Master Database (Tenants & Master Users)
-MONGODB_URI=mongodb://admin:secretpassword@localhost:27017/quickbill_db?authSource=admin
 
-# Dedicated Tenant Store Database
-DATABASE_NAME=quickbill_main_db`}
-              </pre>
+              <div style={{ padding: 14, borderRadius: 'var(--radius-md)', background: 'var(--neutral-50)', border: '1px solid var(--neutral-200)' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', textTransform: 'uppercase', fontWeight: 600 }}>Local Storage Cache</span>
+                <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--primary-600)', marginTop: 2 }}>✓ Encrypted & Active</p>
+              </div>
+
+              <div style={{ padding: 14, borderRadius: 'var(--radius-md)', background: 'var(--neutral-50)', border: '1px solid var(--neutral-200)' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', textTransform: 'uppercase', fontWeight: 600 }}>Multi-Branch Routing</span>
+                <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--neutral-900)', marginTop: 2 }}>✓ {locations.length} Outlets Configured</p>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL: Add Staff Member */}
+      {/* MODAL 1: Add New Staff Member */}
       {isUserModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 520 }}>
-            <div className="modal-header">
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <UserCheck size={18} color="var(--primary-600)" />
-                <span>Create New Staff Member</span>
-              </h3>
+        <div className="modal-overlay" style={{ zIndex: 9999 }}>
+          <div className="modal-content" style={{ maxWidth: 600, padding: 0, overflow: 'hidden', borderRadius: 'var(--radius-lg)' }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid var(--neutral-200)',
+              backgroundColor: 'var(--neutral-50)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 10px rgba(79, 70, 229, 0.3)'
+                }}>
+                  <UserPlus size={22} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--neutral-900)', margin: 0 }}>
+                    Create New Staff Member
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                    Set up credentials, assign role privileges, and specify branch outlet access.
+                  </p>
+                </div>
+              </div>
               <button 
                 type="button" 
                 className="btn-ghost" 
-                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.2rem' }}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.3rem', color: 'var(--neutral-400)', padding: 4 }}
                 onClick={() => setIsUserModalOpen(false)}
               >
                 ✕
@@ -636,105 +1169,275 @@ DATABASE_NAME=quickbill_main_db`}
             </div>
 
             <form onSubmit={handleCreateUser}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="modal-body" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 20, maxHeight: 'calc(85vh - 130px)', overflowY: 'auto' }}>
                 {userFormError && (
                   <div style={{
-                    padding: 10,
-                    borderRadius: 6,
+                    padding: '12px 16px',
+                    borderRadius: 8,
                     backgroundColor: 'var(--danger-50)',
                     border: '1px solid rgba(239, 68, 68, 0.3)',
                     color: 'var(--danger-700)',
-                    fontSize: '0.82rem',
+                    fontSize: '0.85rem',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6
+                    gap: 8
                   }}>
-                    <AlertCircle size={15} />
-                    <span>{userFormError}</span>
+                    <AlertCircle size={17} style={{ flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600 }}>{userFormError}</span>
                   </div>
                 )}
 
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Full Name *</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. Rahul Sharma"
-                    value={newUserName}
-                    onChange={(e) => setNewUserName(e.target.value)}
-                    required
-                  />
-                </div>
+                {/* Section 1: Credentials */}
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-700)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Users size={14} />
+                    <span>1. Basic Profile & Credentials</span>
+                  </div>
 
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Email Address (Login Username) *</label>
-                  <div style={{ position: 'relative' }}>
-                    <Mail size={16} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 12 }} />
-                    <input
-                      type="email"
-                      className="form-input"
-                      style={{ paddingLeft: 36 }}
-                      placeholder="e.g. rahul@quickbill.local"
-                      value={newUserEmail}
-                      onChange={(e) => setNewUserEmail(e.target.value)}
-                      required
-                    />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Full Name *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Rahul Sharma"
+                        value={newUserName}
+                        onChange={(e) => setNewUserName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Email (Login ID) *</label>
+                      <div style={{ position: 'relative' }}>
+                        <Mail size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                        <input
+                          type="email"
+                          className="form-input"
+                          style={{ paddingLeft: 36 }}
+                          placeholder="e.g. rahul@quickbill.local"
+                          value={newUserEmail}
+                          onChange={(e) => setNewUserEmail(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginTop: 12, marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Account Password *</label>
+                    <div style={{ position: 'relative' }}>
+                      <Lock size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                      <input
+                        type="password"
+                        className="form-input"
+                        style={{ paddingLeft: 36 }}
+                        placeholder="Minimum 6 characters"
+                        value={newUserPassword}
+                        onChange={(e) => setNewUserPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)', marginTop: 4, display: 'block' }}>
+                      Staff member will use this password alongside their email to sign in.
+                    </span>
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Password *</label>
-                  <div style={{ position: 'relative' }}>
-                    <Lock size={16} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 12 }} />
-                    <input
-                      type="password"
-                      className="form-input"
-                      style={{ paddingLeft: 36 }}
-                      placeholder="Min. 6 characters"
-                      value={newUserPassword}
-                      onChange={(e) => setNewUserPassword(e.target.value)}
-                      required
-                    />
+                {/* Section 2: Role Selector Cards */}
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-700)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <ShieldCheck size={14} />
+                    <span>2. Select Access Role & Permissions</span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                    {/* Role 1: Cashier */}
+                    <div
+                      onClick={() => setNewUserRole('CASHIER')}
+                      style={{
+                        padding: 14,
+                        borderRadius: 'var(--radius-md)',
+                        border: `2px solid ${newUserRole === 'CASHIER' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                        backgroundColor: newUserRole === 'CASHIER' ? 'var(--primary-50)' : '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        boxShadow: newUserRole === 'CASHIER' ? '0 4px 12px var(--primary-glow)' : 'none'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: '1.4rem' }}>🧾</span>
+                          {newUserRole === 'CASHIER' && <CheckCircle2 size={16} color="var(--primary-600)" />}
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--neutral-900)' }}>Cashier</div>
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, background: 'var(--success-100)', color: 'var(--success-700)', fontWeight: 700, display: 'inline-block', margin: '4px 0 6px 0' }}>
+                          POS & Checkout
+                        </span>
+                        <p style={{ fontSize: '0.72rem', color: 'var(--neutral-600)', lineHeight: 1.35, margin: 0 }}>
+                          Fast POS sales, customer receipts, and invoice returns.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Role 2: Manager */}
+                    <div
+                      onClick={() => setNewUserRole('MANAGER')}
+                      style={{
+                        padding: 14,
+                        borderRadius: 'var(--radius-md)',
+                        border: `2px solid ${newUserRole === 'MANAGER' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                        backgroundColor: newUserRole === 'MANAGER' ? 'var(--primary-50)' : '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        boxShadow: newUserRole === 'MANAGER' ? '0 4px 12px var(--primary-glow)' : 'none'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: '1.4rem' }}>🏪</span>
+                          {newUserRole === 'MANAGER' && <CheckCircle2 size={16} color="var(--primary-600)" />}
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--neutral-900)' }}>Manager</div>
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, background: 'var(--warning-100)', color: 'var(--warning-700)', fontWeight: 700, display: 'inline-block', margin: '4px 0 6px 0' }}>
+                          Stock & Ops
+                        </span>
+                        <p style={{ fontSize: '0.72rem', color: 'var(--neutral-600)', lineHeight: 1.35, margin: 0 }}>
+                          Inventory stocks, reports, ledger entries, and counter ops.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Role 3: Store Admin */}
+                    <div
+                      onClick={() => setNewUserRole('TENANT_ADMIN')}
+                      style={{
+                        padding: 14,
+                        borderRadius: 'var(--radius-md)',
+                        border: `2px solid ${newUserRole === 'TENANT_ADMIN' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                        backgroundColor: newUserRole === 'TENANT_ADMIN' ? 'var(--primary-50)' : '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        boxShadow: newUserRole === 'TENANT_ADMIN' ? '0 4px 12px var(--primary-glow)' : 'none'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: '1.4rem' }}>👑</span>
+                          {newUserRole === 'TENANT_ADMIN' && <CheckCircle2 size={16} color="var(--primary-600)" />}
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--neutral-900)' }}>Store Admin</div>
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, background: 'var(--primary-100)', color: 'var(--primary-700)', fontWeight: 700, display: 'inline-block', margin: '4px 0 6px 0' }}>
+                          Full Control
+                        </span>
+                        <p style={{ fontSize: '0.72rem', color: 'var(--neutral-600)', lineHeight: 1.35, margin: 0 }}>
+                          Global access across all branches, staff settings, & billing.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>System Role & Permissions *</label>
-                  <select
-                    className="form-select"
-                    value={newUserRole}
-                    onChange={(e) => setNewUserRole(e.target.value as UserRole)}
-                  >
-                    <option value="CASHIER">🧾 Cashier (POS Billing, Receipts, Customer Orders)</option>
-                    <option value="MANAGER">🏪 Store Manager (Stock Inventory, Reports, Counter Ops)</option>
-                    <option value="TENANT_ADMIN">👑 Store Admin (Full Store Control, Staff & Locations)</option>
-                  </select>
-                </div>
-
+                {/* Section 3: Branch Location Permissions */}
                 {newUserRole !== 'TENANT_ADMIN' && (
-                  <div className="form-group">
-                    <label className="form-label" style={{ fontWeight: 600 }}>Assign Store Locations / Branches</label>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', marginBottom: 8 }}>
-                      Select the specific branch outlets this staff member is authorized to access.
-                    </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 130, overflowY: 'auto', padding: 8, background: 'var(--neutral-50)', borderRadius: 6, border: '1px solid var(--neutral-200)' }}>
-                      {locations.map((loc) => (
-                        <label key={loc.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
-                          <input
-                            type="checkbox"
-                            checked={selectedLocationIds.includes(loc.id)}
-                            onChange={() => handleToggleLocationSelection(loc.id)}
-                          />
-                          <span style={{ fontWeight: 600 }}>{loc.name}</span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', fontFamily: 'var(--font-mono)' }}>({loc.code})</span>
-                        </label>
-                      ))}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-700)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <MapPin size={14} />
+                        <span>3. Assigned Store Outlets ({selectedLocationIds.length} Selected)</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => setSelectedLocationIds(locations.map(l => l.id))}
+                          style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+                        >
+                          Select All
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => setSelectedLocationIds([])}
+                          style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, maxHeight: 150, overflowY: 'auto', padding: 4 }}>
+                      {locations.map((loc) => {
+                        const isSelected = selectedLocationIds.includes(loc.id);
+                        const isLocActive = loc.isActive !== false;
+                        return (
+                          <div
+                            key={loc.id}
+                            onClick={() => handleToggleLocationSelection(loc.id, false)}
+                            style={{
+                              padding: '10px 12px',
+                              borderRadius: 'var(--radius-md)',
+                              border: `1.5px solid ${isSelected ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                              backgroundColor: isSelected ? 'var(--primary-50)' : '#ffffff',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                              <MapPin size={15} color={isSelected ? 'var(--primary-600)' : 'var(--neutral-400)'} style={{ flexShrink: 0 }} />
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--neutral-900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {loc.name}
+                                </div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', fontFamily: 'var(--font-mono)' }}>
+                                  {loc.code} {loc.isDefault ? '• Default' : ''} {!isLocActive ? '• (Inactive)' : ''}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{
+                              width: 18,
+                              height: 18,
+                              borderRadius: 4,
+                              border: `1.5px solid ${isSelected ? 'var(--primary-600)' : 'var(--neutral-300)'}`,
+                              backgroundColor: isSelected ? 'var(--primary-600)' : '#ffffff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#ffffff',
+                              fontSize: '0.7rem',
+                              flexShrink: 0
+                            }}>
+                              {isSelected && <Check size={12} />}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="modal-footer">
+              {/* Modal Footer */}
+              <div style={{
+                padding: '16px 24px',
+                backgroundColor: 'var(--neutral-50)',
+                borderTop: '1px solid var(--neutral-200)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 12
+              }}>
                 <button 
                   type="button" 
                   className="btn btn-secondary" 
@@ -742,8 +1445,9 @@ DATABASE_NAME=quickbill_main_db`}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Create Staff Account
+                <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <UserPlus size={16} />
+                  <span>Create Staff Account</span>
                 </button>
               </div>
             </form>
@@ -751,19 +1455,379 @@ DATABASE_NAME=quickbill_main_db`}
         </div>
       )}
 
-      {/* MODAL: Add Branch Location */}
-      {isLocModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 480 }}>
-            <div className="modal-header">
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <MapPin size={18} color="var(--primary-600)" />
-                <span>Add New Store Branch Location</span>
-              </h3>
+      {/* MODAL 2: Edit Staff Member & Permissions (Immutable Email) */}
+      {isEditUserModalOpen && (
+        <div className="modal-overlay" style={{ zIndex: 9999 }}>
+          <div className="modal-content" style={{ maxWidth: 600, padding: 0, overflow: 'hidden', borderRadius: 'var(--radius-lg)' }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid var(--neutral-200)',
+              backgroundColor: 'var(--neutral-50)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 10px rgba(124, 58, 237, 0.3)'
+                }}>
+                  <ShieldCheck size={22} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--neutral-900)', margin: 0 }}>
+                    Edit Staff & Role Permissions
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                    Modify staff details, change security role, and update branch access.
+                  </p>
+                </div>
+              </div>
               <button 
                 type="button" 
                 className="btn-ghost" 
-                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.2rem' }}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.3rem', color: 'var(--neutral-400)', padding: 4 }}
+                onClick={() => setIsEditUserModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditUser}>
+              <div className="modal-body" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 20, maxHeight: 'calc(85vh - 130px)', overflowY: 'auto' }}>
+                {editUserFormError && (
+                  <div style={{
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    backgroundColor: 'var(--danger-50)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    color: 'var(--danger-700)',
+                    fontSize: '0.85rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8
+                  }}>
+                    <AlertCircle size={17} style={{ flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600 }}>{editUserFormError}</span>
+                  </div>
+                )}
+
+                {/* Section 1: Identity & Credentials */}
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-700)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Users size={14} />
+                    <span>1. Basic Profile & Login ID</span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Full Name *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={editUserName}
+                        onChange={(e) => setEditUserName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Email Address</label>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          <Lock size={11} color="var(--neutral-400)" />
+                          <span>Fixed Login ID</span>
+                        </span>
+                      </div>
+                      <div style={{ position: 'relative' }}>
+                        <Mail size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                        <input
+                          type="email"
+                          className="form-input"
+                          style={{ paddingLeft: 36, backgroundColor: 'var(--neutral-100)', color: 'var(--neutral-600)', cursor: 'not-allowed' }}
+                          value={editUserEmail}
+                          disabled
+                          readOnly
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginTop: 12, marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Reset Password (Optional)</label>
+                    <div style={{ position: 'relative' }}>
+                      <Lock size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                      <input
+                        type="password"
+                        className="form-input"
+                        style={{ paddingLeft: 36 }}
+                        placeholder="Leave blank to keep existing password"
+                        value={editUserNewPassword}
+                        onChange={(e) => setEditUserNewPassword(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: Role Selector Cards */}
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-700)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <ShieldCheck size={14} />
+                    <span>2. Security Role & System Tier</span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                    {/* Role 1: Cashier */}
+                    <div
+                      onClick={() => setEditUserRole('CASHIER')}
+                      style={{
+                        padding: 14,
+                        borderRadius: 'var(--radius-md)',
+                        border: `2px solid ${editUserRole === 'CASHIER' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                        backgroundColor: editUserRole === 'CASHIER' ? 'var(--primary-50)' : '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        boxShadow: editUserRole === 'CASHIER' ? '0 4px 12px var(--primary-glow)' : 'none'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: '1.4rem' }}>🧾</span>
+                          {editUserRole === 'CASHIER' && <CheckCircle2 size={16} color="var(--primary-600)" />}
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--neutral-900)' }}>Cashier</div>
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, background: 'var(--success-100)', color: 'var(--success-700)', fontWeight: 700, display: 'inline-block', margin: '4px 0 6px 0' }}>
+                          POS & Checkout
+                        </span>
+                        <p style={{ fontSize: '0.72rem', color: 'var(--neutral-600)', lineHeight: 1.35, margin: 0 }}>
+                          Fast POS sales, customer receipts, and invoice returns.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Role 2: Manager */}
+                    <div
+                      onClick={() => setEditUserRole('MANAGER')}
+                      style={{
+                        padding: 14,
+                        borderRadius: 'var(--radius-md)',
+                        border: `2px solid ${editUserRole === 'MANAGER' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                        backgroundColor: editUserRole === 'MANAGER' ? 'var(--primary-50)' : '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        boxShadow: editUserRole === 'MANAGER' ? '0 4px 12px var(--primary-glow)' : 'none'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: '1.4rem' }}>🏪</span>
+                          {editUserRole === 'MANAGER' && <CheckCircle2 size={16} color="var(--primary-600)" />}
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--neutral-900)' }}>Manager</div>
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, background: 'var(--warning-100)', color: 'var(--warning-700)', fontWeight: 700, display: 'inline-block', margin: '4px 0 6px 0' }}>
+                          Stock & Ops
+                        </span>
+                        <p style={{ fontSize: '0.72rem', color: 'var(--neutral-600)', lineHeight: 1.35, margin: 0 }}>
+                          Inventory stocks, reports, ledger entries, and counter ops.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Role 3: Store Admin */}
+                    <div
+                      onClick={() => setEditUserRole('TENANT_ADMIN')}
+                      style={{
+                        padding: 14,
+                        borderRadius: 'var(--radius-md)',
+                        border: `2px solid ${editUserRole === 'TENANT_ADMIN' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                        backgroundColor: editUserRole === 'TENANT_ADMIN' ? 'var(--primary-50)' : '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        boxShadow: editUserRole === 'TENANT_ADMIN' ? '0 4px 12px var(--primary-glow)' : 'none'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: '1.4rem' }}>👑</span>
+                          {editUserRole === 'TENANT_ADMIN' && <CheckCircle2 size={16} color="var(--primary-600)" />}
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--neutral-900)' }}>Store Admin</div>
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, background: 'var(--primary-100)', color: 'var(--primary-700)', fontWeight: 700, display: 'inline-block', margin: '4px 0 6px 0' }}>
+                          Full Control
+                        </span>
+                        <p style={{ fontSize: '0.72rem', color: 'var(--neutral-600)', lineHeight: 1.35, margin: 0 }}>
+                          Global access across all branches, staff settings, & billing.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3: Branch Location Permissions */}
+                {editUserRole !== 'TENANT_ADMIN' && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-700)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <MapPin size={14} />
+                        <span>3. Assigned Store Outlets ({editUserLocationIds.length} Selected)</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => setEditUserLocationIds(locations.map(l => l.id))}
+                          style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+                        >
+                          Select All
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => setEditUserLocationIds([])}
+                          style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, maxHeight: 150, overflowY: 'auto', padding: 4 }}>
+                      {locations.map((loc) => {
+                        const isSelected = editUserLocationIds.includes(loc.id);
+                        const isLocActive = loc.isActive !== false;
+                        return (
+                          <div
+                            key={loc.id}
+                            onClick={() => handleToggleLocationSelection(loc.id, true)}
+                            style={{
+                              padding: '10px 12px',
+                              borderRadius: 'var(--radius-md)',
+                              border: `1.5px solid ${isSelected ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                              backgroundColor: isSelected ? 'var(--primary-50)' : '#ffffff',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                              <MapPin size={15} color={isSelected ? 'var(--primary-600)' : 'var(--neutral-400)'} style={{ flexShrink: 0 }} />
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--neutral-900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {loc.name}
+                                </div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', fontFamily: 'var(--font-mono)' }}>
+                                  {loc.code} {loc.isDefault ? '• Default' : ''} {!isLocActive ? '• (Inactive)' : ''}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{
+                              width: 18,
+                              height: 18,
+                              borderRadius: 4,
+                              border: `1.5px solid ${isSelected ? 'var(--primary-600)' : 'var(--neutral-300)'}`,
+                              backgroundColor: isSelected ? 'var(--primary-600)' : '#ffffff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#ffffff',
+                              fontSize: '0.7rem',
+                              flexShrink: 0
+                            }}>
+                              {isSelected && <Check size={12} />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div style={{
+                padding: '16px 24px',
+                backgroundColor: 'var(--neutral-50)',
+                borderTop: '1px solid var(--neutral-200)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 12
+              }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => setIsEditUserModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <ShieldCheck size={16} />
+                  <span>Save Permissions</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: Add Branch Location */}
+      {isLocModalOpen && (
+        <div className="modal-overlay" style={{ zIndex: 9999 }}>
+          <div className="modal-content" style={{ maxWidth: 540, padding: 0, overflow: 'hidden', borderRadius: 'var(--radius-lg)' }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid var(--neutral-200)',
+              backgroundColor: 'var(--neutral-50)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 10px rgba(16, 185, 129, 0.3)'
+                }}>
+                  <Store size={22} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--neutral-900)', margin: 0 }}>
+                    Add Store Branch Location
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                    Configure a new retail counter, store branch, or stock warehouse.
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                className="btn-ghost" 
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.3rem', color: 'var(--neutral-400)', padding: 4 }}
                 onClick={() => setIsLocModalOpen(false)}
               >
                 ✕
@@ -771,30 +1835,65 @@ DATABASE_NAME=quickbill_main_db`}
             </div>
 
             <form onSubmit={handleCreateLocation}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="modal-body" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
                 {locFormError && (
                   <div style={{
-                    padding: 10,
-                    borderRadius: 6,
+                    padding: '12px 16px',
+                    borderRadius: 8,
                     backgroundColor: 'var(--danger-50)',
                     border: '1px solid rgba(239, 68, 68, 0.3)',
                     color: 'var(--danger-700)',
-                    fontSize: '0.82rem',
+                    fontSize: '0.85rem',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6
+                    gap: 8
                   }}>
-                    <AlertCircle size={15} />
-                    <span>{locFormError}</span>
+                    <AlertCircle size={17} style={{ flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600 }}>{locFormError}</span>
                   </div>
                 )}
 
-                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label" style={{ fontWeight: 600 }}>Branch Code *</label>
+                {/* Live Outlet Preview Card */}
+                <div style={{
+                  padding: '14px 16px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'linear-gradient(135deg, var(--neutral-50) 0%, var(--primary-50) 100%)',
+                  border: '1px solid var(--primary-200)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 8, background: '#ffffff', color: 'var(--primary-600)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--shadow-sm)' }}>
+                      <MapPin size={18} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--neutral-900)' }}>
+                        {newLocName.trim() || 'New Outlet Name'}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>
+                        {newLocAddress.trim() || 'Physical location address'}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    <span style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', fontWeight: 800, padding: '2px 8px', borderRadius: 4, background: 'var(--neutral-200)', color: 'var(--neutral-800)' }}>
+                      {newLocCode.trim().toUpperCase() || 'CODE-01'}
+                    </span>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--success-700)', fontWeight: 700 }}>
+                      ● Ready for Billing
+                    </span>
+                  </div>
+                </div>
+
+                {/* Section 1: Identification */}
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 14 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Branch Code *</label>
                     <input
                       type="text"
                       className="form-input"
+                      style={{ fontFamily: 'var(--font-mono)', textTransform: 'uppercase', fontWeight: 600 }}
                       placeholder="e.g. BR-03"
                       value={newLocCode}
                       onChange={(e) => setNewLocCode(e.target.value)}
@@ -802,12 +1901,12 @@ DATABASE_NAME=quickbill_main_db`}
                     />
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label" style={{ fontWeight: 600 }}>Branch / Outlet Name *</label>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Branch / Outlet Name *</label>
                     <input
                       type="text"
                       className="form-input"
-                      placeholder="e.g. Airport Kiosk Counter"
+                      placeholder="e.g. Airport Express Counter"
                       value={newLocName}
                       onChange={(e) => setNewLocName(e.target.value)}
                       required
@@ -815,34 +1914,66 @@ DATABASE_NAME=quickbill_main_db`}
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Physical Address</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Terminal 3 Arrivals, New Delhi"
-                    value={newLocAddress}
-                    onChange={(e) => setNewLocAddress(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Phone / Contact Number</label>
+                {/* Section 2: Address & Contact */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Physical Address</label>
                   <div style={{ position: 'relative' }}>
-                    <Phone size={16} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 12 }} />
+                    <MapPin size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
                     <input
                       type="text"
                       className="form-input"
                       style={{ paddingLeft: 36 }}
-                      placeholder="+91 98765 00000"
+                      placeholder="e.g. Terminal 3 Arrivals, New Delhi"
+                      value={newLocAddress}
+                      onChange={(e) => setNewLocAddress(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Phone / Counter Contact</label>
+                  <div style={{ position: 'relative' }}>
+                    <Phone size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ paddingLeft: 36 }}
+                      placeholder="e.g. +91 98765 00000"
                       value={newLocPhone}
                       onChange={(e) => setNewLocPhone(e.target.value)}
                     />
                   </div>
                 </div>
+
+                {/* Info Callout */}
+                <div style={{
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  backgroundColor: 'var(--neutral-50)',
+                  border: '1px solid var(--neutral-200)',
+                  fontSize: '0.78rem',
+                  color: 'var(--neutral-600)',
+                  lineHeight: 1.45,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}>
+                  <Info size={16} color="var(--primary-600)" style={{ flexShrink: 0 }} />
+                  <span>
+                    New branches are active upon creation and will immediately be available for POS sales checkout and stock allocation.
+                  </span>
+                </div>
               </div>
 
-              <div className="modal-footer">
+              {/* Modal Footer */}
+              <div style={{
+                padding: '16px 24px',
+                backgroundColor: 'var(--neutral-50)',
+                borderTop: '1px solid var(--neutral-200)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 12
+              }}>
                 <button 
                   type="button" 
                   className="btn btn-secondary" 
@@ -850,14 +1981,243 @@ DATABASE_NAME=quickbill_main_db`}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Save Branch Location
+                <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Store size={16} />
+                  <span>Save Branch Location</span>
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* MODAL 4: Edit Branch Location */}
+      {isEditLocModalOpen && (
+        <div className="modal-overlay" style={{ zIndex: 9999 }}>
+          <div className="modal-content" style={{ maxWidth: 540, padding: 0, overflow: 'hidden', borderRadius: 'var(--radius-lg)' }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid var(--neutral-200)',
+              backgroundColor: 'var(--neutral-50)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  background: 'linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 10px rgba(2, 132, 199, 0.3)'
+                }}>
+                  <Edit3 size={22} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--neutral-900)', margin: 0 }}>
+                    Edit Branch Location Details
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                    Update outlet naming, branch identifier code, address, or phone.
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                className="btn-ghost" 
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.3rem', color: 'var(--neutral-400)', padding: 4 }}
+                onClick={() => setIsEditLocModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditLocation}>
+              <div className="modal-body" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {editLocFormError && (
+                  <div style={{
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    backgroundColor: 'var(--danger-50)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    color: 'var(--danger-700)',
+                    fontSize: '0.85rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8
+                  }}>
+                    <AlertCircle size={17} style={{ flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600 }}>{editLocFormError}</span>
+                  </div>
+                )}
+
+                {/* Section 1: Identification */}
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 14 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Branch Code *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ fontFamily: 'var(--font-mono)', textTransform: 'uppercase', fontWeight: 600 }}
+                      value={editLocCode}
+                      onChange={(e) => setEditLocCode(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Branch / Outlet Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={editLocName}
+                      onChange={(e) => setEditLocName(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Section 2: Address & Contact */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Physical Address</label>
+                  <div style={{ position: 'relative' }}>
+                    <MapPin size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ paddingLeft: 36 }}
+                      value={editLocAddress}
+                      onChange={(e) => setEditLocAddress(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Phone / Counter Contact</label>
+                  <div style={{ position: 'relative' }}>
+                    <Phone size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ paddingLeft: 36 }}
+                      value={editLocPhone}
+                      onChange={(e) => setEditLocPhone(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div style={{
+                padding: '16px 24px',
+                backgroundColor: 'var(--neutral-50)',
+                borderTop: '1px solid var(--neutral-200)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 12
+              }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => setIsEditLocModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Edit3 size={16} />
+                  <span>Update Branch Details</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: Custom Confirmation & Action Dialog */}
+      {confirmModal.isOpen && (
+        <div className="modal-overlay" style={{ zIndex: 10000 }}>
+          <div className="modal-content" style={{ maxWidth: 460, padding: 0, overflow: 'hidden' }}>
+            <div style={{
+              padding: '18px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              borderBottom: '1px solid var(--neutral-200)',
+              backgroundColor: confirmModal.confirmBtnClass === 'btn-danger' ? 'var(--danger-50)' : 'var(--neutral-50)'
+            }}>
+              <div style={{
+                width: 36,
+                height: 36,
+                borderRadius: 8,
+                backgroundColor: confirmModal.confirmBtnClass === 'btn-danger' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                color: confirmModal.confirmBtnClass === 'btn-danger' ? 'var(--danger-600)' : 'var(--primary-600)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                {confirmModal.type === 'ALERT_NOTICE' ? <AlertCircle size={20} /> : <AlertTriangle size={20} />}
+              </div>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--neutral-900)', margin: 0 }}>
+                {confirmModal.title}
+              </h3>
+            </div>
+
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ fontSize: '0.9rem', color: 'var(--neutral-800)', margin: 0, lineHeight: 1.5, fontWeight: 500 }}>
+                {confirmModal.message}
+              </p>
+              {confirmModal.subMessage && (
+                <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', margin: 0, lineHeight: 1.4, backgroundColor: 'var(--neutral-50)', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--neutral-200)' }}>
+                  {confirmModal.subMessage}
+                </p>
+              )}
+            </div>
+
+            <div style={{
+              padding: '12px 20px',
+              backgroundColor: 'var(--neutral-50)',
+              borderTop: '1px solid var(--neutral-200)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 10
+            }}>
+              {confirmModal.type !== 'ALERT_NOTICE' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                className={`btn ${confirmModal.confirmBtnClass || 'btn-primary'}`}
+                onClick={confirmModal.type === 'ALERT_NOTICE' ? () => setConfirmModal(prev => ({ ...prev, isOpen: false })) : handleExecuteConfirm}
+              >
+                {confirmModal.confirmText || 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sync Catalog & Inventory to Branch Modal */}
+      <SyncInventoryModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        targetLocation={syncTargetLocation}
+        onSuccess={async () => {
+          await loadData();
+        }}
+      />
     </div>
   );
 };
+

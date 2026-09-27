@@ -26,7 +26,8 @@ import {
   Loader2,
   Sparkles,
   Eye,
-  Check
+  Check,
+  Boxes
 } from 'lucide-react';
 import { Item, StoreLocation, ItemLocationInventory, ItemCategory, ItemImage } from '../types';
 import { store } from '../services/store';
@@ -34,6 +35,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { QRModal } from '../components/QRModal';
 import { CustomSelect } from '../components/CustomSelect';
 import { Pagination } from '../components/Pagination';
+import { SyncInventoryModal } from '../components/SyncInventoryModal';
 import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
 import { uploadItemImage, deleteItemImages } from '../services/supabaseStorage';
 
@@ -77,6 +79,9 @@ export const InventoryView: React.FC = () => {
   const [adjustLocationId, setAdjustLocationId] = useState<string>(selectedLocationId);
   const [adjustDelta, setAdjustDelta] = useState<number>(10);
   const [adjustType, setAdjustType] = useState<'ADD' | 'REDUCE'>('ADD');
+
+  // Branch Catalog Sync Modal State
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
 
   // Category Master Management Modal State
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -637,7 +642,16 @@ export const InventoryView: React.FC = () => {
         </div>
 
         {canManage && (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => setIsSyncModalOpen(true)}
+              title="Synchronize and configure catalog items for active branch"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--primary-700)', fontWeight: 600 }}
+            >
+              <Boxes size={16} color="var(--primary-600)" />
+              <span>Sync Branch Items</span>
+            </button>
             <button className="btn btn-secondary" onClick={() => setIsCategoryModalOpen(true)}>
               <Layers size={16} />
               <span>Categories</span>
@@ -2119,6 +2133,18 @@ export const InventoryView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Sync Catalog & Inventory to Branch Modal */}
+      <SyncInventoryModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        targetLocation={activeLocation}
+        onSuccess={async () => {
+          await loadPaginatedItems();
+          refreshData();
+        }}
+      />
     </div>
   );
 };
+

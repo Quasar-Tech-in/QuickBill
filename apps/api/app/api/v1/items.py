@@ -101,7 +101,7 @@ async def create_item(
     # Determine initial stock
     initial_stock = payload.current_stock if payload.current_stock is not None else (payload.opening_stock or Decimal("0.0"))
 
-    # Convert locations
+    # Convert locations or auto-populate from tenant locations
     locations_data = []
     if payload.locations:
         for loc in payload.locations:
@@ -110,6 +110,31 @@ async def create_item(
                 if float_field in loc_dict and loc_dict[float_field] is not None:
                     loc_dict[float_field] = float(loc_dict[float_field])
             locations_data.append(loc_dict)
+    else:
+        # Auto-populate all tenant locations when no explicit location list is passed
+        try:
+            b_queries = [{"businessId": business_id}]
+            if ObjectId.is_valid(business_id):
+                b_queries.append({"businessId": ObjectId(business_id)})
+            loc_cursor = db.locations.find({"$or": b_queries})
+            async for t_loc in loc_cursor:
+                t_loc_id = str(t_loc["_id"])
+                is_default_branch = bool(t_loc.get("isDefault", False))
+                locations_data.append({
+                    "locationId": t_loc_id,
+                    "locationName": t_loc.get("name", "Branch Outlet"),
+                    "mrp": float(payload.mrp) if payload.mrp is not None else float(payload.sale_price),
+                    "salePrice": float(payload.sale_price),
+                    "purchasePrice": float(payload.purchase_price),
+                    "currentStock": float(initial_stock) if is_default_branch else 0.0,
+                    "minStockAlert": float(payload.min_stock_alert),
+                    "isListed": True if is_default_branch else False,
+                    "hasDiscount": bool(payload.has_discount),
+                    "discountType": payload.discount_type or "PERCENT",
+                    "discountValue": float(payload.discount_value or 0)
+                })
+        except Exception as e:
+            logger.warning(f"Could not auto-populate location configs for new item: {e}")
 
     # Convert images
     images_data = []
