@@ -19,11 +19,20 @@ import {
   Check,
   FolderPlus,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  Sparkles,
+  Clock,
+  User,
+  Building,
+  CreditCard,
+  Smartphone,
+  Banknote
 } from 'lucide-react';
 import { store } from '../services/store';
 import { Expense, ExpenseCategory, LedgerEntry, Party, Payment } from '../types';
 import { Pagination } from '../components/Pagination';
+import { SearchablePartySelect } from '../components/SearchablePartySelect';
+import { SearchableCategorySelect } from '../components/SearchableCategorySelect';
 
 export const LedgerView: React.FC = () => {
   const currentUser = store.getCurrentUser();
@@ -353,6 +362,13 @@ export const LedgerView: React.FC = () => {
 
     await store.deleteExpense(expenseId);
     refreshData();
+  };
+
+  // Handle adding new custom category from SearchableCategorySelect
+  const handleAddNewCategory = async (catName: string) => {
+    const added = await store.addExpenseCategory(catName);
+    setCategories(store.getExpenseCategories());
+    return added.name;
   };
 
   // Category Manager: Add Category
@@ -766,9 +782,34 @@ export const LedgerView: React.FC = () => {
       {/* Record Entry Modal (Tabs: Payment In / Payment Out / Shop Expense) */}
       {isRecordModalOpen && (
         <div className="modal-overlay" onClick={() => !isSaving && setIsRecordModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
-            <div className="card-header">
-              <span className="card-title">Record Financial Transaction</span>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 620, width: '100%' }}>
+            <div className="card-header" style={{ borderBottom: '1px solid var(--neutral-200, #e2e8f0)', padding: '16px 20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    backgroundColor: activeTab === 'EXPENSE' ? '#fee2e2' : activeTab === 'PAYMENT_IN' ? '#ecfdf5' : '#fef3c7',
+                    color: activeTab === 'EXPENSE' ? '#dc2626' : activeTab === 'PAYMENT_IN' ? '#059669' : '#d97706',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {activeTab === 'EXPENSE' && <Receipt size={20} />}
+                  {activeTab === 'PAYMENT_IN' && <ArrowDownLeft size={20} />}
+                  {activeTab === 'PAYMENT_OUT' && <ArrowUpRight size={20} />}
+                </div>
+                <div>
+                  <h3 className="card-title" style={{ fontSize: '1.1rem', margin: 0 }}>Record Financial Transaction</h3>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                    {activeTab === 'EXPENSE' && 'Log an operating store expense (Electricity, Rent, Staff Wages, etc.)'}
+                    {activeTab === 'PAYMENT_IN' && 'Record payment collected from a customer towards due balances'}
+                    {activeTab === 'PAYMENT_OUT' && 'Record payment sent to a supplier/vendor towards bills'}
+                  </p>
+                </div>
+              </div>
               <button className="btn btn-secondary btn-icon" onClick={() => setIsRecordModalOpen(false)} disabled={isSaving}>
                 <X size={16} />
               </button>
@@ -781,21 +822,22 @@ export const LedgerView: React.FC = () => {
                 onClick={() => setActiveTab('EXPENSE')}
                 style={{
                   flex: 1,
-                  padding: '10px 14px',
-                  fontSize: '0.82rem',
+                  padding: '12px 10px',
+                  fontSize: '0.84rem',
                   fontWeight: 700,
                   border: 'none',
-                  borderBottom: activeTab === 'EXPENSE' ? '2px solid var(--danger-600)' : '2px solid transparent',
+                  borderBottom: activeTab === 'EXPENSE' ? '3px solid var(--danger-600, #dc2626)' : '3px solid transparent',
                   backgroundColor: activeTab === 'EXPENSE' ? '#ffffff' : 'transparent',
-                  color: activeTab === 'EXPENSE' ? 'var(--danger-600)' : 'var(--neutral-600)',
+                  color: activeTab === 'EXPENSE' ? 'var(--danger-600, #dc2626)' : 'var(--neutral-600, #64748b)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: 6
+                  gap: 6,
+                  transition: 'all 0.15s ease',
                 }}
               >
-                <Receipt size={15} />
+                <Receipt size={16} />
                 <span>Shop Expense</span>
               </button>
 
@@ -804,21 +846,22 @@ export const LedgerView: React.FC = () => {
                 onClick={() => setActiveTab('PAYMENT_IN')}
                 style={{
                   flex: 1,
-                  padding: '10px 14px',
-                  fontSize: '0.82rem',
+                  padding: '12px 10px',
+                  fontSize: '0.84rem',
                   fontWeight: 700,
                   border: 'none',
-                  borderBottom: activeTab === 'PAYMENT_IN' ? '2px solid #059669' : '2px solid transparent',
+                  borderBottom: activeTab === 'PAYMENT_IN' ? '3px solid #059669' : '3px solid transparent',
                   backgroundColor: activeTab === 'PAYMENT_IN' ? '#ffffff' : 'transparent',
-                  color: activeTab === 'PAYMENT_IN' ? '#059669' : 'var(--neutral-600)',
+                  color: activeTab === 'PAYMENT_IN' ? '#059669' : 'var(--neutral-600, #64748b)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: 6
+                  gap: 6,
+                  transition: 'all 0.15s ease',
                 }}
               >
-                <ArrowDownLeft size={15} />
+                <ArrowDownLeft size={16} />
                 <span>Customer Receipt</span>
               </button>
 
@@ -828,104 +871,184 @@ export const LedgerView: React.FC = () => {
                   onClick={() => setActiveTab('PAYMENT_OUT')}
                   style={{
                     flex: 1,
-                    padding: '10px 14px',
-                    fontSize: '0.82rem',
+                    padding: '12px 10px',
+                    fontSize: '0.84rem',
                     fontWeight: 700,
                     border: 'none',
-                    borderBottom: activeTab === 'PAYMENT_OUT' ? '2px solid #d97706' : '2px solid transparent',
+                    borderBottom: activeTab === 'PAYMENT_OUT' ? '3px solid #d97706' : '3px solid transparent',
                     backgroundColor: activeTab === 'PAYMENT_OUT' ? '#ffffff' : 'transparent',
-                    color: activeTab === 'PAYMENT_OUT' ? '#d97706' : 'var(--neutral-600)',
+                    color: activeTab === 'PAYMENT_OUT' ? '#d97706' : 'var(--neutral-600, #64748b)',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: 6
+                    gap: 6,
+                    transition: 'all 0.15s ease',
                   }}
                 >
-                  <ArrowUpRight size={15} />
+                  <ArrowUpRight size={16} />
                   <span>Supplier Payout</span>
                 </button>
               )}
             </div>
 
             <form onSubmit={handleRecordSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '20px' }}>
                 {activeTab === 'EXPENSE' ? (
                   <>
-                    <div className="form-group">
-                      <label className="form-label">Expense Category *</label>
-                      <select
-                        className="form-select"
-                        value={expenseForm.category}
-                        onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
-                      >
-                        {categories.map(c => (
-                          <option key={c.id} value={c.name}>{c.name}</option>
+                    {/* Expense Category with Searchable Category Dropdown */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <label className="form-label" style={{ margin: 0, fontWeight: 700, fontSize: '0.82rem' }}>
+                          Expense Category *
+                        </label>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
+                          Search or create custom
+                        </span>
+                      </div>
+                      <SearchableCategorySelect
+                        categories={categories}
+                        selectedCategory={expenseForm.category}
+                        onSelectCategory={(cat) => setExpenseForm({ ...expenseForm, category: cat })}
+                        onAddNewCategory={handleAddNewCategory}
+                      />
+                    </div>
+
+                    {/* Amount & Quick Chips */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Amount (₹) *</label>
+                          <div style={{ position: 'relative' }}>
+                            <span style={{ position: 'absolute', left: 12, top: 9, fontWeight: 700, color: 'var(--neutral-400)', fontSize: '0.9rem' }}>₹</span>
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              required
+                              className="form-input"
+                              placeholder="0.00"
+                              style={{ paddingLeft: 28, fontSize: '1rem', fontWeight: 700 }}
+                              value={expenseForm.amount}
+                              onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Payment Mode</label>
+                          <select
+                            className="form-select"
+                            style={{ height: 38 }}
+                            value={expenseForm.paymentMode}
+                            onChange={(e) => setExpenseForm({ ...expenseForm, paymentMode: e.target.value as any })}
+                          >
+                            <option value="CASH">💵 Cash</option>
+                            <option value="UPI">📱 UPI (GPay / PhonePe / Paytm)</option>
+                            <option value="CARD">💳 Card (Debit / Credit)</option>
+                            <option value="BANK_TRANSFER">🏦 Bank Transfer (NEFT / IMPS)</option>
+                            <option value="CHEQUE">📝 Cheque</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Quick Amount Chips */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)', fontWeight: 600 }}>Quick:</span>
+                        {[100, 500, 1000, 2000, 5000].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => {
+                              const cur = parseFloat(expenseForm.amount) || 0;
+                              setExpenseForm({ ...expenseForm, amount: String(cur > 0 ? cur + preset : preset) });
+                            }}
+                            style={{
+                              border: '1px solid var(--neutral-200)',
+                              borderRadius: 4,
+                              backgroundColor: 'var(--neutral-50)',
+                              fontSize: '0.72rem',
+                              fontWeight: 600,
+                              color: 'var(--neutral-700)',
+                              padding: '2px 8px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            +₹{preset}
+                          </button>
                         ))}
-                        <option value="CUSTOM">+ Add Custom Category...</option>
-                      </select>
-                    </div>
-
-                    {expenseForm.category === 'CUSTOM' && (
-                      <div className="form-group">
-                        <label className="form-label">New Category Name *</label>
-                        <input
-                          type="text"
-                          required
-                          className="form-input"
-                          placeholder="e.g. Generator Fuel, Water Dispenser..."
-                          value={expenseForm.customCategoryName}
-                          onChange={(e) => setExpenseForm({ ...expenseForm, customCategoryName: e.target.value })}
-                          autoFocus
-                        />
-                      </div>
-                    )}
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                      <div className="form-group">
-                        <label className="form-label">Amount (₹) *</label>
-                        <input
-                          type="number"
-                          min="1"
-                          step="0.01"
-                          required
-                          className="form-input"
-                          placeholder="0.00"
-                          value={expenseForm.amount}
-                          onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
-                        />
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Payment Mode</label>
-                        <select
-                          className="form-select"
-                          value={expenseForm.paymentMode}
-                          onChange={(e) => setExpenseForm({ ...expenseForm, paymentMode: e.target.value as any })}
-                        >
-                          <option value="CASH">Cash</option>
-                          <option value="UPI">UPI (Google Pay / PhonePe)</option>
-                          <option value="CARD">Card</option>
-                          <option value="BANK_TRANSFER">Bank Transfer</option>
-                          <option value="CHEQUE">Cheque</option>
-                        </select>
+                        {expenseForm.amount && (
+                          <button
+                            type="button"
+                            onClick={() => setExpenseForm({ ...expenseForm, amount: '' })}
+                            style={{
+                              border: 'none',
+                              backgroundColor: 'transparent',
+                              fontSize: '0.7rem',
+                              color: 'var(--danger-600)',
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                            }}
+                          >
+                            Clear
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                      <div className="form-group">
-                        <label className="form-label">Paid To / Payee Name</label>
+                    {/* Payee & Date */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Paid To / Payee Name</label>
                         <input
                           type="text"
                           className="form-input"
-                          placeholder="e.g. Electricity Board, Landlord"
+                          placeholder="e.g. Electricity Board, Landlord, Ramesh (Driver)"
                           value={expenseForm.payee}
                           onChange={(e) => setExpenseForm({ ...expenseForm, payee: e.target.value })}
                         />
                       </div>
 
-                      <div className="form-group">
-                        <label className="form-label">Expense Date</label>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <label className="form-label" style={{ margin: 0, fontWeight: 700, fontSize: '0.82rem' }}>Expense Date</label>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button
+                              type="button"
+                              onClick={() => setExpenseForm({ ...expenseForm, expenseDate: new Date().toISOString().split('T')[0] })}
+                              style={{
+                                border: 'none',
+                                background: 'none',
+                                fontSize: '0.68rem',
+                                color: 'var(--primary-600)',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                                padding: 0,
+                              }}
+                            >
+                              Today
+                            </button>
+                            <span style={{ fontSize: '0.68rem', color: 'var(--neutral-300)' }}>|</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const y = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+                                setExpenseForm({ ...expenseForm, expenseDate: y });
+                              }}
+                              style={{
+                                border: 'none',
+                                background: 'none',
+                                fontSize: '0.68rem',
+                                color: 'var(--primary-600)',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                                padding: 0,
+                              }}
+                            >
+                              Yesterday
+                            </button>
+                          </div>
+                        </div>
                         <input
                           type="date"
                           className="form-input"
@@ -935,20 +1058,21 @@ export const LedgerView: React.FC = () => {
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                      <div className="form-group">
-                        <label className="form-label">Reference ID / Bill No</label>
+                    {/* Reference ID & Location */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Reference ID / Bill No</label>
                         <input
                           type="text"
                           className="form-input"
-                          placeholder="e.g. EB-BILL-90219"
+                          placeholder="e.g. EB-BILL-90219, RCP-5521"
                           value={expenseForm.referenceNumber}
                           onChange={(e) => setExpenseForm({ ...expenseForm, referenceNumber: e.target.value })}
                         />
                       </div>
 
-                      <div className="form-group">
-                        <label className="form-label">Branch Location</label>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Branch Location</label>
                         <select
                           className="form-select"
                           value={expenseForm.locationId}
@@ -961,12 +1085,13 @@ export const LedgerView: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="form-group">
-                      <label className="form-label">Description / Remarks</label>
+                    {/* Description */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Description / Remarks (Optional)</label>
                       <input
                         type="text"
                         className="form-input"
-                        placeholder="e.g. Electricity bill for September counter operations"
+                        placeholder="e.g. Electricity bill for counter operations & backup inverter"
                         value={expenseForm.description}
                         onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
                       />
@@ -974,80 +1099,139 @@ export const LedgerView: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    <div className="form-group">
-                      <label className="form-label">
-                        {activeTab === 'PAYMENT_IN' ? 'Select Customer *' : 'Select Supplier *'}
-                      </label>
-                      <select
-                        required
-                        className="form-select"
-                        value={paymentForm.partyId}
-                        onChange={(e) => {
-                          const pId = e.target.value;
-                          setPaymentForm({ ...paymentForm, partyId: pId });
-                          const selected = parties.find(p => p.id === pId);
-                          if (selected && selected.currentBalance !== 0) {
-                            setPaymentForm(prev => ({ ...prev, partyId: pId, amount: String(Math.abs(selected.currentBalance)) }));
+                    {/* Customer / Supplier Searchable Contact Selector */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <label className="form-label" style={{ margin: 0, fontWeight: 700, fontSize: '0.82rem' }}>
+                          {activeTab === 'PAYMENT_IN' ? 'Search Customer *' : 'Search Supplier *'}
+                        </label>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
+                          Filter by name or phone
+                        </span>
+                      </div>
+
+                      <SearchablePartySelect
+                        parties={activeTab === 'PAYMENT_IN' ? customerList : supplierList}
+                        selectedPartyId={paymentForm.partyId}
+                        partyType={activeTab === 'PAYMENT_IN' ? 'CUSTOMER' : 'SUPPLIER'}
+                        onSelect={(party) => {
+                          if (party) {
+                            setPaymentForm(prev => ({
+                              ...prev,
+                              partyId: party.id,
+                              amount: party.currentBalance !== 0 ? String(Math.abs(party.currentBalance)) : prev.amount
+                            }));
+                          } else {
+                            setPaymentForm(prev => ({ ...prev, partyId: '' }));
                           }
                         }}
-                      >
-                        <option value="">-- Choose Contact --</option>
-                        {(activeTab === 'PAYMENT_IN' ? customerList : supplierList).map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} {p.phone ? `(${p.phone})` : ''} - Due: ₹{Math.abs(p.currentBalance).toFixed(2)}
-                          </option>
+                        onAutoFillBalance={(bal) => {
+                          setPaymentForm(prev => ({ ...prev, amount: String(bal) }));
+                        }}
+                      />
+                    </div>
+
+                    {/* Amount & Payment Mode */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Amount (₹) *</label>
+                          <div style={{ position: 'relative' }}>
+                            <span style={{ position: 'absolute', left: 12, top: 9, fontWeight: 700, color: 'var(--neutral-400)', fontSize: '0.9rem' }}>₹</span>
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              required
+                              className="form-input"
+                              placeholder="0.00"
+                              style={{ paddingLeft: 28, fontSize: '1rem', fontWeight: 700 }}
+                              value={paymentForm.amount}
+                              onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Payment Mode</label>
+                          <select
+                            className="form-select"
+                            style={{ height: 38 }}
+                            value={paymentForm.paymentMode}
+                            onChange={(e) => setPaymentForm({ ...paymentForm, paymentMode: e.target.value as any })}
+                          >
+                            <option value="UPI">📱 UPI (Google Pay / PhonePe / Paytm)</option>
+                            <option value="CASH">💵 Cash</option>
+                            <option value="BANK_TRANSFER">🏦 Bank Transfer (NEFT / IMPS)</option>
+                            <option value="CARD">💳 Card (Debit / Credit)</option>
+                            <option value="CHEQUE">📝 Cheque</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Quick Amount Chips */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)', fontWeight: 600 }}>Quick:</span>
+                        {[500, 1000, 2000, 5000, 10000].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => {
+                              const cur = parseFloat(paymentForm.amount) || 0;
+                              setPaymentForm({ ...paymentForm, amount: String(cur > 0 ? cur + preset : preset) });
+                            }}
+                            style={{
+                              border: '1px solid var(--neutral-200)',
+                              borderRadius: 4,
+                              backgroundColor: 'var(--neutral-50)',
+                              fontSize: '0.72rem',
+                              fontWeight: 600,
+                              color: 'var(--neutral-700)',
+                              padding: '2px 8px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            +₹{preset}
+                          </button>
                         ))}
-                      </select>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                      <div className="form-group">
-                        <label className="form-label">Amount (₹) *</label>
-                        <input
-                          type="number"
-                          min="1"
-                          step="0.01"
-                          required
-                          className="form-input"
-                          placeholder="0.00"
-                          value={paymentForm.amount}
-                          onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                        />
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Payment Mode</label>
-                        <select
-                          className="form-select"
-                          value={paymentForm.paymentMode}
-                          onChange={(e) => setPaymentForm({ ...paymentForm, paymentMode: e.target.value as any })}
-                        >
-                          <option value="UPI">UPI (Google Pay / PhonePe)</option>
-                          <option value="CASH">Cash</option>
-                          <option value="BANK_TRANSFER">Bank Transfer (NEFT/IMPS)</option>
-                          <option value="CARD">Card</option>
-                          <option value="CHEQUE">Cheque</option>
-                        </select>
+                        {paymentForm.amount && (
+                          <button
+                            type="button"
+                            onClick={() => setPaymentForm({ ...paymentForm, amount: '' })}
+                            style={{
+                              border: 'none',
+                              backgroundColor: 'transparent',
+                              fontSize: '0.7rem',
+                              color: 'var(--danger-600)',
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                            }}
+                          >
+                            Clear
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    <div className="form-group">
-                      <label className="form-label">UTR / Transaction Reference No</label>
+                    {/* UTR / Transaction Reference */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>UTR / Transaction Reference No (Optional)</label>
                       <input
                         type="text"
                         className="form-input"
-                        placeholder="e.g. UPI/628192839120"
+                        placeholder="e.g. UPI/628192839120, NEFT-HDFC-99210"
                         value={paymentForm.referenceNumber}
                         onChange={(e) => setPaymentForm({ ...paymentForm, referenceNumber: e.target.value })}
                       />
                     </div>
 
-                    <div className="form-group">
-                      <label className="form-label">Payment Notes</label>
+                    {/* Payment Notes */}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Payment Notes / Remarks (Optional)</label>
                       <input
                         type="text"
                         className="form-input"
-                        placeholder="e.g. Cleared bill balance"
+                        placeholder="e.g. Cleared bill invoice balance, advance token payment"
                         value={paymentForm.notes}
                         onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
                       />
@@ -1056,12 +1240,24 @@ export const LedgerView: React.FC = () => {
                 )}
               </div>
 
-              <div className="modal-footer">
+              <div className="modal-footer" style={{ borderTop: '1px solid var(--neutral-200, #e2e8f0)', padding: '14px 20px', background: 'var(--neutral-50, #f8fafc)' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsRecordModalOpen(false)} disabled={isSaving}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={isSaving}>
-                  {isSaving ? 'Recording...' : 'Save & Record Entry'}
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isSaving || (activeTab !== 'EXPENSE' && !paymentForm.partyId)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '8px 20px',
+                    fontWeight: 700,
+                  }}
+                >
+                  <Check size={16} />
+                  <span>{isSaving ? 'Recording...' : 'Save & Record Entry'}</span>
                 </button>
               </div>
             </form>
@@ -1072,61 +1268,73 @@ export const LedgerView: React.FC = () => {
       {/* Edit Expense Modal */}
       {isEditExpenseOpen && editingExpense && (
         <div className="modal-overlay" onClick={() => !isSaving && setIsEditExpenseOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
-            <div className="card-header">
-              <span className="card-title">Edit Shop Expense</span>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600, width: '100%' }}>
+            <div className="card-header" style={{ borderBottom: '1px solid var(--neutral-200, #e2e8f0)', padding: '16px 20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Edit3 size={18} />
+                </div>
+                <div>
+                  <span className="card-title" style={{ fontSize: '1.05rem', margin: 0 }}>Edit Shop Expense</span>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                    Update details for this recorded expense entry
+                  </p>
+                </div>
+              </div>
               <button className="btn btn-secondary btn-icon" onClick={() => setIsEditExpenseOpen(false)} disabled={isSaving}>
                 <X size={16} />
               </button>
             </div>
             <form onSubmit={handleSaveEditExpense} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div className="form-group">
-                  <label className="form-label">Expense Category *</label>
-                  <select
-                    className="form-select"
-                    value={editExpenseForm.category}
-                    onChange={(e) => setEditExpenseForm({ ...editExpenseForm, category: e.target.value })}
-                  >
-                    {categories.map(c => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '20px' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Expense Category *</label>
+                  <SearchableCategorySelect
+                    categories={categories}
+                    selectedCategory={editExpenseForm.category}
+                    onSelectCategory={(cat) => setEditExpenseForm({ ...editExpenseForm, category: cat })}
+                    onAddNewCategory={handleAddNewCategory}
+                  />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label">Amount (₹) *</label>
-                    <input
-                      type="number"
-                      min="1"
-                      step="0.01"
-                      required
-                      className="form-input"
-                      value={editExpenseForm.amount}
-                      onChange={(e) => setEditExpenseForm({ ...editExpenseForm, amount: e.target.value })}
-                    />
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Amount (₹) *</label>
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: 12, top: 9, fontWeight: 700, color: 'var(--neutral-400)', fontSize: '0.9rem' }}>₹</span>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        required
+                        className="form-input"
+                        style={{ paddingLeft: 28, fontSize: '1rem', fontWeight: 700 }}
+                        value={editExpenseForm.amount}
+                        onChange={(e) => setEditExpenseForm({ ...editExpenseForm, amount: e.target.value })}
+                      />
+                    </div>
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Payment Mode</label>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Payment Mode</label>
                     <select
                       className="form-select"
+                      style={{ height: 38 }}
                       value={editExpenseForm.paymentMode}
                       onChange={(e) => setEditExpenseForm({ ...editExpenseForm, paymentMode: e.target.value as any })}
                     >
-                      <option value="CASH">Cash</option>
-                      <option value="UPI">UPI</option>
-                      <option value="CARD">Card</option>
-                      <option value="BANK_TRANSFER">Bank Transfer</option>
-                      <option value="CHEQUE">Cheque</option>
+                      <option value="CASH">💵 Cash</option>
+                      <option value="UPI">📱 UPI</option>
+                      <option value="CARD">💳 Card</option>
+                      <option value="BANK_TRANSFER">🏦 Bank Transfer</option>
+                      <option value="CHEQUE">📝 Cheque</option>
                     </select>
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label">Paid To / Payee Name</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Paid To / Payee Name</label>
                     <input
                       type="text"
                       className="form-input"
@@ -1135,8 +1343,46 @@ export const LedgerView: React.FC = () => {
                     />
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Expense Date</label>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label className="form-label" style={{ margin: 0, fontWeight: 700, fontSize: '0.82rem' }}>Expense Date</label>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          type="button"
+                          onClick={() => setEditExpenseForm({ ...editExpenseForm, expenseDate: new Date().toISOString().split('T')[0] })}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            fontSize: '0.68rem',
+                            color: 'var(--primary-600)',
+                            cursor: 'pointer',
+                            fontWeight: 700,
+                            padding: 0,
+                          }}
+                        >
+                          Today
+                        </button>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--neutral-300)' }}>|</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const y = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+                            setEditExpenseForm({ ...editExpenseForm, expenseDate: y });
+                          }}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            fontSize: '0.68rem',
+                            color: 'var(--primary-600)',
+                            cursor: 'pointer',
+                            fontWeight: 700,
+                            padding: 0,
+                          }}
+                        >
+                          Yesterday
+                        </button>
+                      </div>
+                    </div>
                     <input
                       type="date"
                       className="form-input"
@@ -1146,9 +1392,9 @@ export const LedgerView: React.FC = () => {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label">Reference ID / Bill No</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Reference ID / Bill No</label>
                     <input
                       type="text"
                       className="form-input"
@@ -1157,8 +1403,8 @@ export const LedgerView: React.FC = () => {
                     />
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Branch Location</label>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Branch Location</label>
                     <select
                       className="form-select"
                       value={editExpenseForm.locationId}
@@ -1171,8 +1417,8 @@ export const LedgerView: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">Description / Remarks</label>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.82rem' }}>Description / Remarks</label>
                   <input
                     type="text"
                     className="form-input"
@@ -1182,7 +1428,7 @@ export const LedgerView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="modal-footer">
+              <div className="modal-footer" style={{ borderTop: '1px solid var(--neutral-200, #e2e8f0)', padding: '14px 20px', background: 'var(--neutral-50, #f8fafc)' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsEditExpenseOpen(false)} disabled={isSaving}>
                   Cancel
                 </button>
