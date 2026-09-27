@@ -515,8 +515,34 @@ async def receive_purchase_order_goods(
                     "discountValue": 0.0
                 })
 
+            # Calculate Weighted Average Cost
+            old_avg_cost = float(item_doc.get("averageCostPrice") or item_doc.get("purchasePrice") or unit_cost)
+            old_stock = max(0.0, current_master_stock)
+            new_avg_cost = ((old_stock * old_avg_cost) + (qty_received * unit_cost)) / new_master_stock if new_master_stock > 0 else unit_cost
+
+            # Append or update FIFO Batch Record
+            existing_batches = list(item_doc.get("batches") or [])
+            batch_num = f"BAT-{po_number.replace('PO-', '')}-{item_id_str[-4:].upper()}"
+            existing_batches.append({
+                "batchId": f"batch_{secrets.token_hex(6)}",
+                "batchNumber": batch_num,
+                "purchaseOrderId": str(po_doc["_id"]),
+                "purchaseOrderNumber": po_number,
+                "purchasePrice": round(unit_cost, 2),
+                "salePrice": float(item_doc.get("salePrice", unit_cost * 1.3)),
+                "mrp": float(item_doc.get("mrp", unit_cost * 1.4)),
+                "currentStock": qty_received,
+                "locationId": location_id,
+                "receivedDate": now.isoformat().split("T")[0],
+                "receivedAt": now.isoformat(),
+                "supplierId": supplier_id,
+                "supplierName": supplier_name
+            })
+
             item_updates = {
                 "currentStock": round(new_master_stock, 3),
+                "averageCostPrice": round(new_avg_cost, 2),
+                "batches": existing_batches,
                 "locations": loc_list,
                 "updatedAt": now
             }

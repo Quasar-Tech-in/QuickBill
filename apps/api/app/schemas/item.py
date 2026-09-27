@@ -26,6 +26,21 @@ class ItemImageSchema(BaseSchema):
     size_bytes: Optional[int] = Field(None, alias="sizeBytes")
     original_size_bytes: Optional[int] = Field(None, alias="originalSizeBytes")
 
+class ItemBatchSchema(BaseSchema):
+    batch_id: Optional[str] = Field(None, alias="batchId")
+    batch_number: str = Field(..., alias="batchNumber")
+    purchase_order_id: Optional[str] = Field(None, alias="purchaseOrderId")
+    purchase_order_number: Optional[str] = Field(None, alias="purchaseOrderNumber")
+    purchase_price: Decimal = Field(default=Decimal("0.00"), ge=0, alias="purchasePrice")
+    sale_price: Optional[Decimal] = Field(None, ge=0, alias="salePrice")
+    mrp: Optional[Decimal] = Field(None, ge=0)
+    current_stock: Decimal = Field(default=Decimal("0.0"), alias="currentStock")
+    location_id: Optional[str] = Field(None, alias="locationId")
+    received_date: Optional[str] = Field(None, alias="receivedDate")
+    received_at: Optional[str] = Field(None, alias="receivedAt")
+    supplier_id: Optional[str] = Field(None, alias="supplierId")
+    supplier_name: Optional[str] = Field(None, alias="supplierName")
+
 class ItemBase(BaseSchema):
     name: str = Field(..., min_length=1, max_length=200)
     sku: Optional[str] = Field(None, max_length=100)
@@ -33,6 +48,7 @@ class ItemBase(BaseSchema):
     category: Optional[str] = Field(default="General", max_length=100)
     unit: str = Field(default="pcs", max_length=20)
     purchase_price: Decimal = Field(default=Decimal("0.00"), ge=0, alias="purchasePrice")
+    average_cost_price: Optional[Decimal] = Field(default=Decimal("0.00"), ge=0, alias="averageCostPrice")
     sale_price: Decimal = Field(..., ge=0, alias="salePrice")
     mrp: Optional[Decimal] = Field(None, ge=0)
     tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100, alias="taxRate")
@@ -43,6 +59,7 @@ class ItemBase(BaseSchema):
     has_discount: bool = Field(default=False, alias="hasDiscount")
     discount_type: Optional[str] = Field(default="PERCENT", alias="discountType")
     discount_value: Optional[Decimal] = Field(default=Decimal("0.0"), ge=0, alias="discountValue")
+    batches: Optional[List[ItemBatchSchema]] = Field(default=[], alias="batches")
     locations: Optional[List[LocationInventorySchema]] = None
     images: Optional[List[ItemImageSchema]] = None
     image_url: Optional[str] = Field(None, alias="imageUrl")
@@ -58,6 +75,7 @@ class ItemUpdate(BaseSchema):
     category: Optional[str] = None
     unit: Optional[str] = None
     purchase_price: Optional[Decimal] = Field(None, alias="purchasePrice")
+    average_cost_price: Optional[Decimal] = Field(None, alias="averageCostPrice")
     sale_price: Optional[Decimal] = Field(None, alias="salePrice")
     mrp: Optional[Decimal] = Field(None, alias="mrp")
     tax_rate: Optional[Decimal] = Field(None, alias="taxRate")
@@ -68,6 +86,7 @@ class ItemUpdate(BaseSchema):
     has_discount: Optional[bool] = Field(None, alias="hasDiscount")
     discount_type: Optional[str] = Field(None, alias="discountType")
     discount_value: Optional[Decimal] = Field(None, alias="discountValue")
+    batches: Optional[List[ItemBatchSchema]] = Field(None, alias="batches")
     locations: Optional[List[LocationInventorySchema]] = None
     images: Optional[List[ItemImageSchema]] = None
     image_url: Optional[str] = Field(None, alias="imageUrl")

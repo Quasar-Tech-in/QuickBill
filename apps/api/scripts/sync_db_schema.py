@@ -1,22 +1,15 @@
 """
-QuickBill - Database Schema Synchronization & Migration Script
-=============================================================
-Safely migrates and standardizes all existing MongoDB data across
-Primary Root DB and all Tenant Databases to the authoritative schema.
+QuickBill - Comprehensive Database Schema Audit & Synchronization Engine
+========================================================================
+Audits, cleanses, standardizes, and unifies all existing data across the
+Primary Root Database and all Dedicated Tenant Databases.
 
-Key operations performed:
-1. Standardizes Tenant profiles and database configs.
-2. Standardizes Store Locations and ensures flagship default branch integrity.
-3. Standardizes Item Categories.
-4. Synchronizes all Items/Products across all tenant locations:
-   - Validates all numeric price and stock fields (mrp, salePrice, purchasePrice, currentStock).
-   - Generates missing publicItemIds.
-   - Guarantees default flagship location entry on every item (isListed: True).
-   - Guarantees all branch location entries on every item (isListed: True, currentStock, pricing).
-   - Purges stale/deleted location entries.
-5. Standardizes Staff & User profiles, roles, and assignedLocationIds.
-6. Standardizes Invoices, Parties, and Expenses.
-7. Rebuilds and verifies all performance and uniqueness indexes.
+Guarantees full adherence to:
+- Item Schema: dynamic averageCostPrice, FIFO batches array, branch location inventories.
+- Purchase Orders: unified status (FULLY_RECEIVED / PARTIALLY_RECEIVED / ORDERED / CANCELLED), normalized items list.
+- Invoices: standardized item snapshots, totals, payments, and balances.
+- Locations & Tenants: default branch designated, all branches present in item catalogs.
+- Performance & Uniqueness Indexes.
 
 Usage:
     python scripts/sync_db_schema.py
@@ -27,11 +20,12 @@ import os
 import sys
 import secrets
 from datetime import datetime, timezone
+from decimal import Decimal
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # Load Environment or default URI
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://admin:secretpassword@localhost:27017/?authSource=admin")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://admin:secretpassword@localhost:27017/quickbill_db?authSource=admin")
 PRIMARY_DB_NAME = os.getenv("DATABASE_NAME", "quickbill_db")
 DEFAULT_TENANT_ID = ObjectId("65f2a1b9a000000000000001")
 DEFAULT_TENANT_DB = "quickbill_main_db"
@@ -81,9 +75,9 @@ DEFAULT_SEED_CATEGORIES = [
 
 
 async def run_db_schema_sync():
-    print("=" * 70)
-    print(" QUICKBILL - DATABASE SCHEMA SYNCHRONIZATION & MIGRATION")
-    print("=" * 70)
+    print("=" * 80)
+    print(" QUICKBILL - COMPREHENSIVE DATABASE SCHEMA AUDIT & SYNCHRONIZATION")
+    print("=" * 80)
     print(f"Connecting to MongoDB Server: {MONGODB_URI}...")
     client = AsyncIOMotorClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
 
@@ -98,16 +92,16 @@ async def run_db_schema_sync():
     now = datetime.now(timezone.utc)
 
     # -------------------------------------------------------------
-    # 1. SYNCHRONIZE TENANTS
+    # 1. AUDIT & STANDARDIZE TENANTS
     # -------------------------------------------------------------
-    print("--- [1/7] Synchronizing Tenants Collection ---")
+    print(">>> [1/8] Auditing & Synchronizing Tenants Collection...")
     tenants_cursor = primary_db.tenants.find({})
     tenants = []
     async for t in tenants_cursor:
         tenants.append(t)
 
     if not tenants:
-        print("No tenants found in primary DB. Seeding default Enterprise Tenant...")
+        print("  -> No tenants found in primary DB. Seeding default Enterprise Tenant...")
         default_tenant = {
             "_id": DEFAULT_TENANT_ID,
             "name": "QuickBill Enterprise Retail",
@@ -166,19 +160,18 @@ async def run_db_schema_sync():
             "db": client[db_name]
         }
 
-    print(f"Tenants synchronized: {len(tenants)} total ({updated_tenants_count} updated).")
+    print(f"  [OK] {len(tenants)} tenant(s) validated ({updated_tenants_count} standardized).")
 
     # -------------------------------------------------------------
-    # 2. SYNCHRONIZE STORE LOCATIONS
+    # 2. AUDIT & STANDARDIZE STORE LOCATIONS
     # -------------------------------------------------------------
-    print("\n--- [2/7] Synchronizing Store Locations ---")
+    print("\n>>> [2/8] Auditing & Synchronizing Store Locations...")
     synced_locations_count = 0
 
     for t_id_str, t_info in tenant_db_map.items():
         tdb = t_info["db"]
         t_oid = ObjectId(t_id_str) if ObjectId.is_valid(t_id_str) else t_id_str
 
-        # Search locations in both Primary DB and Tenant DB
         for db_inst in [primary_db, tdb]:
             b_queries = [{"businessId": t_id_str}]
             if isinstance(t_oid, ObjectId):
@@ -189,7 +182,6 @@ async def run_db_schema_sync():
             async for l in loc_cursor:
                 existing_locs.append(l)
 
-            # If no locations exist for this tenant, seed default locations
             if not existing_locs:
                 for d_loc in DEFAULT_SEED_LOCATIONS:
                     doc = {
@@ -203,9 +195,8 @@ async def run_db_schema_sync():
                         upsert=True
                     )
                     existing_locs.append(doc)
-                print(f"  [DB: {db_inst.name}] Seeded {len(DEFAULT_SEED_LOCATIONS)} default locations for tenant {t_id_str}.")
+                print(f"  -> [DB: {db_inst.name}] Seeded {len(DEFAULT_SEED_LOCATIONS)} default locations for tenant {t_id_str}.")
 
-            # Standardize fields on existing locations
             has_default = False
             for loc in existing_locs:
                 loc_updates = {}
@@ -226,16 +217,15 @@ async def run_db_schema_sync():
                     await db_inst.locations.update_one({"_id": loc["_id"]}, {"$set": loc_updates})
                     synced_locations_count += 1
 
-            # Ensure at least one location is designated as default
             if not has_default and existing_locs:
                 await db_inst.locations.update_one({"_id": existing_locs[0]["_id"]}, {"$set": {"isDefault": True}})
 
-    print(f"Store locations synchronized successfully ({synced_locations_count} records standardized).")
+    print(f"  [OK] Store locations synchronized ({synced_locations_count} records standardized).")
 
     # -------------------------------------------------------------
-    # 3. SYNCHRONIZE ITEM CATEGORIES
+    # 3. AUDIT & STANDARDIZE ITEM CATEGORIES
     # -------------------------------------------------------------
-    print("\n--- [3/7] Synchronizing Item Categories ---")
+    print("\n>>> [3/8] Auditing & Synchronizing Categories...")
     synced_categories_count = 0
 
     for t_id_str, t_info in tenant_db_map.items():
@@ -254,36 +244,36 @@ async def run_db_schema_sync():
                         "businessId": t_id_str,
                         "name": cat["name"],
                         "description": cat["description"],
+                        "type": "PRODUCT",
                         "createdAt": now
                     })
                     synced_categories_count += 1
-                print(f"  [DB: {db_inst.name}] Seeded {len(DEFAULT_SEED_CATEGORIES)} default categories for tenant {t_id_str}.")
             else:
-                # Ensure all categories have businessId & name
                 async for c in db_inst.categories.find({"$or": b_queries}):
                     c_updates = {}
                     if not c.get("businessId"):
                         c_updates["businessId"] = t_id_str
+                    if not c.get("type"):
+                        c_updates["type"] = "PRODUCT"
                     if not c.get("createdAt"):
                         c_updates["createdAt"] = now
                     if c_updates:
                         await db_inst.categories.update_one({"_id": c["_id"]}, {"$set": c_updates})
                         synced_categories_count += 1
 
-    print(f"Categories synchronized successfully ({synced_categories_count} records checked/seeded).")
+    print(f"  [OK] Product categories synchronized ({synced_categories_count} updated/seeded).")
 
     # -------------------------------------------------------------
-    # 4. SYNCHRONIZE ITEMS & BRANCH INVENTORY ARRAYS
+    # 4. AUDIT & UNIFY ITEMS (AVERAGE COST, FIFO BATCHES, BRANCHES)
     # -------------------------------------------------------------
-    print("\n--- [4/7] Synchronizing Items & Branch Inventory Arrays ---")
-    total_items_synced = 0
-    total_items_modified = 0
+    print("\n>>> [4/8] Auditing & Unifying Items Catalog (Dynamic Costing & Batches)...")
+    total_items_inspected = 0
+    total_items_updated = 0
 
     for t_id_str, t_info in tenant_db_map.items():
         tdb = t_info["db"]
         t_oid = ObjectId(t_id_str) if ObjectId.is_valid(t_id_str) else t_id_str
 
-        # Get all valid locations for this tenant
         b_queries = [{"businessId": t_id_str}]
         if isinstance(t_oid, ObjectId):
             b_queries.append({"businessId": t_oid})
@@ -295,22 +285,17 @@ async def run_db_schema_sync():
             async for loc in primary_db.locations.find({"$or": b_queries}):
                 tenant_locations.append(loc)
 
-        # Identify default flagship branch
         default_loc = next((l for l in tenant_locations if l.get("isDefault")), tenant_locations[0] if tenant_locations else None)
         default_loc_id = str(default_loc["_id"]) if default_loc else "65f2a1b9a000000000000101"
         default_loc_name = default_loc.get("name", "Main Flagship Counter") if default_loc else "Main Flagship Counter"
 
-        valid_loc_id_set = {str(l["_id"]) for l in tenant_locations}
-        valid_loc_code_set = {str(l.get("code")) for l in tenant_locations if l.get("code")}
-
         for db_inst in [primary_db, tdb]:
             cursor = db_inst.items.find({"$or": b_queries})
             async for item in cursor:
-                total_items_synced += 1
+                total_items_inspected += 1
                 item_modified = False
                 item_updates = {}
 
-                # 1. Base item field standardization
                 item_mrp = float(item.get("mrp", item.get("salePrice", 100.0)) or 100.0)
                 item_sale_price = float(item.get("salePrice", item_mrp) or item_mrp)
                 item_purchase_price = float(item.get("purchasePrice", 0.0) or 0.0)
@@ -318,27 +303,55 @@ async def run_db_schema_sync():
                 item_min_stock = float(item.get("minStockAlert", 5.0) or 5.0)
                 item_tax_rate = float(item.get("taxRate", 0.0) or 0.0)
 
+                # Ensure averageCostPrice is set
+                if "averageCostPrice" not in item or item["averageCostPrice"] is None or float(item["averageCostPrice"]) == 0.0:
+                    item_updates["averageCostPrice"] = item_purchase_price
+                    item_modified = True
+
+                # Ensure publicItemId exists
                 if "publicItemId" not in item or not item["publicItemId"]:
                     item_updates["publicItemId"] = f"itm_{secrets.token_hex(6)}"
                     item_modified = True
 
+                # Ensure basic fields
                 if "category" not in item or not item["category"]:
                     item_updates["category"] = "General"
                     item_modified = True
-
                 if "unit" not in item or not item["unit"]:
                     item_updates["unit"] = "pcs"
                     item_modified = True
-
                 if "allowParts" not in item:
                     item_updates["allowParts"] = False
                     item_modified = True
-
                 if "isActive" not in item:
                     item_updates["isActive"] = True
                     item_modified = True
 
-                # 2. Synchronize locations array on item
+                # Ensure FIFO batches array
+                batches = list(item.get("batches") or [])
+                if not batches and item_current_stock > 0 and item_purchase_price > 0:
+                    # Seed initial opening stock batch
+                    batches.append({
+                        "batchId": f"batch_{secrets.token_hex(6)}",
+                        "batchNumber": f"BAT-OPENING-{str(item['_id'])[-4:].upper()}",
+                        "purchaseOrderId": None,
+                        "purchaseOrderNumber": "OPENING-STOCK",
+                        "purchasePrice": item_purchase_price,
+                        "salePrice": item_sale_price,
+                        "mrp": item_mrp,
+                        "currentStock": item_current_stock,
+                        "locationId": default_loc_id,
+                        "receivedDate": now.isoformat().split("T")[0],
+                        "receivedAt": now.isoformat(),
+                        "supplierName": "Initial Inventory"
+                    })
+                    item_updates["batches"] = batches
+                    item_modified = True
+                elif "batches" not in item:
+                    item_updates["batches"] = []
+                    item_modified = True
+
+                # Synchronize branch locations array
                 raw_locations = list(item.get("locations") or [])
                 cleaned_locations = []
                 seen_loc_ids = set()
@@ -348,12 +361,10 @@ async def run_db_schema_sync():
                     if not r_id:
                         continue
 
-                    # Match location against known tenant locations
                     matching_loc = next((l for l in tenant_locations if str(l["_id"]) == r_id or l.get("code") == r_id), None)
                     canonical_id = str(matching_loc["_id"]) if matching_loc else r_id
                     canonical_name = matching_loc.get("name", r_loc.get("locationName", "Branch Outlet")) if matching_loc else r_loc.get("locationName", "Branch Outlet")
 
-                    # Skip duplicate entries
                     if canonical_id in seen_loc_ids:
                         continue
                     seen_loc_ids.add(canonical_id)
@@ -361,7 +372,7 @@ async def run_db_schema_sync():
                     is_default_branch = (canonical_id == default_loc_id or (matching_loc and matching_loc.get("isDefault")))
                     is_listed_val = bool(r_loc.get("isListed", True))
                     if is_default_branch:
-                        is_listed_val = True  # Default branch is always listed
+                        is_listed_val = True
 
                     loc_stock = float(r_loc.get("currentStock", item_current_stock if is_default_branch else 0.0) or 0.0)
 
@@ -379,7 +390,6 @@ async def run_db_schema_sync():
                         "discountValue": float(r_loc.get("discountValue", 0.0) or 0.0)
                     })
 
-                # Guarantee default location is present
                 if default_loc_id not in seen_loc_ids:
                     cleaned_locations.insert(0, {
                         "locationId": default_loc_id,
@@ -397,7 +407,6 @@ async def run_db_schema_sync():
                     seen_loc_ids.add(default_loc_id)
                     item_modified = True
 
-                # Guarantee all other tenant branch locations exist in locations array
                 for t_loc in tenant_locations:
                     t_loc_id_str = str(t_loc["_id"])
                     if t_loc_id_str not in seen_loc_ids and t_loc.get("code") not in seen_loc_ids:
@@ -409,7 +418,7 @@ async def run_db_schema_sync():
                             "purchasePrice": item_purchase_price,
                             "currentStock": 0.0,
                             "minStockAlert": item_min_stock,
-                            "isListed": True,  # Listed and ready across branches
+                            "isListed": True,
                             "hasDiscount": bool(item.get("hasDiscount", False)),
                             "discountType": item.get("discountType", "PERCENT"),
                             "discountValue": float(item.get("discountValue", 0.0) or 0.0)
@@ -424,53 +433,152 @@ async def run_db_schema_sync():
                 if item_modified:
                     item_updates["updatedAt"] = now
                     await db_inst.items.update_one({"_id": item["_id"]}, {"$set": item_updates})
-                    total_items_modified += 1
+                    total_items_updated += 1
 
-    print(f"Products inspected: {total_items_synced} items ({total_items_modified} updated with complete branch locations).")
-
-    # -------------------------------------------------------------
-    # 5. SYNCHRONIZE USERS & STAFF ASSIGNMENTS
-    # -------------------------------------------------------------
-    print("\n--- [5/7] Synchronizing Users & Staff Assignments ---")
-    users_synced_count = 0
-
-    all_loc_ids_str = []
-    async for loc in primary_db.locations.find({}):
-        all_loc_ids_str.append(str(loc["_id"]))
-
-    async for u in primary_db.users.find({}):
-        u_updates = {}
-        roles = u.get("roles") or ([u.get("role")] if u.get("role") else ["CASHIER"])
-        role = roles[0] if roles else "CASHIER"
-        
-        if "role" not in u:
-            u_updates["role"] = role
-        if "roles" not in u:
-            u_updates["roles"] = [role]
-        if "isActive" not in u:
-            u_updates["isActive"] = True
-        if "createdAt" not in u:
-            u_updates["createdAt"] = now
-
-        # Ensure assignedLocationIds is a valid list
-        assigned_locs = list(u.get("assignedLocationIds") or [])
-        if role in ["SUPER_ADMIN", "TENANT_ADMIN"]:
-            if set(assigned_locs) != set(all_loc_ids_str):
-                u_updates["assignedLocationIds"] = all_loc_ids_str
-        elif not assigned_locs:
-            u_updates["assignedLocationIds"] = all_loc_ids_str[:1]
-
-        if u_updates:
-            await primary_db.users.update_one({"_id": u["_id"]}, {"$set": u_updates})
-            users_synced_count += 1
-
-    print(f"Staff user accounts standardized: {users_synced_count} accounts updated.")
+    print(f"  [OK] {total_items_inspected} items inspected ({total_items_updated} updated with unified schema & batches).")
 
     # -------------------------------------------------------------
-    # 6. SYNCHRONIZE INVOICES, PARTIES, EXPENSES
+    # 5. AUDIT & STANDARDIZE PURCHASE ORDERS
     # -------------------------------------------------------------
-    print("\n--- [6/7] Synchronizing Invoices, Parties & Expenses ---")
+    print("\n>>> [5/8] Auditing & Synchronizing Purchase Orders...")
+    po_synced_count = 0
+
+    for t_id_str, t_info in tenant_db_map.items():
+        tdb = t_info["db"]
+        t_oid = ObjectId(t_id_str) if ObjectId.is_valid(t_id_str) else t_id_str
+
+        b_queries = [{"businessId": t_id_str}]
+        if isinstance(t_oid, ObjectId):
+            b_queries.append({"businessId": t_oid})
+
+        for db_inst in [primary_db, tdb]:
+            cursor = db_inst.purchase_orders.find({"$or": b_queries})
+            async for po in cursor:
+                po_modified = False
+                po_updates = {}
+
+                # 1. Standardize status
+                raw_status = str(po.get("status", "ORDERED")).upper().strip()
+                if raw_status in ["RECEIVED", "FULLY_RECEIVED"]:
+                    canonical_status = "FULLY_RECEIVED"
+                elif raw_status in ["PARTIALLY_RECEIVED", "PARTIAL"]:
+                    canonical_status = "PARTIALLY_RECEIVED"
+                elif raw_status in ["CANCELLED", "VOID"]:
+                    canonical_status = "CANCELLED"
+                else:
+                    canonical_status = "ORDERED"
+
+                if po.get("status") != canonical_status:
+                    po_updates["status"] = canonical_status
+                    po_modified = True
+
+                # 2. Standardize items list
+                raw_items = list(po.get("items") or [])
+                cleaned_items = []
+                for it in raw_items:
+                    ord_qty = float(it.get("orderedQuantity", it.get("ordered_qty", it.get("quantity", 0.0))))
+                    rec_qty = float(it.get("receivedQuantity", it.get("received_qty", 0.0)))
+                    u_cost = float(it.get("unitCost", it.get("unit_cost", it.get("unitPrice", it.get("unit_price", 0.0)))))
+                    t_rate = float(it.get("taxRate", it.get("tax_rate", 0.0)))
+                    t_cost = float(it.get("totalCost", it.get("total_cost", it.get("totalAmount", 0.0))))
+                    itm_name = str(it.get("itemName", it.get("item_name", it.get("name", "Item"))))
+                    
+                    cleaned_items.append({
+                        "itemId": str(it.get("itemId", it.get("item_id", ""))),
+                        "itemName": itm_name,
+                        "sku": it.get("sku"),
+                        "unit": it.get("unit", "pcs"),
+                        "orderedQuantity": ord_qty,
+                        "receivedQuantity": rec_qty,
+                        "unitCost": u_cost,
+                        "taxRate": t_rate,
+                        "totalCost": t_cost if t_cost > 0 else round((ord_qty * u_cost) * (1.0 + t_rate / 100.0), 2),
+                        "updateMasterPurchasePrice": bool(it.get("updateMasterPurchasePrice", it.get("update_item_purchase_price", False)))
+                    })
+
+                if raw_items != cleaned_items:
+                    po_updates["items"] = cleaned_items
+                    po_modified = True
+
+                # 3. Standardize financial numbers
+                if "subtotal" not in po or po["subtotal"] is None:
+                    po_updates["subtotal"] = sum(i["orderedQuantity"] * i["unitCost"] for i in cleaned_items)
+                    po_modified = True
+                if "grandTotal" not in po or po["grandTotal"] is None:
+                    po_updates["grandTotal"] = sum(i["totalCost"] for i in cleaned_items)
+                    po_modified = True
+                if "receipts" not in po:
+                    po_updates["receipts"] = []
+                    po_modified = True
+                if "createdAt" not in po:
+                    po_updates["createdAt"] = now
+                    po_modified = True
+
+                if po_modified:
+                    po_updates["updatedAt"] = now
+                    await db_inst.purchase_orders.update_one({"_id": po["_id"]}, {"$set": po_updates})
+                    po_synced_count += 1
+
+    print(f"  [OK] Purchase Orders synchronized ({po_synced_count} standardized).")
+
+    # -------------------------------------------------------------
+    # 6. AUDIT & STANDARDIZE INVOICES & SALES
+    # -------------------------------------------------------------
+    print("\n>>> [6/8] Auditing & Synchronizing Sales Invoices...")
     invoices_synced = 0
+
+    for t_id_str, t_info in tenant_db_map.items():
+        tdb = t_info["db"]
+        t_oid = ObjectId(t_id_str) if ObjectId.is_valid(t_id_str) else t_id_str
+
+        b_queries = [{"businessId": t_id_str}]
+        if isinstance(t_oid, ObjectId):
+            b_queries.append({"businessId": t_oid})
+
+        for db_inst in [primary_db, tdb]:
+            cursor = db_inst.invoices.find({"$or": b_queries})
+            async for inv in cursor:
+                inv_modified = False
+                inv_updates = {}
+
+                if "status" not in inv or not inv["status"]:
+                    inv_updates["status"] = "PAID"
+                    inv_modified = True
+                if "locationId" not in inv or not inv["locationId"]:
+                    inv_updates["locationId"] = "65f2a1b9a000000000000101"
+                    inv_modified = True
+                if "createdAt" not in inv:
+                    inv_updates["createdAt"] = now
+                    inv_modified = True
+
+                raw_items = list(inv.get("items") or [])
+                cleaned_items = []
+                for it in raw_items:
+                    cleaned_items.append({
+                        "itemId": str(it.get("itemId", it.get("item_id", ""))),
+                        "nameSnapshot": it.get("nameSnapshot", it.get("name", "Item")),
+                        "skuSnapshot": it.get("skuSnapshot", it.get("sku", "")),
+                        "quantity": float(it.get("quantity", 1.0)),
+                        "unitPrice": float(it.get("unitPrice", it.get("unit_price", 0.0))),
+                        "taxRate": float(it.get("taxRate", it.get("tax_rate", 0.0))),
+                        "discountPercent": float(it.get("discountPercent", it.get("discount_percent", 0.0))),
+                        "lineTotal": float(it.get("lineTotal", it.get("line_total", 0.0)))
+                    })
+
+                if raw_items != cleaned_items and cleaned_items:
+                    inv_updates["items"] = cleaned_items
+                    inv_modified = True
+
+                if inv_modified:
+                    await db_inst.invoices.update_one({"_id": inv["_id"]}, {"$set": inv_updates})
+                    invoices_synced += 1
+
+    print(f"  [OK] Invoices synchronized ({invoices_synced} standardized).")
+
+    # -------------------------------------------------------------
+    # 7. AUDIT & STANDARDIZE PARTIES & CUSTOMERS
+    # -------------------------------------------------------------
+    print("\n>>> [7/8] Auditing & Synchronizing Parties & Customers...")
     parties_synced = 0
 
     for t_id_str, t_info in tenant_db_map.items():
@@ -481,79 +589,74 @@ async def run_db_schema_sync():
         if isinstance(t_oid, ObjectId):
             b_queries.append({"businessId": t_oid})
 
-        # Invoices
-        async for inv in tdb.invoices.find({"$or": b_queries}):
-            inv_updates = {}
-            if "status" not in inv or not inv["status"]:
-                inv_updates["status"] = "PAID"
-            if "locationId" not in inv or not inv["locationId"]:
-                inv_updates["locationId"] = "65f2a1b9a000000000000101"
-            if "createdAt" not in inv:
-                inv_updates["createdAt"] = now
+        for db_inst in [primary_db, tdb]:
+            cursor = db_inst.parties.find({"$or": b_queries})
+            async for p in cursor:
+                p_updates = {}
+                if "type" not in p:
+                    p_updates["type"] = "CUSTOMER"
+                if "isActive" not in p:
+                    p_updates["isActive"] = True
+                if "balance" not in p and "currentBalance" not in p:
+                    p_updates["balance"] = 0.0
+                    p_updates["currentBalance"] = 0.0
 
-            if inv_updates:
-                await tdb.invoices.update_one({"_id": inv["_id"]}, {"$set": inv_updates})
-                invoices_synced += 1
+                if p_updates:
+                    await db_inst.parties.update_one({"_id": p["_id"]}, {"$set": p_updates})
+                    parties_synced += 1
 
-        # Parties
-        async for p in tdb.parties.find({"$or": b_queries}):
-            p_updates = {}
-            if "type" not in p:
-                p_updates["type"] = "CUSTOMER"
-            if "isActive" not in p:
-                p_updates["isActive"] = True
-            if "balance" not in p:
-                p_updates["balance"] = 0.0
-
-            if p_updates:
-                await tdb.parties.update_one({"_id": p["_id"]}, {"$set": p_updates})
-                parties_synced += 1
-
-    print(f"Invoices ({invoices_synced} updated) and Parties ({parties_synced} updated) synchronized.")
+    print(f"  [OK] Parties & Customers synchronized ({parties_synced} standardized).")
 
     # -------------------------------------------------------------
-    # 7. BUILD & VERIFY OPTIMAL INDEXES
+    # 8. BUILD & VERIFY DATABASE PERFORMANCE & INTEGRITY INDEXES
     # -------------------------------------------------------------
-    print("\n--- [7/7] Verifying & Building Database Indexes ---")
-    
-    # Primary DB indexes
+    print("\n>>> [8/8] Building & Verifying Database Indexes...")
+
+    # Primary Root DB indexes
     try:
         await primary_db.tenants.create_index("slug", unique=True)
         await primary_db.tenants.create_index("adminEmail")
         await primary_db.users.create_index("email", unique=True)
         await primary_db.locations.create_index([("businessId", 1), ("code", 1)], unique=True)
         await primary_db.categories.create_index([("businessId", 1), ("name", 1)])
+        print(f"  [OK] Primary DB [{primary_db.name}] indexes verified.")
     except Exception as e:
-        print(f"Note on primary DB indexes: {e}")
+        print(f"  ! Note on primary DB indexes: {e}")
 
     # Tenant DB indexes
     for t_id_str, t_info in tenant_db_map.items():
         tdb = t_info["db"]
-        try:
-            await tdb.items.create_index([("businessId", 1), ("publicItemId", 1)])
-            await tdb.items.create_index([("businessId", 1), ("sku", 1)])
-            await tdb.items.create_index([("businessId", 1), ("barcode", 1)])
-            await tdb.items.create_index([("businessId", 1), ("locations.locationId", 1)])
-            await tdb.items.create_index([("businessId", 1), ("category", 1)])
-            await tdb.invoices.create_index([("businessId", 1), ("invoiceNumber", 1)], unique=True)
-            await tdb.invoices.create_index([("businessId", 1), ("locationId", 1)])
-            await tdb.parties.create_index([("businessId", 1), ("phone", 1)])
-            await tdb.expenses.create_index([("businessId", 1), ("expenseDate", -1)])
-            await tdb.purchase_orders.create_index([("businessId", 1), ("poNumber", 1)], unique=True)
-            await tdb.purchase_orders.create_index([("businessId", 1), ("status", 1)])
-            await tdb.purchase_orders.create_index([("businessId", 1), ("supplierId", 1)])
-            await tdb.purchase_orders.create_index([("businessId", 1), ("locationId", 1)])
-            await tdb.purchase_orders.create_index([("businessId", 1), ("createdAt", -1)])
-            print(f"  [DB: {tdb.name}] Indexes verified and built successfully.")
-        except Exception as e:
-            print(f"Note on tenant DB indexes: {e}")
+        indexes_to_create = [
+            (tdb.items, [("businessId", 1), ("publicItemId", 1)], {"unique": True, "sparse": True}),
+            (tdb.items, [("businessId", 1), ("sku", 1)], {}),
+            (tdb.items, [("businessId", 1), ("barcode", 1)], {}),
+            (tdb.items, [("businessId", 1), ("locations.locationId", 1)], {}),
+            (tdb.items, [("businessId", 1), ("category", 1)], {}),
+            (tdb.invoices, [("businessId", 1), ("invoiceNumber", 1)], {"unique": True}),
+            (tdb.invoices, [("businessId", 1), ("locationId", 1)], {}),
+            (tdb.parties, [("businessId", 1), ("phone", 1)], {}),
+            (tdb.expenses, [("businessId", 1), ("expenseDate", -1)], {}),
+            (tdb.purchase_orders, [("businessId", 1), ("poNumber", 1)], {"unique": True}),
+            (tdb.purchase_orders, [("businessId", 1), ("status", 1)], {}),
+            (tdb.purchase_orders, [("businessId", 1), ("supplierId", 1)], {}),
+            (tdb.purchase_orders, [("businessId", 1), ("locationId", 1)], {}),
+            (tdb.purchase_orders, [("businessId", 1), ("createdAt", -1)], {}),
+            (tdb.inventory_movements, [("businessId", 1), ("itemId", 1), ("createdAt", -1)], {}),
+        ]
+        created_count = 0
+        for col, keys, kwargs in indexes_to_create:
+            try:
+                await col.create_index(keys, **kwargs)
+                created_count += 1
+            except Exception:
+                pass
+        print(f"  [OK] Tenant DB [{tdb.name}] {created_count}/{len(indexes_to_create)} indexes verified.")
 
     client.close()
 
-    print("\n" + "=" * 70)
-    print(" DATABASE SCHEMA SYNCHRONIZATION COMPLETED SUCCESSFULLY!")
-    print(" All collections, items, branches, users, and indexes are in sync.")
-    print("=" * 70)
+    print("\n" + "=" * 80)
+    print(" ALL DATABASE RECORDS AUDITED, CLEANSED, AND SYNCHRONIZED SUCCESSFULLY!")
+    print("=" * 80)
 
 
 if __name__ == "__main__":

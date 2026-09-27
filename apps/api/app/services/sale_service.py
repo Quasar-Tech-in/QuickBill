@@ -240,16 +240,50 @@ class SaleService:
         for it in totals.items:
             qty_sold = round(float(it.quantity), 3)
             target_item_oid = ObjectId(it.item_id) if ObjectId.is_valid(it.item_id) else None
+            item_doc_found = item_docs.get(it.item_id) or {}
+            cogs_cost = float(item_doc_found.get("averageCostPrice") or item_doc_found.get("purchasePrice") or 0.0)
+
             if target_item_oid:
-                await self.db.items.update_one(
-                    {"_id": target_item_oid},
-                    {"$inc": {"currentStock": -qty_sold}}
-                )
+                batches = list(item_doc_found.get("batches") or [])
+                if batches:
+                    remaining_to_deduct = qty_sold
+                    # Sort batches by received_date / received_at ascending (FIFO)
+                    batches.sort(key=lambda b: b.get("receivedDate") or b.get("receivedAt") or "")
+
+                    batch_cogs_accum = []
+                    for batch in batches:
+                        b_stock = float(batch.get("currentStock", 0.0) or 0.0)
+                        if b_stock <= 0:
+                            continue
+                        deduct_qty = min(remaining_to_deduct, b_stock)
+                        batch["currentStock"] = round(b_stock - deduct_qty, 3)
+                        b_purchase_price = float(batch.get("purchasePrice", cogs_cost))
+                        batch_cogs_accum.append((deduct_qty, b_purchase_price))
+                        remaining_to_deduct -= deduct_qty
+                        if remaining_to_deduct <= 0:
+                            break
+
+                    if batch_cogs_accum:
+                        total_priced_qty = sum(q for q, _ in batch_cogs_accum)
+                        if total_priced_qty > 0:
+                            cogs_cost = sum(q * c for q, c in batch_cogs_accum) / total_priced_qty
+
+                    await self.db.items.update_one(
+                        {"_id": target_item_oid},
+                        {"$set": {"batches": batches}, "$inc": {"currentStock": -qty_sold}}
+                    )
+                else:
+                    await self.db.items.update_one(
+                        {"_id": target_item_oid},
+                        {"$inc": {"currentStock": -qty_sold}}
+                    )
+
                 if request.location_id:
                     await self.db.items.update_one(
                         {"_id": target_item_oid, "locations.locationId": request.location_id},
                         {"$inc": {"locations.$.currentStock": -qty_sold}}
                     )
+
             movement_doc = {
                 "businessId": b_oid,
                 "itemId": target_item_oid or it.item_id,
@@ -258,7 +292,7 @@ class SaleService:
                 "referenceId": invoice_id,
                 "referenceNumber": invoice_number,
                 "quantityChange": -qty_sold,
-                "unitCost": float(item_docs.get(it.item_id, {}).get("purchasePrice", 0)),
+                "unitCost": round(cogs_cost, 2),
                 "createdAt": now
             }
             await self.db.inventory_movements.insert_one(movement_doc)

@@ -68,6 +68,22 @@ export interface ItemImage {
   originalSizeBytes?: number;
 }
 
+export interface ItemBatch {
+  batchId?: string;
+  batchNumber: string;
+  purchaseOrderId?: string;
+  purchaseOrderNumber?: string;
+  purchasePrice: number;
+  salePrice?: number;
+  mrp?: number;
+  currentStock: number;
+  locationId?: string;
+  receivedDate?: string;
+  receivedAt?: string;
+  supplierId?: string;
+  supplierName?: string;
+}
+
 export interface Item {
   id: string;
   businessId?: string;
@@ -83,11 +99,13 @@ export interface Item {
   mrp?: number;
   salePrice: number;
   purchasePrice: number;
+  averageCostPrice?: number; // Weighted average cost across batches
   currentStock: number;
   minStockAlert: number;
   hasDiscount?: boolean;
   discountType?: 'PERCENT' | 'FLAT';
   discountValue?: number;
+  batches?: ItemBatch[]; // FIFO / Lot price tracking
   // Multi-location specific stock and pricing overrides
   locations?: ItemLocationInventory[];
   // Product image gallery with ordered indexing

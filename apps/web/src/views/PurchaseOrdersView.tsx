@@ -75,7 +75,6 @@ export const PurchaseOrdersView: React.FC = () => {
       orderedQty: number;
       unitPrice: number;
       taxRate: number;
-      updateItemPurchasePrice: boolean;
     }[];
   }>({
     supplierId: '',
@@ -85,6 +84,12 @@ export const PurchaseOrdersView: React.FC = () => {
     terms: 'Payment due within 30 days of goods receipt.',
     items: [],
   });
+
+  // PO Form Search & Autocomplete States
+  const [supplierSearchQuery, setSupplierSearchQuery] = useState<string>('');
+  const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = useState<boolean>(false);
+  const [itemSearchQuery, setItemSearchQuery] = useState<string>('');
+  const [isItemSearchFocused, setIsItemSearchFocused] = useState<boolean>(false);
 
   // Form State: Receive Goods
   const [receiveForm, setReceiveForm] = useState<{
@@ -177,6 +182,36 @@ export const PurchaseOrdersView: React.FC = () => {
   }, [loadData]);
 
   // Line Item Handlers
+  const handleSelectProductToAdd = (itemToAdd: Item) => {
+    setNewPO(prev => {
+      const existingIndex = prev.items.findIndex(it => it.itemId === itemToAdd.id);
+      if (existingIndex >= 0) {
+        const updated = [...prev.items];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          orderedQty: Number(updated[existingIndex].orderedQty || 0) + 1,
+        };
+        return { ...prev, items: updated };
+      } else {
+        return {
+          ...prev,
+          items: [
+            ...prev.items,
+            {
+              itemId: itemToAdd.id,
+              orderedQty: 1,
+              unitPrice: itemToAdd.purchasePrice || itemToAdd.salePrice || 0,
+              taxRate: itemToAdd.taxRate || 0,
+            },
+          ],
+        };
+      }
+    });
+    setItemSearchQuery('');
+    setIsItemSearchFocused(false);
+    showNotification('success', `Added "${itemToAdd.name}" to order lines`);
+  };
+
   const handleAddLineItem = () => {
     if (items.length === 0) {
       showNotification('error', 'No catalog products available. Add one first!');
@@ -192,7 +227,6 @@ export const PurchaseOrdersView: React.FC = () => {
           orderedQty: 1,
           unitPrice: firstItem.purchasePrice || firstItem.salePrice || 0,
           taxRate: firstItem.taxRate || 0,
-          updateItemPurchasePrice: false,
         },
       ],
     }));
@@ -243,27 +277,20 @@ export const PurchaseOrdersView: React.FC = () => {
   };
 
   const openCreateModal = () => {
-    const suppliers = parties.filter(p => p.type === 'SUPPLIER');
-    const defaultSupplier = suppliers.length > 0 ? suppliers[0].id : '';
     const defaultLocation = activeLocation?.id || (locations[0]?.id || '');
-    
-    const initialItem = items[0];
-    const initialLine = initialItem ? [{
-      itemId: initialItem.id,
-      orderedQty: 10,
-      unitPrice: initialItem.purchasePrice || 0,
-      taxRate: initialItem.taxRate || 0,
-      updateItemPurchasePrice: false,
-    }] : [];
 
     setNewPO({
-      supplierId: defaultSupplier,
+      supplierId: '',
       locationId: defaultLocation,
       expectedDeliveryDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
       notes: '',
       terms: 'Payment due within 30 days of goods receipt.',
-      items: initialLine,
+      items: [], // Start empty with NO default products added
     });
+    setSupplierSearchQuery('');
+    setIsSupplierDropdownOpen(false);
+    setItemSearchQuery('');
+    setIsItemSearchFocused(false);
     setIsCreateModalOpen(true);
   };
 
@@ -437,6 +464,8 @@ export const PurchaseOrdersView: React.FC = () => {
 
       setParties(store.getParties());
       setNewPO(prev => ({ ...prev, supplierId: created.id }));
+      setSupplierSearchQuery('');
+      setIsSupplierDropdownOpen(false);
       setIsQuickSupplierModalOpen(false);
       setQuickSupplier({ name: '', phone: '', email: '', gstin: '', address: '' });
       showNotification('success', `Supplier "${created.name}" created and selected!`);
@@ -476,14 +505,15 @@ export const PurchaseOrdersView: React.FC = () => {
           ...prev.items,
           {
             itemId: created.id,
-            orderedQty: 10,
+            orderedQty: 1,
             unitPrice: created.purchasePrice || 0,
             taxRate: created.taxRate || 0,
-            updateItemPurchasePrice: false,
           },
         ],
       }));
 
+      setItemSearchQuery('');
+      setIsItemSearchFocused(false);
       setIsQuickItemModalOpen(false);
       setQuickItem({ name: '', category: 'General Store', unit: 'pcs', purchasePrice: 0, salePrice: 0, taxRate: 18 });
       showNotification('success', `Product "${created.name}" added to order!`);
@@ -934,9 +964,9 @@ export const PurchaseOrdersView: React.FC = () => {
             <form onSubmit={handleSavePO} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
               <div className="modal-body" style={{ overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {/* Header Inputs Grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-                  {/* Supplier */}
-                  <div className="form-group" style={{ margin: 0 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+                  {/* Searchable Supplier */}
+                  <div className="form-group" style={{ margin: 0, position: 'relative' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <label className="form-label" style={{ margin: 0 }}>Supplier (Vendor) *</label>
                       <button
@@ -947,17 +977,164 @@ export const PurchaseOrdersView: React.FC = () => {
                         + Quick Add Supplier
                       </button>
                     </div>
-                    <select
-                      className="form-select"
-                      value={newPO.supplierId}
-                      onChange={(e) => setNewPO({ ...newPO, supplierId: e.target.value })}
-                      required
-                    >
-                      <option value="">-- Select Supplier --</option>
-                      {parties.filter(p => p.type === 'SUPPLIER').map(sup => (
-                        <option key={sup.id} value={sup.id}>{sup.name} {sup.phone ? `(${sup.phone})` : ''}</option>
-                      ))}
-                    </select>
+
+                    {newPO.supplierId ? (
+                      (() => {
+                        const selSup = parties.find(p => p.id === newPO.supplierId);
+                        return (
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '6px 10px',
+                            background: 'var(--primary-50)',
+                            border: '1px solid var(--primary-200)',
+                            borderRadius: 'var(--radius-sm)',
+                            minHeight: 38
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+                              <Building2 size={16} color="var(--primary-600)" style={{ flexShrink: 0 }} />
+                              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--primary-900)' }}>
+                                  {selSup?.name || 'Selected Supplier'}
+                                </div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--primary-700)' }}>
+                                  {selSup?.phone && selSup.phone !== 'N/A' ? `📞 ${selSup.phone}` : ''}
+                                  {selSup?.gstin ? ` | GST: ${selSup.gstin}` : ''}
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewPO(prev => ({ ...prev, supplierId: '' }));
+                                setSupplierSearchQuery('');
+                                setIsSupplierDropdownOpen(true);
+                              }}
+                              className="btn btn-secondary btn-sm"
+                              style={{ fontSize: '0.72rem', padding: '2px 8px', height: 26, flexShrink: 0 }}
+                            >
+                              Change
+                            </button>
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <div style={{ position: 'relative' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
+                          <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--neutral-400)', pointerEvents: 'none' }} />
+                          <input
+                            type="text"
+                            className="form-input"
+                            style={{ paddingLeft: 32, fontSize: '0.82rem', height: 38 }}
+                            placeholder="Search supplier by name, phone, GST..."
+                            value={supplierSearchQuery}
+                            onChange={(e) => {
+                              setSupplierSearchQuery(e.target.value);
+                              setIsSupplierDropdownOpen(true);
+                            }}
+                            onFocus={() => setIsSupplierDropdownOpen(true)}
+                            required={!newPO.supplierId}
+                          />
+                          {supplierSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setSupplierSearchQuery('')}
+                              style={{ position: 'absolute', right: 8, background: 'none', border: 'none', color: 'var(--neutral-400)', cursor: 'pointer', padding: 2 }}
+                            >
+                              <X size={13} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Supplier Autocomplete Dropdown */}
+                        {isSupplierDropdownOpen && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '100%',
+                            left: 0,
+                            right: 0,
+                            backgroundColor: '#ffffff',
+                            border: '1px solid var(--neutral-300)',
+                            borderRadius: 'var(--radius-sm)',
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                            maxHeight: 220,
+                            overflowY: 'auto',
+                            zIndex: 110,
+                            marginTop: 4,
+                          }}>
+                            {(() => {
+                              const filteredSuppliers = parties
+                                .filter(p => p.type === 'SUPPLIER')
+                                .filter(p => {
+                                  if (!supplierSearchQuery.trim()) return true;
+                                  const q = supplierSearchQuery.toLowerCase();
+                                  return (
+                                    p.name.toLowerCase().includes(q) ||
+                                    (p.phone && p.phone.includes(q)) ||
+                                    (p.gstin && p.gstin.toLowerCase().includes(q))
+                                  );
+                                });
+
+                              if (filteredSuppliers.length === 0) {
+                                return (
+                                  <div style={{ padding: '12px 14px', fontSize: '0.8rem', color: 'var(--neutral-500)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>No matching supplier found.</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setQuickSupplier(prev => ({ ...prev, name: supplierSearchQuery.trim() }));
+                                        setIsSupplierDropdownOpen(false);
+                                        setIsQuickSupplierModalOpen(true);
+                                      }}
+                                      style={{ fontSize: '0.75rem', color: 'var(--primary-600)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}
+                                    >
+                                      + Create "{supplierSearchQuery.trim()}"
+                                    </button>
+                                  </div>
+                                );
+                              }
+
+                              return filteredSuppliers.map(sup => (
+                                <div
+                                  key={sup.id}
+                                  onClick={() => {
+                                    setNewPO(prev => ({ ...prev, supplierId: sup.id }));
+                                    setSupplierSearchQuery('');
+                                    setIsSupplierDropdownOpen(false);
+                                  }}
+                                  style={{
+                                    padding: '8px 12px',
+                                    borderBottom: '1px solid var(--neutral-100)',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    transition: 'background-color 0.1s ease',
+                                    backgroundColor: '#ffffff',
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--primary-50)')}
+                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#ffffff')}
+                                >
+                                  <div>
+                                    <div style={{ fontSize: '0.83rem', fontWeight: 700, color: 'var(--neutral-900)' }}>
+                                      {sup.name}
+                                    </div>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>
+                                      {sup.phone && sup.phone !== 'N/A' ? `Phone: ${sup.phone}` : ''}
+                                      {sup.gstin ? ` | GST: ${sup.gstin}` : ''}
+                                    </div>
+                                  </div>
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
+                                    Select →
+                                  </div>
+                                </div>
+                              ));
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Destination Location */}
@@ -968,6 +1145,7 @@ export const PurchaseOrdersView: React.FC = () => {
                       value={newPO.locationId}
                       onChange={(e) => setNewPO({ ...newPO, locationId: e.target.value })}
                       required
+                      style={{ height: 38, fontSize: '0.82rem' }}
                     >
                       {locations.map(loc => (
                         <option key={loc.id} value={loc.id}>📍 {loc.name} ({loc.code})</option>
@@ -983,13 +1161,14 @@ export const PurchaseOrdersView: React.FC = () => {
                       className="form-input"
                       value={newPO.expectedDeliveryDate}
                       onChange={(e) => setNewPO({ ...newPO, expectedDeliveryDate: e.target.value })}
+                      style={{ height: 38, fontSize: '0.82rem' }}
                     />
                   </div>
                 </div>
 
                 {/* Items Section */}
                 <div style={{ border: '1px solid var(--neutral-200)', borderRadius: 'var(--radius-md)', padding: 14, backgroundColor: 'var(--neutral-50)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--neutral-800)', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span>Ordered Products</span>
                       <span className="badge" style={{ background: 'var(--neutral-200)', color: 'var(--neutral-700)' }}>
@@ -1007,22 +1186,134 @@ export const PurchaseOrdersView: React.FC = () => {
                         <PackagePlus size={13} />
                         <span>+ Quick Add Product</span>
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={handleAddLineItem}
-                        className="btn btn-primary btn-sm"
-                        style={{ fontSize: '0.78rem' }}
-                      >
-                        <Plus size={13} />
-                        <span>Add Line Item</span>
-                      </button>
                     </div>
                   </div>
 
+                  {/* Product Search & Autocomplete Input Bar */}
+                  <div style={{ position: 'relative', marginBottom: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
+                      <Search size={15} style={{ position: 'absolute', left: 10, color: 'var(--neutral-400)', pointerEvents: 'none' }} />
+                      <input
+                        type="text"
+                        className="form-input"
+                        style={{ paddingLeft: 34, paddingRight: itemSearchQuery ? 30 : 10, height: 38, fontSize: '0.82rem', backgroundColor: '#ffffff' }}
+                        placeholder="Type product name, SKU, or barcode to search and add to order..."
+                        value={itemSearchQuery}
+                        onChange={(e) => {
+                          setItemSearchQuery(e.target.value);
+                          setIsItemSearchFocused(true);
+                        }}
+                        onFocus={() => setIsItemSearchFocused(true)}
+                      />
+                      {itemSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setItemSearchQuery('')}
+                          style={{ position: 'absolute', right: 8, background: 'none', border: 'none', color: 'var(--neutral-400)', cursor: 'pointer', padding: 2 }}
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Autocomplete Dropdown for Items */}
+                    {isItemSearchFocused && itemSearchQuery.trim().length > 0 && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid var(--neutral-300)',
+                        borderRadius: 'var(--radius-sm)',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                        maxHeight: 240,
+                        overflowY: 'auto',
+                        zIndex: 100,
+                        marginTop: 4,
+                      }}>
+                        {(() => {
+                          const q = itemSearchQuery.toLowerCase();
+                          const filteredCatalogItems = items.filter(it => {
+                            const nameMatch = it.name?.toLowerCase().includes(q);
+                            const skuMatch = it.sku?.toLowerCase().includes(q);
+                            const barcodeMatch = it.barcode?.toLowerCase().includes(q);
+                            const catMatch = it.category?.toLowerCase().includes(q);
+                            return nameMatch || skuMatch || barcodeMatch || catMatch;
+                          });
+
+                          if (filteredCatalogItems.length === 0) {
+                            return (
+                              <div style={{ padding: '12px 14px', fontSize: '0.8rem', color: 'var(--neutral-500)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>No matching product found in catalog.</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setQuickItem(prev => ({ ...prev, name: itemSearchQuery.trim() }));
+                                    setIsItemSearchFocused(false);
+                                    setIsQuickItemModalOpen(true);
+                                  }}
+                                  style={{ fontSize: '0.75rem', color: 'var(--primary-600)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}
+                                >
+                                  + Create "{itemSearchQuery.trim()}"
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return filteredCatalogItems.map(it => {
+                            const isAlreadyAdded = newPO.items.some(line => line.itemId === it.id);
+                            return (
+                              <div
+                                key={it.id}
+                                onClick={() => handleSelectProductToAdd(it)}
+                                style={{
+                                  padding: '8px 12px',
+                                  borderBottom: '1px solid var(--neutral-100)',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  transition: 'background-color 0.1s ease',
+                                  backgroundColor: '#ffffff',
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--primary-50)')}
+                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#ffffff')}
+                              >
+                                <div>
+                                  <div style={{ fontSize: '0.83rem', fontWeight: 700, color: 'var(--neutral-850)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span>{it.name}</span>
+                                    {it.sku && <span className="badge" style={{ fontSize: '0.68rem', padding: '1px 5px' }}>SKU: {it.sku}</span>}
+                                    {it.category && <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)' }}>• {it.category}</span>}
+                                  </div>
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                                    Unit: {it.unit || 'pcs'} | Cost: ₹{it.purchasePrice || it.salePrice || 0} | Stock: {it.currentStock || 0}
+                                  </div>
+                                </div>
+                                <div>
+                                  {isAlreadyAdded ? (
+                                    <span className="badge" style={{ backgroundColor: 'var(--primary-100)', color: 'var(--primary-700)', fontSize: '0.72rem' }}>
+                                      + Incr Qty
+                                    </span>
+                                  ) : (
+                                    <span className="badge" style={{ backgroundColor: 'var(--success-50)', color: 'var(--success-700)', fontSize: '0.72rem' }}>
+                                      + Add to PO
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+                  </div>
+
                   {newPO.items.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: 24, background: '#ffffff', borderRadius: 'var(--radius-sm)', border: '1px dashed var(--neutral-300)', color: 'var(--neutral-500)', fontSize: '0.85rem' }}>
-                      No items added yet. Click <strong>"Add Line Item"</strong> or <strong>"Quick Add Product"</strong> to begin.
+                    <div style={{ textAlign: 'center', padding: '28px 16px', background: '#ffffff', borderRadius: 'var(--radius-sm)', border: '1px dashed var(--neutral-300)', color: 'var(--neutral-500)', fontSize: '0.85rem' }}>
+                      <PackagePlus size={28} style={{ display: 'block', margin: '0 auto 8px', color: 'var(--neutral-400)' }} />
+                      No items added to this purchase order yet.<br />
+                      Use the <strong>product search bar above</strong> to find and add products, or click <strong>"Quick Add Product"</strong>.
                     </div>
                   ) : (
                     <div style={{ background: '#ffffff', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)', overflow: 'hidden' }}>
@@ -1042,30 +1333,21 @@ export const PurchaseOrdersView: React.FC = () => {
                             const lineSub = line.orderedQty * line.unitPrice;
                             const lineTax = (lineSub * line.taxRate) / 100;
                             const lineTot = lineSub + lineTax;
+                            const targetItem = items.find(it => it.id === line.itemId);
 
                             return (
                               <tr key={idx} style={{ borderBottom: '1px solid var(--neutral-100)' }}>
                                 <td style={{ padding: '8px 10px' }}>
-                                  <select
-                                    className="form-select"
-                                    style={{ height: 32, padding: '4px 8px', fontSize: '0.8rem' }}
-                                    value={line.itemId}
-                                    onChange={(e) => handleUpdateLineItem(idx, 'itemId', e.target.value)}
-                                  >
-                                    {items.map(it => (
-                                      <option key={it.id} value={it.id}>
-                                        {it.name} {it.sku ? `[${it.sku}]` : ''} ({it.unit || 'pcs'})
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, fontSize: '0.72rem', color: 'var(--neutral-500)', cursor: 'pointer' }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={line.updateItemPurchasePrice}
-                                      onChange={(e) => handleUpdateLineItem(idx, 'updateItemPurchasePrice', e.target.checked)}
-                                    />
-                                    <span>Sync to item master cost price</span>
-                                  </label>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                    <span style={{ fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.83rem' }}>
+                                      {targetItem?.name || 'Catalog Item'}
+                                    </span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: 'var(--neutral-500)', flexWrap: 'wrap' }}>
+                                      {targetItem?.sku && <span className="badge" style={{ fontSize: '0.66rem', padding: '1px 5px' }}>SKU: {targetItem.sku}</span>}
+                                      <span>Unit: {targetItem?.unit || 'pcs'}</span>
+                                      {targetItem?.category && <span>• {targetItem.category}</span>}
+                                    </div>
+                                  </div>
                                 </td>
 
                                 <td style={{ padding: '8px 10px' }}>
