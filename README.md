@@ -53,6 +53,8 @@ This project is a high-speed, multi-tenant billing and inventory management appl
                                   └────────────────────────┘
 ```
 
+> 📖 **Deep-Dive Technical Architecture & Schemas**: See [MONGODB_SCHEMA_AND_INTEGRATION_ARCHITECTURE.md](MONGODB_SCHEMA_AND_INTEGRATION_ARCHITECTURE.md) for complete collection schemas, multi-tenant database routing, root account connectivity, and ACID transactional sequence diagrams.
+
 ---
 
 ## 📁 Repository Structure
@@ -60,7 +62,7 @@ This project is a high-speed, multi-tenant billing and inventory management appl
 ```text
 .
 ├── .agents/
-│   └── skills/                      # 18 Antigravity workspace skills & runbooks
+│   └── skills/                      # 21 Antigravity workspace skills & runbooks
 │       ├── auth-rbac/               # JWT, password hashing, and role guards
 │       ├── billing-engine/          # Authoritative financial math & tax calculations
 │       ├── devops-ci-cd/            # Docker, CI/CD, and MongoDB backup scripts

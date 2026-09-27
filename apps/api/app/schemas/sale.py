@@ -13,9 +13,10 @@ class SaleItemInput(BaseSchema):
 
 class SaleItemSnapshot(BaseSchema):
     item_id: str = Field(..., alias="itemId")
-    name_snapshot: str = Field(..., alias="nameSnapshot")
+    name_snapshot: Optional[str] = Field(None, alias="nameSnapshot")
+    name: Optional[str] = None
     sku_snapshot: Optional[str] = Field(None, alias="skuSnapshot")
-    quantity: Decimal
+    quantity: Decimal = Field(default=Decimal("1.0"))
     returned_quantity: Decimal = Field(default=Decimal("0.00"), alias="returnedQuantity")
     return_reason: Optional[str] = Field(None, alias="returnReason")  # RESTOCKABLE_RETURN, DEFECTIVE_DAMAGED, EXCHANGE, WRONG_ITEM
     return_note: Optional[str] = Field(None, alias="returnNote")
@@ -23,9 +24,9 @@ class SaleItemSnapshot(BaseSchema):
     return_status: Optional[str] = Field(None, alias="returnStatus")  # NONE, PARTIAL, FULL
     unit_price: Decimal = Field(..., alias="unitPrice")
     discount: Decimal = Field(default=Decimal("0.00"))
-    taxable_amount: Decimal = Field(..., alias="taxableAmount")
-    tax_rate: Decimal = Field(..., alias="taxRate")
-    tax_amount: Decimal = Field(..., alias="taxAmount")
+    taxable_amount: Optional[Decimal] = Field(default=None, alias="taxableAmount")
+    tax_rate: Decimal = Field(default=Decimal("0.00"), alias="taxRate")
+    tax_amount: Optional[Decimal] = Field(default=Decimal("0.00"), alias="taxAmount")
     line_total: Decimal = Field(..., alias="lineTotal")
 
 class SaleCreateRequest(BaseSchema):
@@ -92,26 +93,26 @@ class SaleResponse(BaseSchema):
     billed_by_name: Optional[str] = Field(None, alias="billedByName")
     billed_by_role: Optional[str] = Field(None, alias="billedByRole")
     status: str = "CONFIRMED"  # CONFIRMED, PARTIALLY_RETURNED, RETURNED, CANCELLED
-    payment_status: str = Field(..., alias="paymentStatus")  # PAID, PARTIAL, UNPAID, REFUNDED
-    items: List[SaleItemSnapshot]
-    subtotal: Decimal
-    tax_total: Decimal = Field(..., alias="taxTotal")
-    discount_total: Decimal = Field(..., alias="discountTotal")
+    payment_status: Optional[str] = Field(default="PAID", alias="paymentStatus")  # PAID, PARTIAL, UNPAID, REFUNDED
+    items: List[SaleItemSnapshot] = Field(default=[])
+    subtotal: Decimal = Field(default=Decimal("0.00"))
+    tax_total: Decimal = Field(default=Decimal("0.00"), alias="taxTotal")
+    discount_total: Decimal = Field(default=Decimal("0.00"), alias="discountTotal")
     discount_type: Optional[str] = Field(None, alias="discountType")
     discount_value: Optional[Decimal] = Field(None, alias="discountValue")
     additional_charges: Decimal = Field(default=Decimal("0.00"), alias="additionalCharges")
     round_off: Decimal = Field(default=Decimal("0.00"), alias="roundOff")
-    grand_total: Decimal = Field(..., alias="grandTotal")
+    grand_total: Decimal = Field(default=Decimal("0.00"), alias="grandTotal")
     original_grand_total: Optional[Decimal] = Field(None, alias="originalGrandTotal")
     return_total: Optional[Decimal] = Field(default=Decimal("0.00"), alias="returnTotal")
     has_returns: Optional[bool] = Field(default=False, alias="hasReturns")
     return_status: Optional[str] = Field(default="NONE", alias="returnStatus")
     return_notes: Optional[str] = Field(None, alias="returnNotes")
-    paid_amount: Decimal = Field(..., alias="paidAmount")
-    balance_due: Decimal = Field(..., alias="balanceDue")
+    paid_amount: Decimal = Field(default=Decimal("0.00"), alias="paidAmount")
+    balance_due: Decimal = Field(default=Decimal("0.00"), alias="balanceDue")
     payment_mode: Optional[str] = Field(default="CASH", alias="paymentMode")
     type: Optional[str] = "SALE"
     notes: Optional[str] = None
-    created_at: datetime = Field(..., alias="createdAt")
+    created_at: Optional[datetime] = Field(default=None, alias="createdAt")
     updated_at: Optional[datetime] = Field(None, alias="updatedAt")
 
