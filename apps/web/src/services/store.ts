@@ -373,6 +373,145 @@ class StoreService {
     return { success: false, error: 'Invalid email or password.' };
   }
 
+  async loginSuperAdminStep1(
+    email: string,
+    password: string
+  ): Promise<{
+    success: boolean;
+    requires_2fa?: boolean;
+    requires_2fa_setup?: boolean;
+    mfa_session_token?: string;
+    setup_token?: string;
+    otpauth_uri?: string;
+    secret_key?: string;
+    email?: string;
+    error?: string;
+  }> {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !password) {
+      return { success: false, error: 'Please provide both master email and password.' };
+    }
+
+    try {
+      const res = await axios.post(`${API_BASE_URL}/auth/superadmin/login`, {
+        email: cleanEmail,
+        password: password,
+      }, { timeout: 5000 });
+
+      return {
+        success: true,
+        requires_2fa: res.data.requires_2fa,
+        requires_2fa_setup: res.data.requires_2fa_setup,
+        mfa_session_token: res.data.mfa_session_token,
+        setup_token: res.data.setup_token,
+        otpauth_uri: res.data.otpauth_uri,
+        secret_key: res.data.secret_key,
+        email: res.data.email,
+      };
+    } catch (err: any) {
+      const errMsg = err.response?.data?.detail || err.message;
+      return {
+        success: false,
+        error: typeof errMsg === 'string' ? errMsg : 'Master credentials authentication failed.'
+      };
+    }
+  }
+
+  async verifySuperAdmin2FA(
+    mfaSessionToken: string,
+    code: string
+  ): Promise<{ success: boolean; user?: User; error?: string }> {
+    try {
+      const res = await axios.post(`${API_BASE_URL}/auth/superadmin/verify-2fa`, {
+        mfa_session_token: mfaSessionToken,
+        code: code.trim(),
+      }, { timeout: 5000 });
+
+      if (res.data?.access_token) {
+        const authenticatedUser: User = {
+          id: res.data.user_id,
+          email: res.data.email,
+          name: res.data.name || 'Super Administrator',
+          role: 'SUPER_ADMIN',
+          businessId: res.data.default_business_id || 'system_platform',
+          tenantName: 'Platform Central Master Control',
+          token: res.data.access_token,
+          assignedLocationIds: [],
+          isActive: true,
+        };
+
+        this.currentUser = authenticatedUser;
+        this.isSuperAdminMode = true;
+        this.saveToStorage();
+        return { success: true, user: authenticatedUser };
+      }
+    } catch (err: any) {
+      const errMsg = err.response?.data?.detail || err.message;
+      return {
+        success: false,
+        error: typeof errMsg === 'string' ? errMsg : 'Invalid Authenticator verification code.'
+      };
+    }
+
+    return { success: false, error: 'Verification failed.' };
+  }
+
+  async confirmSuperAdmin2FASetup(
+    setupToken: string,
+    code: string
+  ): Promise<{ success: boolean; user?: User; backup_codes?: string[]; error?: string }> {
+    try {
+      const res = await axios.post(`${API_BASE_URL}/auth/superadmin/confirm-2fa-setup`, {
+        setup_token: setupToken,
+        code: code.trim(),
+      }, { timeout: 5000 });
+
+      if (res.data?.access_token) {
+        const authenticatedUser: User = {
+          id: res.data.user_id,
+          email: res.data.email,
+          name: res.data.name || 'Super Administrator',
+          role: 'SUPER_ADMIN',
+          businessId: res.data.default_business_id || 'system_platform',
+          tenantName: 'Platform Central Master Control',
+          token: res.data.access_token,
+          assignedLocationIds: [],
+          isActive: true,
+        };
+
+        this.currentUser = authenticatedUser;
+        this.isSuperAdminMode = true;
+        this.saveToStorage();
+        return { 
+          success: true, 
+          user: authenticatedUser,
+          backup_codes: res.data.backup_codes || []
+        };
+      }
+    } catch (err: any) {
+      const errMsg = err.response?.data?.detail || err.message;
+      return {
+        success: false,
+        error: typeof errMsg === 'string' ? errMsg : 'Failed to confirm Authenticator setup code.'
+      };
+    }
+
+    return { success: false, error: 'Setup confirmation failed.' };
+  }
+
+  async resetSuperAdmin2FA(): Promise<{ success: boolean; error?: string }> {
+    try {
+      await apiClient.post('/auth/superadmin/reset-2fa');
+      return { success: true };
+    } catch (err: any) {
+      const errMsg = err.response?.data?.detail || err.message;
+      return {
+        success: false,
+        error: typeof errMsg === 'string' ? errMsg : 'Failed to reset 2FA.'
+      };
+    }
+  }
+
   logout() {
     this.currentUser = null;
     this.isSuperAdminMode = false;
