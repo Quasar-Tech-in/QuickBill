@@ -360,6 +360,17 @@ class StoreService {
         }
 
         this.saveToStorage();
+
+        // Fetch and synchronize live tenant and subscription data from database
+        try {
+          await this.fetchActiveTenant();
+          if (this.currentUser) {
+            this.currentUser.tenantName = this.currentTenant.name;
+          }
+        } catch (e) {
+          console.warn('Initial tenant sync failed:', e);
+        }
+
         return { success: true, user: authenticatedUser };
       }
     } catch (err: any) {
@@ -1129,6 +1140,70 @@ class StoreService {
       console.warn('Backend fetchTenants failed, using local tenants:', e);
     }
     return this.getTenants();
+  }
+
+  async fetchActiveTenant(): Promise<Tenant> {
+    try {
+      const res = await apiClient.get('/tenants/current');
+      if (res.data && (res.data.id || res.data._id)) {
+        const t = res.data;
+        const normalizedTenant: Tenant = {
+          id: t.id || t._id,
+          name: t.name,
+          slug: t.slug,
+          plan: t.plan || t.subscription?.plan_id || t.subscription?.planId || 'PROFESSIONAL',
+          status: t.status || t.subscription?.status || 'ACTIVE',
+          adminEmail: t.admin_email || t.adminEmail || '',
+          phone: t.phone,
+          gstin: t.gstin,
+          address: t.address,
+          createdAt: t.created_at || t.createdAt || new Date().toISOString(),
+          databaseConfig: {
+            isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
+            mongodbUri: t.database_config?.mongodb_uri || t.databaseConfig?.mongodbUri,
+            databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_db',
+          },
+          subscription: {
+            planId: t.subscription?.plan_id || t.subscription?.planId || 'PROFESSIONAL',
+            planName: t.subscription?.plan_name || t.subscription?.planName || 'Professional Tier',
+            status: t.subscription?.status || 'ACTIVE',
+            maxUsers: t.subscription?.max_users !== undefined ? t.subscription.max_users : (t.subscription?.maxUsers !== undefined ? t.subscription.maxUsers : 3),
+            maxLocations: t.subscription?.max_locations !== undefined ? t.subscription.max_locations : (t.subscription?.maxLocations !== undefined ? t.subscription.maxLocations : 3),
+            billingCycle: t.subscription?.billing_cycle || t.subscription?.billingCycle || 'ANNUAL',
+            startDate: t.subscription?.start_date || t.subscription?.startDate || t.created_at,
+            endDate: t.subscription?.end_date || t.subscription?.endDate || new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+            daysRemaining: t.subscription?.days_remaining !== undefined ? t.subscription.days_remaining : 365,
+            gracePeriodDays: t.subscription?.grace_period_days || 7,
+            pricePerCycle: t.subscription?.price_per_cycle || 1999,
+            currency: '₹',
+            autoRenew: t.subscription?.auto_renew || false,
+            features: t.subscription?.features || ['pos', 'inventory', 'ledger'],
+            renewalHistory: t.subscription?.renewal_history || [],
+            notes: t.subscription?.notes,
+          },
+          stats: t.stats || {
+            productsCount: 0,
+            invoicesCount: 0,
+            monthlyGmv: 0,
+            usersCount: 1,
+            locationsCount: 1,
+          }
+        };
+
+        this.currentTenant = normalizedTenant;
+        const idx = this.tenants.findIndex(x => x.id === normalizedTenant.id);
+        if (idx >= 0) {
+          this.tenants[idx] = normalizedTenant;
+        } else {
+          this.tenants.unshift(normalizedTenant);
+        }
+        this.saveToStorage();
+        return normalizedTenant;
+      }
+    } catch (e) {
+      console.warn('fetchActiveTenant failed, fallback to local currentTenant:', e);
+    }
+    return this.getActiveTenant();
   }
 
   getActiveTenant(): Tenant {

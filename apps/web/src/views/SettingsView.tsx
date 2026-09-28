@@ -121,13 +121,13 @@ export const SettingsView: React.FC = () => {
   const [editLocPhone, setEditLocPhone] = useState('');
   const [editLocFormError, setEditLocFormError] = useState('');
 
-  // Store Profile State
-  const activeTenant = store.getActiveTenant();
+  // Store Profile & Active Tenant State
+  const [activeTenant, setActiveTenant] = useState<Tenant>(store.getActiveTenant());
   const [profileName, setProfileName] = useState(activeTenant?.name || '');
   const [profileGstin, setProfileGstin] = useState(activeTenant?.gstin || '');
   const [profilePhone, setProfilePhone] = useState(activeTenant?.phone || '');
   const [profileEmail, setProfileEmail] = useState(activeTenant?.adminEmail || '');
-  const [profileAddress, setProfileAddress] = useState('Ground Floor, Metro Retail Plaza, Sector 18, New Delhi');
+  const [profileAddress, setProfileAddress] = useState(activeTenant?.address || 'Ground Floor, Metro Retail Plaza, Sector 18, New Delhi');
   const [profileCurrency, setProfileCurrency] = useState('₹ (INR)');
   const [profileSavedMsg, setProfileSavedMsg] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -135,13 +135,13 @@ export const SettingsView: React.FC = () => {
   const currentUser = store.getCurrentUser();
   const canManage = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'TENANT_ADMIN';
 
-  // Quota & Limits Calculation
+  // Quota & Limits Calculation from Live Database Subscription
   const sub = activeTenant?.subscription;
-  const maxUsersAllowed = sub?.maxUsers ?? (activeTenant?.plan === 'STARTER' ? 2 : (activeTenant?.plan === 'ENTERPRISE' ? 25 : 5));
+  const maxUsersAllowed = sub?.maxUsers !== undefined ? sub.maxUsers : (activeTenant?.plan === 'STARTER' ? 2 : (activeTenant?.plan === 'ENTERPRISE' ? 25 : 5));
   const activeUsersCount = users.filter(u => u.isActive !== false).length;
   const isUsersCapped = activeUsersCount >= maxUsersAllowed && currentUser?.role !== 'SUPER_ADMIN';
 
-  const maxLocationsAllowed = sub?.maxLocations ?? (activeTenant?.plan === 'STARTER' ? 1 : (activeTenant?.plan === 'ENTERPRISE' ? 10 : 3));
+  const maxLocationsAllowed = sub?.maxLocations !== undefined ? sub.maxLocations : (activeTenant?.plan === 'STARTER' ? 1 : (activeTenant?.plan === 'ENTERPRISE' ? 10 : 3));
   const activeLocationsCount = locations.filter(l => l.isActive !== false).length;
   const isLocationsCapped = activeLocationsCount >= maxLocationsAllowed && currentUser?.role !== 'SUPER_ADMIN';
 
@@ -151,20 +151,23 @@ export const SettingsView: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const uList = await store.getUsers();
-      const lList = await store.fetchLocations();
+      const [uList, lList, liveTenant] = await Promise.all([
+        store.getUsers(),
+        store.fetchLocations(),
+        store.fetchActiveTenant(),
+      ]);
       setUsers(uList);
       setLocations(lList);
-      
-      const t = store.getActiveTenant();
-      if (t) {
-        setProfileName(t.name || '');
-        setProfileGstin(t.gstin || '');
-        setProfilePhone(t.phone || '');
-        setProfileEmail(t.adminEmail || '');
+      if (liveTenant) {
+        setActiveTenant(liveTenant);
+        setProfileName(liveTenant.name || '');
+        setProfileGstin(liveTenant.gstin || '');
+        setProfilePhone(liveTenant.phone || '');
+        setProfileEmail(liveTenant.adminEmail || '');
+        if (liveTenant.address) setProfileAddress(liveTenant.address);
       }
     } catch (e) {
-      console.error('Failed loading staff and locations:', e);
+      console.error('Failed loading staff, locations, and live tenant:', e);
     } finally {
       setLoading(false);
     }

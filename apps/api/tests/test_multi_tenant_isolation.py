@@ -465,5 +465,61 @@ async def test_store_suspension_login_and_operational_lockdown(superadmin_token)
         assert cashier_login_active.json()["store_status"] == "ACTIVE"
 
 
+@pytest.mark.asyncio
+async def test_tenant_current_subscription_endpoint():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        primary_db = db_manager.get_primary_database()
+        from app.core.security import get_password_hash
+        from bson import ObjectId
+
+        hashed_pw = get_password_hash("OwnerSecret@2026")
+        await primary_db.users.update_one(
+            {"email": "owner_sync@store.local"},
+            {"$set": {
+                "name": "Sync Store Owner",
+                "email": "owner_sync@store.local",
+                "passwordHash": hashed_pw,
+                "roles": ["TENANT_ADMIN"],
+                "tenantId": ObjectId(TENANT_A_ID),
+                "authorizedTenantIds": [TENANT_A_ID],
+                "isActive": True
+            }},
+            upsert=True
+        )
+
+        # Login as tenant owner
+        login_res = await ac.post("/api/v1/auth/login", json={
+            "email": "owner_sync@store.local",
+            "password": "OwnerSecret@2026"
+        })
+        token = login_res.json()["access_token"]
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Business-ID": TENANT_A_ID
+        }
+
+        # Update Tenant A subscription in DB to test custom limits (3 users, 3 locations)
+        await primary_db.tenants.update_one(
+            {"_id": ObjectId(TENANT_A_ID)},
+            {"$set": {
+                "subscription.maxUsers": 3,
+                "subscription.maxLocations": 3,
+                "subscription.status": "ACTIVE",
+                "subscription.plan": "PRO"
+            }}
+        )
+
+        # Fetch /tenants/current
+        res = await ac.get("/api/v1/tenants/current", headers=headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["id"] == TENANT_A_ID
+        assert "subscription" in data
+        assert data["subscription"]["max_users"] == 3
+        assert data["subscription"]["max_locations"] == 3
+        assert data["subscription"]["status"] == "ACTIVE"
+
+
+
 
 

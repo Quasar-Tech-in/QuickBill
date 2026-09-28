@@ -91,6 +91,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     if (isStaffNonAdmin) {
       checkActiveLocations();
     }
+    store.fetchActiveTenant().catch(() => {});
   }, [currentUser]);
 
   // Enforce role-based route access guard and store status lockout

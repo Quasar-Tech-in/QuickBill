@@ -135,132 +135,128 @@ def calculate_subscription_status(end_date_str: str, base_status: str = "ACTIVE"
     else:
         return "ACTIVE", delta_days
 
+def build_tenant_response(t: dict) -> TenantResponse:
+    now = datetime.now(timezone.utc)
+    tid_str = str(t.get("_id", t.get("id", "")))
+    plan_str = t.get("plan", "PROFESSIONAL").upper()
+    
+    # Pull or build subscription
+    sub_doc = t.get("subscription", {})
+    sub_plan = sub_doc.get("planId") or sub_doc.get("plan") or plan_str
+    default_limits = PLAN_DEFAULTS.get(sub_plan, PLAN_DEFAULTS["PROFESSIONAL"])
+    
+    sub_end_date = sub_doc.get("endDate") or (now + timedelta(days=365)).isoformat()
+    sub_start_date = sub_doc.get("startDate") or t.get("createdAt", now.isoformat())
+    if isinstance(sub_start_date, datetime):
+        sub_start_date = sub_start_date.isoformat()
+    if isinstance(sub_end_date, datetime):
+        sub_end_date = sub_end_date.isoformat()
+
+    calculated_status, days_left = calculate_subscription_status(
+        sub_end_date,
+        base_status=t.get("status", "ACTIVE")
+    )
+
+    # Determine max_users and max_locations directly from DB sub_doc, only falling back if absent
+    max_u = sub_doc.get("maxUsers") if sub_doc.get("maxUsers") is not None else (
+        sub_doc.get("max_users") if sub_doc.get("max_users") is not None else default_limits["max_users"]
+    )
+    max_l = sub_doc.get("maxLocations") if sub_doc.get("maxLocations") is not None else (
+        sub_doc.get("max_locations") if sub_doc.get("max_locations") is not None else default_limits["max_locations"]
+    )
+
+    subscription_model = TenantSubscriptionModel(
+        plan_id=sub_plan,
+        plan_name=sub_doc.get("planName", f"{sub_plan.title()} Tier"),
+        status=calculated_status,
+        max_users=max_u,
+        max_locations=max_l,
+        billing_cycle=sub_doc.get("billingCycle", "ANNUAL"),
+        start_date=sub_start_date,
+        end_date=sub_end_date,
+        days_remaining=days_left,
+        grace_period_days=sub_doc.get("gracePeriodDays", 7),
+        price_per_cycle=sub_doc.get("pricePerCycle", 999.0),
+        currency="₹",
+        auto_renew=sub_doc.get("autoRenew", False),
+        features=sub_doc.get("features", default_limits["features"]),
+        renewal_history=sub_doc.get("renewalHistory", []),
+        notes=sub_doc.get("notes")
+    )
+
+    db_cfg = t.get("databaseConfig", {})
+    db_config_model = DatabaseConfig(
+        isolation_mode=db_cfg.get("isolationMode", db_cfg.get("isolation_mode", "SHARED")),
+        mongodb_uri=db_cfg.get("mongodbUri", db_cfg.get("mongodb_uri", settings.MONGODB_URI)),
+        database_name=db_cfg.get("databaseName", db_cfg.get("database_name", "quickbill_db"))
+    )
+
+    stats_doc = t.get("stats", {
+        "productsCount": 0,
+        "invoicesCount": 0,
+        "monthlyGmv": 0.0,
+        "usersCount": 1,
+        "locationsCount": 1
+    })
+
+    return TenantResponse(
+        id=tid_str,
+        name=t.get("name", "Untitled Store"),
+        slug=t.get("slug", "store"),
+        plan=sub_plan,
+        status=t.get("status", "ACTIVE"),
+        admin_email=t.get("adminEmail", t.get("admin_email", "")),
+        phone=t.get("phone"),
+        gstin=t.get("gstin"),
+        address=t.get("address"),
+        created_at=str(t.get("createdAt", now.isoformat())),
+        database_config=db_config_model,
+        subscription=subscription_model,
+        stats=stats_doc
+    )
+
 @router.get("", response_model=List[TenantResponse])
 async def list_tenants(user: TokenPayload = Depends(get_current_user)):
     primary_db = get_database()
-    now = datetime.now(timezone.utc)
     
-    # Query all tenants from DB
+    # Query all tenants strictly from DB - no in-code fallbacks
     cursor = primary_db.tenants.find({})
     db_tenants = await cursor.to_list(length=100)
     
-    results = []
+    return [build_tenant_response(t) for t in db_tenants]
+
+@router.get("/current", response_model=TenantResponse)
+async def get_current_tenant(user: TokenPayload = Depends(get_current_user)):
+    primary_db = get_database()
     
-    # Fallback to seed primary tenant if primary_db.tenants is empty
-    if not db_tenants:
-        end_date_1 = (now + timedelta(days=290)).isoformat()
+    tenant_id = user.default_business_id
+    if not tenant_id or tenant_id == "system_platform":
+        first_t = await primary_db.tenants.find_one({})
+        if not first_t:
+            raise HTTPException(status_code=404, detail="No tenants configured.")
+        return build_tenant_response(first_t)
 
-        db_tenants = [
-            {
-                "_id": ObjectId("65f2a1b9a000000000000001"),
-                "name": "QuickBill Enterprise Retail",
-                "slug": "quickbill-main",
-                "plan": "ENTERPRISE",
-                "status": "ACTIVE",
-                "adminEmail": "admin@quickbill.local",
-                "phone": "+91 9876543210",
-                "gstin": "07AABCB1234F1Z5",
-                "address": "Ground Floor, Metro Retail Plaza, Sector 18, New Delhi",
-                "createdAt": "2026-01-15T10:00:00Z",
-                "databaseConfig": {
-                    "isolationMode": "DEDICATED_DATABASE",
-                    "mongodbUri": f"mongodb://admin:secretpassword@localhost:27017/quickbill_main_db?authSource=admin",
-                    "databaseName": "quickbill_main_db"
-                },
-                "subscription": {
-                    "planId": "ENTERPRISE",
-                    "planName": "Enterprise Tier",
-                    "status": "ACTIVE",
-                    "maxUsers": 25,
-                    "maxLocations": 10,
-                    "billingCycle": "ANNUAL",
-                    "startDate": "2026-01-15T10:00:00Z",
-                    "endDate": end_date_1,
-                    "pricePerCycle": 49999.0,
-                    "features": PLAN_DEFAULTS["ENTERPRISE"]["features"]
-                },
-                "stats": {
-                    "productsCount": 32,
-                    "invoicesCount": 3,
-                    "monthlyGmv": 12450.0,
-                    "usersCount": 3,
-                    "locationsCount": 3
-                }
-            }
-        ]
+    t_oid = ObjectId(tenant_id) if ObjectId.is_valid(tenant_id) else None
+    q = {"_id": t_oid} if t_oid else {"slug": tenant_id}
+    tenant = await primary_db.tenants.find_one(q)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant store profile not found.")
 
-    for t in db_tenants:
-        tid_str = str(t.get("_id", t.get("id", "")))
-        plan_str = t.get("plan", "PROFESSIONAL").upper()
-        
-        # Pull or build subscription
-        sub_doc = t.get("subscription", {})
-        sub_plan = sub_doc.get("planId", plan_str)
-        default_limits = PLAN_DEFAULTS.get(sub_plan, PLAN_DEFAULTS["PROFESSIONAL"])
-        
-        sub_end_date = sub_doc.get("endDate") or (now + timedelta(days=365)).isoformat()
-        sub_start_date = sub_doc.get("startDate") or t.get("createdAt", now.isoformat())
-        if isinstance(sub_start_date, datetime):
-            sub_start_date = sub_start_date.isoformat()
-        if isinstance(sub_end_date, datetime):
-            sub_end_date = sub_end_date.isoformat()
+    return build_tenant_response(tenant)
 
-        calculated_status, days_left = calculate_subscription_status(
-            sub_end_date,
-            base_status=t.get("status", "ACTIVE")
-        )
+@router.get("/{tenant_id}", response_model=TenantResponse)
+async def get_tenant_by_id(tenant_id: str, user: TokenPayload = Depends(get_current_user)):
+    if not is_super_admin(user) and user.default_business_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Unauthorized access to this store.")
 
-        subscription_model = TenantSubscriptionModel(
-            plan_id=sub_plan,
-            plan_name=sub_doc.get("planName", f"{sub_plan.title()} Tier"),
-            status=calculated_status,
-            max_users=sub_doc.get("maxUsers", default_limits["max_users"]),
-            max_locations=sub_doc.get("maxLocations", default_limits["max_locations"]),
-            billing_cycle=sub_doc.get("billingCycle", "ANNUAL"),
-            start_date=sub_start_date,
-            end_date=sub_end_date,
-            days_remaining=days_left,
-            grace_period_days=sub_doc.get("gracePeriodDays", 7),
-            price_per_cycle=sub_doc.get("pricePerCycle", 999.0),
-            currency="₹",
-            auto_renew=sub_doc.get("autoRenew", False),
-            features=sub_doc.get("features", default_limits["features"]),
-            renewal_history=sub_doc.get("renewalHistory", []),
-            notes=sub_doc.get("notes")
-        )
+    primary_db = get_database()
+    t_oid = ObjectId(tenant_id) if ObjectId.is_valid(tenant_id) else None
+    q = {"_id": t_oid} if t_oid else {"slug": tenant_id}
+    tenant = await primary_db.tenants.find_one(q)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found.")
 
-        db_cfg = t.get("databaseConfig", {})
-        db_config_model = DatabaseConfig(
-            isolation_mode=db_cfg.get("isolationMode", db_cfg.get("isolation_mode", "SHARED")),
-            mongodb_uri=db_cfg.get("mongodbUri", db_cfg.get("mongodb_uri", settings.MONGODB_URI)),
-            database_name=db_cfg.get("databaseName", db_cfg.get("database_name", "quickbill_db"))
-        )
-
-        stats_doc = t.get("stats", {
-            "productsCount": 0,
-            "invoicesCount": 0,
-            "monthlyGmv": 0.0,
-            "usersCount": 1,
-            "locationsCount": 1
-        })
-
-        results.append(TenantResponse(
-            id=tid_str,
-            name=t.get("name", "Untitled Store"),
-            slug=t.get("slug", "store"),
-            plan=sub_plan,
-            status=t.get("status", "ACTIVE"),
-            admin_email=t.get("adminEmail", t.get("admin_email", "")),
-            phone=t.get("phone"),
-            gstin=t.get("gstin"),
-            address=t.get("address"),
-            created_at=str(t.get("createdAt", now.isoformat())),
-            database_config=db_config_model,
-            subscription=subscription_model,
-            stats=stats_doc
-        ))
-
-    return results
+    return build_tenant_response(tenant)
 
 @router.post("/test-db-connection")
 async def test_db_connection(req: TestConnectionRequest):
