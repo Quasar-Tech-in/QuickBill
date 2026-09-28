@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection
-from app.api.v1 import auth, items, sales, parties, customers, payments, expenses, reports, tenants, users, locations, categories, purchase_orders
+from app.api.v1 import auth, items, sales, parties, customers, payments, expenses, reports, tenants, users, locations, categories, purchase_orders, labels, shipping
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,6 +55,8 @@ app.include_router(payments.router, prefix=settings.API_V1_STR)
 app.include_router(expenses.router, prefix=settings.API_V1_STR)
 app.include_router(reports.router, prefix=settings.API_V1_STR)
 app.include_router(tenants.router, prefix=settings.API_V1_STR)
+app.include_router(labels.router, prefix=settings.API_V1_STR)
+app.include_router(shipping.router, prefix=settings.API_V1_STR)
 
 @app.get("/health/live", tags=["Health"])
 async def liveness():

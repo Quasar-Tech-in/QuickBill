@@ -5,9 +5,7 @@ import {
   TouchableOpacity, 
   StyleSheet, 
   Modal, 
-  ActivityIndicator, 
   Vibration,
-  Platform,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { colors } from '../theme/colors';
@@ -16,19 +14,22 @@ interface QRScannerModalProps {
   visible: boolean;
   onClose: () => void;
   onScanSuccess: (barcodeData: string) => void;
+  initialStandbyMode?: boolean;
 }
 
 export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   visible,
   onClose,
   onScanSuccess,
+  initialStandbyMode = true,
 }) => {
   const [permission, requestPermission] = useCameraPermissions();
   const [torch, setTorch] = useState(false);
+  const [facing, setFacing] = useState<'back' | 'front'>('back');
+  const [isStandby, setIsStandby] = useState(initialStandbyMode);
   const [scanned, setScanned] = useState(false);
   const [lastScannedText, setLastScannedText] = useState<string | null>(null);
 
-  // Reset scanned debounce state when modal opens
   useEffect(() => {
     if (visible) {
       setScanned(false);
@@ -36,20 +37,22 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     }
   }, [visible]);
 
-  const handleBarcodeScanned = ({ data, type }: { data: string; type: string }) => {
+  const handleBarcodeScanned = ({ data }: { data: string; type: string }) => {
     if (scanned || !data) return;
 
     setScanned(true);
     setLastScannedText(data);
     Vibration.vibrate(100);
 
-    // Call success handler
     onScanSuccess(data);
 
-    // Debounce re-scan after 1.8 seconds so user can scan next item
+    // Debounce re-scan after 1.5 seconds in standby mode, so cashier can scan next item without modal closing
     setTimeout(() => {
       setScanned(false);
-    }, 1800);
+      if (!isStandby) {
+        onClose();
+      }
+    }, 1500);
   };
 
   const handleDemoSampleScan = (sampleData: string) => {
@@ -65,12 +68,11 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
       <View style={styles.container}>
-        {/* Permission Request View */}
         {!permission?.granted ? (
           <View style={styles.permissionContainer}>
             <Text style={styles.permissionTitle}>📷 Camera Access Required</Text>
             <Text style={styles.permissionDesc}>
-              QuickBill needs camera permission to scan product barcodes and QR codes for high-speed billing.
+              QuickBill needs camera permission to scan product barcodes, string tags, and shipping labels for hands-free standby phone operations.
             </Text>
 
             <TouchableOpacity style={styles.grantButton} onPress={requestPermission}>
@@ -82,11 +84,11 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
             </TouchableOpacity>
           </View>
         ) : (
-          /* Live Camera View */
           <View style={StyleSheet.absoluteFill}>
             <CameraView
               style={StyleSheet.absoluteFill}
               enableTorch={torch}
+              facing={facing}
               barcodeScannerSettings={{
                 barcodeTypes: [
                   'qr',
@@ -101,28 +103,42 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
               onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
             />
 
-            {/* Scanning Overlay Mask */}
             <View style={styles.overlay}>
-              {/* Top Bar */}
+              {/* Top Controls Bar */}
               <View style={styles.topBar}>
                 <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
                   <Text style={styles.closeBtnText}>✕ Close</Text>
                 </TouchableOpacity>
 
-                <Text style={styles.scannerHeaderTitle}>Scan Item Barcode</Text>
-
                 <TouchableOpacity 
-                  style={[styles.torchBtn, torch && styles.torchBtnActive]} 
-                  onPress={() => setTorch(!torch)}
+                  style={[styles.modeToggleBtn, isStandby && styles.modeToggleActive]}
+                  onPress={() => setIsStandby(!isStandby)}
                 >
-                  <Text style={styles.torchBtnText}>{torch ? '🔦 On' : '🔦 Off'}</Text>
+                  <Text style={styles.modeToggleText}>
+                    {isStandby ? '📱 Stand-by Mode ON' : '🔍 Single Scan'}
+                  </Text>
                 </TouchableOpacity>
+
+                <View style={styles.topRightControls}>
+                  <TouchableOpacity 
+                    style={styles.controlIconBtn} 
+                    onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
+                  >
+                    <Text style={styles.controlIconText}>🔄 {facing.toUpperCase()}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={[styles.controlIconBtn, torch && styles.torchActive]} 
+                    onPress={() => setTorch(!torch)}
+                  >
+                    <Text style={styles.controlIconText}>{torch ? '🔦 ON' : '🔦 OFF'}</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
-              {/* Target Cutout Viewfinder */}
+              {/* Viewfinder Target Cutout */}
               <View style={styles.viewfinderContainer}>
                 <View style={[styles.viewfinder, scanned && styles.viewfinderSuccess]}>
-                  {/* Corner Markers */}
                   <View style={[styles.corner, styles.topLeft]} />
                   <View style={[styles.corner, styles.topRight]} />
                   <View style={[styles.corner, styles.bottomLeft]} />
@@ -130,7 +146,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
                   {scanned ? (
                     <View style={styles.successBadge}>
-                      <Text style={styles.successBadgeText}>✓ Added to Bill!</Text>
+                      <Text style={styles.successBadgeText}>✓ Scanned & Added!</Text>
                       <Text style={styles.scannedCodeText} numberOfLines={1}>{lastScannedText}</Text>
                     </View>
                   ) : (
@@ -138,13 +154,15 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   )}
                 </View>
                 <Text style={styles.instructionText}>
-                  Point camera at product QR code (`ITEM:...`) or retail barcode
+                  {isStandby
+                    ? "Phone Stand Active: Present product tag, string barcode, or shipping label"
+                    : "Point camera at barcode or QR code"}
                 </Text>
               </View>
 
-              {/* Bottom Quick Test / Demo Barcode Bar */}
+              {/* Bottom Quick Simulation Barcodes */}
               <View style={styles.bottomBar}>
-                <Text style={styles.demoBarTitle}>Quick Test Item Barcodes (Tap to Simulate):</Text>
+                <Text style={styles.demoBarTitle}>Quick Test Barcodes (Tap to Simulate):</Text>
                 <View style={styles.demoChipsRow}>
                   <TouchableOpacity 
                     style={styles.demoChip} 
@@ -155,16 +173,16 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
                   <TouchableOpacity 
                     style={styles.demoChip} 
-                    onPress={() => handleDemoSampleScan('ITEM:ITM-1002')}
+                    onPress={() => handleDemoSampleScan('JW-RING-99')}
                   >
-                    <Text style={styles.demoChipText}>🌻 Sunflower Oil</Text>
+                    <Text style={styles.demoChipText}>💍 Diamond Ring</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity 
                     style={styles.demoChip} 
-                    onPress={() => handleDemoSampleScan('ITEM:ITM-1003')}
+                    onPress={() => handleDemoSampleScan('SHIP:ORD-9842')}
                   >
-                    <Text style={styles.demoChipText}>🖱️ Optical Mouse</Text>
+                    <Text style={styles.demoChipText}>📦 Order ORD-9842</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -238,39 +256,52 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 54,
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingTop: 50,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    backgroundColor: 'rgba(0,0,0,0.7)',
   },
   closeBtn: {
     backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
   },
   closeBtnText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
   },
-  scannerHeaderTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  torchBtn: {
+  modeToggleBtn: {
     backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
   },
-  torchBtnActive: {
+  modeToggleActive: {
+    backgroundColor: colors.primary[500],
+  },
+  modeToggleText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  topRightControls: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  controlIconBtn: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  torchActive: {
     backgroundColor: colors.warning[500],
   },
-  torchBtnText: {
+  controlIconText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '700',
   },
   viewfinderContainer: {
@@ -327,9 +358,6 @@ const styles = StyleSheet.create({
     width: 200,
     height: 2,
     backgroundColor: 'rgba(99, 102, 241, 0.75)',
-    shadowColor: '#4F46E5',
-    shadowOpacity: 0.8,
-    shadowRadius: 6,
   },
   successBadge: {
     backgroundColor: colors.success[500],
@@ -355,15 +383,12 @@ const styles = StyleSheet.create({
     marginTop: 18,
     textAlign: 'center',
     paddingHorizontal: 32,
-    textShadowColor: 'rgba(0, 0, 0, 0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   bottomBar: {
-    padding: 20,
-    paddingBottom: 36,
-    backgroundColor: 'rgba(0,0,0,0.75)',
+    padding: 16,
+    paddingBottom: 32,
+    backgroundColor: 'rgba(0,0,0,0.8)',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
   },
@@ -371,7 +396,7 @@ const styles = StyleSheet.create({
     color: '#cbd5e1',
     fontSize: 12,
     fontWeight: '600',
-    marginBottom: 10,
+    marginBottom: 8,
     textAlign: 'center',
   },
   demoChipsRow: {
@@ -382,8 +407,8 @@ const styles = StyleSheet.create({
   },
   demoChip: {
     backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',
