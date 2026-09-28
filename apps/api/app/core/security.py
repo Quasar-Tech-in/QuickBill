@@ -17,6 +17,9 @@ class TokenPayload(BaseModel):
     default_business_id: Optional[str] = None
     authorized_business_ids: List[str] = []
     assigned_location_ids: List[str] = []
+    store_status: Optional[str] = "ACTIVE"
+    is_store_locked: Optional[bool] = False
+    lockout_reason: Optional[str] = None
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
@@ -81,9 +84,60 @@ async def get_current_business_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No business context specified in request."
         )
-    if target_business not in user.authorized_business_ids and "admin" not in user.roles:
+    normalized_roles = [r.lower() for r in (user.roles or [])]
+    is_admin = any(r in ("admin", "super_admin", "tenant_admin") for r in normalized_roles)
+    if not is_admin and target_business not in (user.authorized_business_ids or []):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access forbidden: You are not authorized for this business tenant."
         )
     return target_business
+
+async def enforce_active_store_operations(
+    business_id: str = Depends(get_current_business_id),
+    user: TokenPayload = Depends(get_current_user)
+) -> str:
+    normalized_roles = [r.upper() for r in (user.roles or [])]
+    if "SUPER_ADMIN" in normalized_roles or "SUPERADMIN" in normalized_roles:
+        return business_id
+
+    # Check database tenant status
+    try:
+        from app.core.database import db_manager
+        from bson import ObjectId
+        primary_db = db_manager.get_primary_database()
+        t_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else None
+        q = {"_id": t_oid} if t_oid else {"slug": business_id}
+        tenant = await primary_db.tenants.find_one(q)
+        if tenant:
+            if tenant.get("status") == "SUSPENDED" or tenant.get("subscription", {}).get("status") == "SUSPENDED":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Store operations are locked: This store account is currently suspended."
+                )
+            sub = tenant.get("subscription", {})
+            end_date_str = sub.get("endDate") or sub.get("end_date")
+            if end_date_str:
+                try:
+                    clean_str = end_date_str.replace("Z", "+00:00")
+                    end_dt = datetime.fromisoformat(clean_str)
+                    if end_dt.tzinfo is None:
+                        end_dt = end_dt.replace(tzinfo=timezone.utc)
+                    now_dt = datetime.now(timezone.utc)
+                    grace_days = sub.get("gracePeriodDays") or sub.get("grace_period_days") or 7
+                    delta_days = (end_dt.date() - now_dt.date()).days
+                    if delta_days < -grace_days:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Store operations are locked: Store subscription license has expired."
+                        )
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    return business_id

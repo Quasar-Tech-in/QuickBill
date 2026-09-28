@@ -27,7 +27,10 @@ import {
   AlertTriangle,
   Layers,
   Sparkles,
-  Boxes
+  Boxes,
+  CreditCard,
+  Clock,
+  Calendar
 } from 'lucide-react';
 import { store } from '../services/store';
 import { User, StoreLocation, UserRole, Tenant } from '../types';
@@ -46,7 +49,7 @@ interface ConfirmModalState {
 }
 
 export const SettingsView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'staff' | 'locations' | 'profile' | 'health'>('staff');
+  const [activeTab, setActiveTab] = useState<'staff' | 'locations' | 'profile' | 'subscription' | 'health'>('staff');
   const [users, setUsers] = useState<User[]>([]);
   const [locations, setLocations] = useState<StoreLocation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -117,6 +120,19 @@ export const SettingsView: React.FC = () => {
 
   const currentUser = store.getCurrentUser();
   const canManage = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'TENANT_ADMIN';
+
+  // Quota & Limits Calculation
+  const sub = activeTenant?.subscription;
+  const maxUsersAllowed = sub?.maxUsers ?? (activeTenant?.plan === 'STARTER' ? 2 : (activeTenant?.plan === 'ENTERPRISE' ? 25 : 5));
+  const activeUsersCount = users.filter(u => u.isActive !== false).length;
+  const isUsersCapped = activeUsersCount >= maxUsersAllowed && currentUser?.role !== 'SUPER_ADMIN';
+
+  const maxLocationsAllowed = sub?.maxLocations ?? (activeTenant?.plan === 'STARTER' ? 1 : (activeTenant?.plan === 'ENTERPRISE' ? 10 : 3));
+  const activeLocationsCount = locations.filter(l => l.isActive !== false).length;
+  const isLocationsCapped = activeLocationsCount >= maxLocationsAllowed && currentUser?.role !== 'SUPER_ADMIN';
+
+  const daysRemaining = sub?.daysRemaining ?? 365;
+  const isStoreLocked = store.isStoreLocked();
 
   const loadData = async () => {
     setLoading(true);
@@ -508,7 +524,7 @@ export const SettingsView: React.FC = () => {
         </div>
 
         {/* Tab Switcher */}
-        <div style={{ display: 'flex', background: 'var(--neutral-100)', padding: 4, borderRadius: 'var(--radius-md)', gap: 4 }}>
+        <div style={{ display: 'flex', background: 'var(--neutral-100)', padding: 4, borderRadius: 'var(--radius-md)', gap: 4, flexWrap: 'wrap' }}>
           <button
             type="button"
             className={`btn btn-sm ${activeTab === 'staff' ? 'btn-primary' : 'btn-ghost'}`}
@@ -516,7 +532,7 @@ export const SettingsView: React.FC = () => {
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <Users size={14} />
-            <span>Staff & Users</span>
+            <span>Staff & Users ({activeUsersCount}/{maxUsersAllowed})</span>
           </button>
           <button
             type="button"
@@ -525,7 +541,7 @@ export const SettingsView: React.FC = () => {
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <MapPin size={14} />
-            <span>Locations & Branches</span>
+            <span>Locations & Branches ({activeLocationsCount}/{maxLocationsAllowed})</span>
           </button>
           <button
             type="button"
@@ -535,6 +551,15 @@ export const SettingsView: React.FC = () => {
           >
             <Building size={14} />
             <span>Store Profile</span>
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTab === 'subscription' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('subscription')}
+            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <CreditCard size={14} />
+            <span>Subscription & License</span>
           </button>
           <button
             type="button"
@@ -551,6 +576,34 @@ export const SettingsView: React.FC = () => {
       {/* TAB 1: Staff & Team Management */}
       {activeTab === 'staff' && (
         <div className="card">
+          {/* Store Locked Warning if suspended/expired */}
+          {isStoreLocked && (
+            <div style={{ backgroundColor: '#fef2f2', borderBottom: '1px solid #fecaca', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Lock size={18} color="#dc2626" />
+              <span style={{ fontSize: '0.85rem', color: '#991b1b', fontWeight: 600 }}>
+                Staff and user management actions are locked because this store is currently suspended or subscription expired.
+              </span>
+            </div>
+          )}
+
+          {/* Quota Cap Warning if at limit */}
+          {!isStoreLocked && isUsersCapped && (
+            <div style={{ backgroundColor: '#fffbeb', borderBottom: '1px solid #fde68a', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <AlertTriangle size={18} color="#d97706" />
+                <span style={{ fontSize: '0.85rem', color: '#92400e', fontWeight: 600 }}>
+                  Staff user limit reached ({activeUsersCount} / {maxUsersAllowed} active users). Upgrade your subscription plan to add more staff.
+                </span>
+              </div>
+              <button 
+                className="btn btn-xs btn-primary"
+                onClick={() => setActiveTab('subscription')}
+              >
+                View Plan & Quotas
+              </button>
+            </div>
+          )}
+
           <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--primary-50)', color: 'var(--primary-600)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -558,8 +611,8 @@ export const SettingsView: React.FC = () => {
               </div>
               <div>
                 <h3 className="card-title">Staff Members & Role Privileges</h3>
-                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
-                  Authorize Store Admins, Managers, and Cashiers with location-scoped access.
+                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', margin: 0 }}>
+                  Plan Quota: <strong>{activeUsersCount} of {maxUsersAllowed} Seats Used</strong>
                 </p>
               </div>
             </div>
@@ -568,14 +621,17 @@ export const SettingsView: React.FC = () => {
               <button 
                 type="button" 
                 className="btn btn-primary btn-sm"
+                disabled={isUsersCapped || isStoreLocked}
                 onClick={() => {
+                  if (isStoreLocked) return;
                   setUserFormError('');
                   setIsUserModalOpen(true);
                 }}
-                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: (isUsersCapped || isStoreLocked) ? 0.6 : 1 }}
+                title={isStoreLocked ? "Staff management is locked while store is suspended" : isUsersCapped ? "Staff limit reached for current plan tier" : "Add new staff user"}
               >
                 <Plus size={15} />
-                <span>Add New Staff</span>
+                <span>{isStoreLocked ? 'Management Locked' : isUsersCapped ? 'User Limit Reached' : 'Add New Staff'}</span>
               </button>
             )}
           </div>
@@ -740,6 +796,24 @@ export const SettingsView: React.FC = () => {
       {/* TAB 2: Locations & Branches Management */}
       {activeTab === 'locations' && (
         <div className="card">
+          {/* Quota Cap Warning if at limit */}
+          {isLocationsCapped && (
+            <div style={{ backgroundColor: '#fffbeb', borderBottom: '1px solid #fde68a', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <AlertTriangle size={18} color="#d97706" />
+                <span style={{ fontSize: '0.85rem', color: '#92400e', fontWeight: 600 }}>
+                  Store branch location limit reached ({activeLocationsCount} / {maxLocationsAllowed} active branches). Upgrade your subscription to add more branch outlets.
+                </span>
+              </div>
+              <button 
+                className="btn btn-xs btn-primary"
+                onClick={() => setActiveTab('subscription')}
+              >
+                View Plan & Quotas
+              </button>
+            </div>
+          )}
+
           <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--primary-50)', color: 'var(--primary-600)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -747,8 +821,8 @@ export const SettingsView: React.FC = () => {
               </div>
               <div>
                 <h3 className="card-title">Store Locations & Counter Branches</h3>
-                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
-                  Manage physical store outlets, warehouses, and checkout counters within your business.
+                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', margin: 0 }}>
+                  Plan Quota: <strong>{activeLocationsCount} of {maxLocationsAllowed} Branches Used</strong>
                 </p>
               </div>
             </div>
@@ -757,14 +831,16 @@ export const SettingsView: React.FC = () => {
               <button 
                 type="button" 
                 className="btn btn-primary btn-sm"
+                disabled={isLocationsCapped}
                 onClick={() => {
                   setLocFormError('');
                   setIsLocModalOpen(true);
                 }}
-                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: isLocationsCapped ? 0.6 : 1 }}
+                title={isLocationsCapped ? "Branch limit reached for current plan tier" : "Add new branch location"}
               >
                 <Plus size={15} />
-                <span>Add Branch Location</span>
+                <span>{isLocationsCapped ? 'Branch Limit Reached' : 'Add Branch Location'}</span>
               </button>
             )}
           </div>
@@ -1116,6 +1192,174 @@ export const SettingsView: React.FC = () => {
               <div style={{ padding: 14, borderRadius: 'var(--radius-md)', background: 'var(--neutral-50)', border: '1px solid var(--neutral-200)' }}>
                 <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', textTransform: 'uppercase', fontWeight: 600 }}>Multi-Branch Routing</span>
                 <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--neutral-900)', marginTop: 2 }}>✓ {locations.length} Outlets Configured</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: Subscription & License Plan */}
+      {activeTab === 'subscription' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Main License Card */}
+          <div className="card">
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--primary-50)', color: 'var(--primary-600)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <CreditCard size={18} />
+                </div>
+                <div>
+                  <h3 className="card-title">Store License & Active Subscription Plan</h3>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', margin: 0 }}>
+                    Current active tier, license expiration dates, and quota limit allocations.
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span 
+                  style={{
+                    fontSize: '0.75rem',
+                    fontWeight: 800,
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    backgroundColor: activeTenant?.plan === 'ENTERPRISE' ? '#ede9fe' : (activeTenant?.plan === 'PROFESSIONAL' ? '#e0e7ff' : '#fef3c7'),
+                    color: activeTenant?.plan === 'ENTERPRISE' ? '#6d28d9' : (activeTenant?.plan === 'PROFESSIONAL' ? '#3730a3' : '#92400e')
+                  }}
+                >
+                  {activeTenant?.plan || 'PROFESSIONAL'} TIER
+                </span>
+                <span 
+                  className={`badge ${daysRemaining <= 7 ? (daysRemaining < 0 ? 'badge-danger' : 'badge-partial') : 'badge-paid'}`}
+                  style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                >
+                  {daysRemaining < 0 ? `License Expired (${Math.abs(daysRemaining)}d past)` : (daysRemaining <= 14 ? `Expiring Soon (${daysRemaining}d left)` : `Active (${daysRemaining}d remaining)`)}
+                </span>
+              </div>
+            </div>
+
+            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {/* Expiration Timeline Banner */}
+              <div 
+                style={{
+                  padding: '18px 22px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: daysRemaining <= 7 ? (daysRemaining < 0 ? '#fef2f2' : '#fffbeb') : 'var(--neutral-50)',
+                  border: `1px solid ${daysRemaining <= 7 ? (daysRemaining < 0 ? '#fca5a5' : '#fde68a') : 'var(--neutral-200)'}`,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 16
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, color: 'var(--neutral-500)' }}>License Expiration</span>
+                  <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: daysRemaining <= 7 ? '#b91c1c' : 'var(--neutral-900)', margin: '4px 0 0 0' }}>
+                    {sub?.endDate ? new Date(sub.endDate).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Continuous'}
+                  </h4>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', margin: '4px 0 0 0' }}>
+                    Billing Cycle: <strong>{sub?.billingCycle || 'Annual'}</strong> • Start Date: <strong>{sub?.startDate ? new Date(sub.startDate).toLocaleDateString() : 'N/A'}</strong>
+                  </p>
+                </div>
+
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--neutral-500)' }}>Need more staff seats or branches?</span>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--primary-600)', marginTop: 2 }}>
+                    Contact your Super Administrator to upgrade plan.
+                  </div>
+                </div>
+              </div>
+
+              {/* Quotas & Limits Progress Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                {/* User Seats Quota */}
+                <div style={{ padding: 18, borderRadius: 'var(--radius-md)', backgroundColor: '#ffffff', border: '1px solid var(--neutral-200)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Users size={16} color="var(--primary-600)" />
+                      <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--neutral-900)' }}>Staff Users Quota</span>
+                    </div>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: isUsersCapped ? '#dc2626' : 'var(--neutral-800)' }}>
+                      {activeUsersCount} / {maxUsersAllowed} Seats Used
+                    </span>
+                  </div>
+
+                  <div style={{ width: '100%', height: 8, backgroundColor: 'var(--neutral-200)', borderRadius: 4, overflow: 'hidden', margin: '10px 0' }}>
+                    <div 
+                      style={{ 
+                        width: `${Math.min(100, (activeUsersCount / maxUsersAllowed) * 100)}%`, 
+                        height: '100%', 
+                        backgroundColor: isUsersCapped ? '#ef4444' : 'var(--primary-600)',
+                        borderRadius: 4 
+                      }} 
+                    />
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--neutral-500)' }}>
+                    {isUsersCapped ? '⚠️ Quota limit reached. To add additional staff, request a license upgrade.' : `${maxUsersAllowed - activeUsersCount} additional staff seat(s) available.`}
+                  </span>
+                </div>
+
+                {/* Locations / Branches Quota */}
+                <div style={{ padding: 18, borderRadius: 'var(--radius-md)', backgroundColor: '#ffffff', border: '1px solid var(--neutral-200)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <MapPin size={16} color="#10b981" />
+                      <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--neutral-900)' }}>Store Branches Quota</span>
+                    </div>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: isLocationsCapped ? '#dc2626' : 'var(--neutral-800)' }}>
+                      {activeLocationsCount} / {maxLocationsAllowed} Outlets Used
+                    </span>
+                  </div>
+
+                  <div style={{ width: '100%', height: 8, backgroundColor: 'var(--neutral-200)', borderRadius: 4, overflow: 'hidden', margin: '10px 0' }}>
+                    <div 
+                      style={{ 
+                        width: `${Math.min(100, (activeLocationsCount / maxLocationsAllowed) * 100)}%`, 
+                        height: '100%', 
+                        backgroundColor: isLocationsCapped ? '#ef4444' : '#10b981',
+                        borderRadius: 4 
+                      }} 
+                    />
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--neutral-500)' }}>
+                    {isLocationsCapped ? '⚠️ Branch limit reached. To configure more outlets, request a license upgrade.' : `${maxLocationsAllowed - activeLocationsCount} additional outlet branch(es) available.`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Enabled Modules Matrix */}
+              <div>
+                <span style={{ fontSize: '0.8rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--neutral-600)', letterSpacing: '0.04em' }}>
+                  Included Capabilities in Current Plan
+                </span>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginTop: 10 }}>
+                  <div style={{ padding: 12, borderRadius: 8, backgroundColor: 'var(--neutral-50)', border: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem' }}>
+                    <CheckCircle2 size={16} color="#10b981" />
+                    <span>POS Counter & Fast Checkout</span>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 8, backgroundColor: 'var(--neutral-50)', border: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem' }}>
+                    <CheckCircle2 size={16} color="#10b981" />
+                    <span>Item Catalog & Price Tiers</span>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 8, backgroundColor: 'var(--neutral-50)', border: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem' }}>
+                    <CheckCircle2 size={16} color="#10b981" />
+                    <span>Double-Entry Expense Ledger</span>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 8, backgroundColor: 'var(--neutral-50)', border: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem' }}>
+                    <CheckCircle2 size={16} color="#10b981" />
+                    <span>Party & CRM Directory</span>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 8, backgroundColor: 'var(--neutral-50)', border: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem' }}>
+                    <CheckCircle2 size={16} color="#10b981" />
+                    <span>P&L Financial Reports</span>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 8, backgroundColor: 'var(--neutral-50)', border: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem' }}>
+                    <CheckCircle2 size={16} color="#10b981" />
+                    <span>Multi-Branch Stock Synchronization</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

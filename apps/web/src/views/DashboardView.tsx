@@ -66,6 +66,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
   const [items, setItems] = useState<Item[]>(selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true));
   const [parties, setParties] = useState<Party[]>(selectedLocationId === 'ALL' ? store.getParties() : store.getParties(selectedLocationId));
 
+  const activeTenant = store.getActiveTenant();
+  const isStoreLocked = store.isStoreLocked();
+  const isSuspended = store.isStoreSuspended();
   const locations = store.getAllLocations();
 
   useEffect(() => {
@@ -249,6 +252,76 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
 
   return (
     <div className="page-container" style={{ paddingBottom: 40 }}>
+      {/* Store Suspension / License Expiry Warning Hero for Owner */}
+      {isStoreLocked && (
+        <div 
+          style={{
+            background: isSuspended 
+              ? 'linear-gradient(135deg, #450a0a 0%, #7f1d1d 100%)' 
+              : 'linear-gradient(135deg, #451a03 0%, #78350f 100%)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '20px 24px',
+            color: '#ffffff',
+            marginBottom: 24,
+            boxShadow: '0 8px 24px -4px rgba(0, 0, 0, 0.25)',
+            border: isSuspended ? '1px solid #ef4444' : '1px solid #f59e0b',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            flexWrap: 'wrap'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, maxWidth: '850px' }}>
+            <div 
+              style={{ 
+                width: 48, 
+                height: 48, 
+                borderRadius: 12, 
+                backgroundColor: 'rgba(255, 255, 255, 0.15)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                flexShrink: 0 
+              }}
+            >
+              {isSuspended ? <AlertTriangle size={26} color="#fca5a5" /> : <Clock size={26} color="#fde68a" />}
+            </div>
+            <div>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: '0 0 4px 0', color: '#ffffff' }}>
+                {isSuspended ? '⚠️ Store Operations Suspended' : '⚠️ Subscription License Expired'}
+              </h3>
+              <p style={{ fontSize: '0.85rem', color: isSuspended ? '#fecaca' : '#fef3c7', margin: 0, lineHeight: 1.5 }}>
+                {isSuspended ? (
+                  <>
+                    Your store account has been <strong>suspended by platform administration</strong>. Active store operations including <strong>POS Billing, Inventory adjustments, Purchase Orders, and User Management</strong> are temporarily locked. <strong>Historical Analytics & Reports remain accessible in read-only mode</strong>. Please contact QuickBill support to restore operational status.
+                  </>
+                ) : (
+                  <>
+                    Your store subscription ended on <strong>{activeTenant.subscription?.endDate ? new Date(activeTenant.subscription.endDate).toLocaleDateString() : 'N/A'}</strong>. Operational checkout and stock changes are locked. Please contact your Super Administrator or renew your subscription to resume operations.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div 
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.12)',
+                padding: '8px 14px',
+                borderRadius: 8,
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                border: '1px solid rgba(255, 255, 255, 0.2)'
+              }}
+            >
+              📊 Read-Only Analytics Mode
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Operations Header Bar */}
       <div 
         style={{

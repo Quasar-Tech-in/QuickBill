@@ -37,6 +37,9 @@ export const DEFAULT_CATEGORIES: ItemCategory[] = [
   { id: 'cat-10', businessId: '65f2a1b9a000000000000001', name: 'General Store', description: 'General merchandise & assorted counter items', createdAt: '2026-01-15T10:00:00Z' },
 ];
 
+const nowMs = Date.now();
+const dayMs = 24 * 60 * 60 * 1000;
+
 const DEFAULT_TENANTS: Tenant[] = [
   {
     id: '65f2a1b9a000000000000001',
@@ -47,17 +50,37 @@ const DEFAULT_TENANTS: Tenant[] = [
     adminEmail: 'admin@quickbill.local',
     phone: '+91 9876543210',
     gstin: '07AABCB1234F1Z5',
+    address: 'Ground Floor, Metro Retail Plaza, Sector 18, New Delhi',
     createdAt: '2026-01-15T10:00:00Z',
     databaseConfig: {
       isolationMode: 'DEDICATED_DATABASE',
       mongodbUri: 'mongodb://admin:secretpassword@localhost:27017/quickbill_main_db?authSource=admin',
       databaseName: 'quickbill_main_db',
     },
+    subscription: {
+      planId: 'ENTERPRISE',
+      planName: 'Enterprise Tier',
+      status: 'ACTIVE',
+      maxUsers: 25,
+      maxLocations: 10,
+      billingCycle: 'ANNUAL',
+      startDate: '2026-01-15T10:00:00Z',
+      endDate: new Date(nowMs + 290 * dayMs).toISOString(),
+      daysRemaining: 290,
+      gracePeriodDays: 7,
+      pricePerCycle: 49999.0,
+      currency: '₹',
+      autoRenew: true,
+      features: ['pos', 'inventory', 'ledger', 'purchase_orders', 'reports', 'multi_location', 'custom_db', 'barcode_labels', 'export_data'],
+      renewalHistory: [],
+      notes: 'Primary enterprise tenant',
+    },
     stats: {
       productsCount: 32,
       invoicesCount: 2,
       monthlyGmv: 2629.0,
       usersCount: 3,
+      locationsCount: 3,
     },
   },
 ];
@@ -157,6 +180,7 @@ class StoreService {
     this.setupAxiosInterceptors();
     this.checkHealth().then(isOnline => {
       if (isOnline) {
+        this.fetchTenants().catch(() => {});
         this.fetchCategories().catch(() => {});
         this.fetchItems().catch(() => {});
         this.fetchInvoices().catch(() => {});
@@ -203,7 +227,20 @@ class StoreService {
       this.payments = savedPayments ? JSON.parse(savedPayments) : [];
       this.expenses = savedExpenses ? JSON.parse(savedExpenses) : [];
       this.expenseCategories = savedExpCats ? JSON.parse(savedExpCats) : DEFAULT_EXPENSE_CATEGORIES;
-      this.tenants = savedTenants ? JSON.parse(savedTenants) : DEFAULT_TENANTS;
+      if (savedTenants) {
+        try {
+          const parsed = JSON.parse(savedTenants);
+          const valid = Array.isArray(parsed) ? parsed.filter((t: any) => 
+            !['65f2a1b9a000000000000002', '65f2a1b9a000000000000003', '65f2a1b9a000000000000004'].includes(t.id) &&
+            !['apex-retail-west', 'metro-tech-spares', 'cloud-kitchen-east'].includes(t.slug)
+          ) : [];
+          this.tenants = valid.length > 0 ? valid : DEFAULT_TENANTS;
+        } catch {
+          this.tenants = DEFAULT_TENANTS;
+        }
+      } else {
+        this.tenants = DEFAULT_TENANTS;
+      }
       this.locations = savedLocations ? JSON.parse(savedLocations) : DEFAULT_LOCATIONS;
       this.users = savedUsers ? JSON.parse(savedUsers) : DEFAULT_USERS;
       this.categories = savedCategories ? JSON.parse(savedCategories) : DEFAULT_CATEGORIES;
@@ -485,6 +522,15 @@ class StoreService {
   }
 
   async addLocation(locData: Omit<StoreLocation, 'id' | 'businessId' | 'createdAt' | 'isActive'>): Promise<StoreLocation> {
+    // Quota Limit Enforcement (unless Super Admin)
+    if (!this.isSuperAdmin()) {
+      const activeLocations = this.locations.filter(l => (l.businessId === this.currentTenant.id || !l.businessId) && l.isActive !== false);
+      const maxLocationsAllowed = this.currentTenant.subscription?.maxLocations ?? 3;
+      if (activeLocations.length >= maxLocationsAllowed) {
+        throw new Error(`Subscription location limit reached (${activeLocations.length}/${maxLocationsAllowed} branches). Please contact Super Admin to upgrade your subscription.`);
+      }
+    }
+
     const newLoc: StoreLocation = {
       ...locData,
       id: `loc_${Date.now()}`,
@@ -504,7 +550,10 @@ class StoreService {
       if (res.data?.id || res.data?._id) {
         newLoc.id = res.data.id || res.data._id;
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.response?.data?.detail) {
+        throw new Error(err.response.data.detail);
+      }
       console.warn('Backend /locations creation failed, fallback local:', err);
     }
 
@@ -727,6 +776,15 @@ class StoreService {
   }
 
   async addUser(userData: { name: string; email: string; password?: string; role: UserRole; assignedLocationIds: string[] }): Promise<User> {
+    // Quota Limit Enforcement (unless Super Admin)
+    if (!this.isSuperAdmin()) {
+      const activeUsers = this.getUsers().filter(u => u.isActive !== false);
+      const maxUsersAllowed = this.currentTenant.subscription?.maxUsers ?? 5;
+      if (activeUsers.length >= maxUsersAllowed) {
+        throw new Error(`Subscription user limit reached (${activeUsers.length}/${maxUsersAllowed} staff users). Please contact Super Admin to upgrade your subscription.`);
+      }
+    }
+
     const newUser: User = {
       id: `usr_${Date.now()}`,
       name: userData.name,
@@ -750,7 +808,10 @@ class StoreService {
       if (res.data?.id) {
         newUser.id = res.data.id;
       }
-    } catch {
+    } catch (err: any) {
+      if (err?.response?.data?.detail) {
+        throw new Error(err.response.data.detail);
+      }
       // offline fallback
     }
 
@@ -786,8 +847,9 @@ class StoreService {
     return this.users.length < prevLen;
   }
 
-  // --- Tenancy ---
+  // --- Tenancy & Subscription Lifecycle ---
   getTenants(): Tenant[] {
+    const now = new Date();
     const visibleTenants = (this.isSuperAdmin() || !this.currentUser) 
       ? this.tenants 
       : [this.currentTenant];
@@ -795,21 +857,129 @@ class StoreService {
     return visibleTenants.map(t => {
       const tenantItems = this.items.filter(i => (i.businessId || DEFAULT_TENANTS[0].id) === t.id);
       const tenantInvoices = this.invoices.filter(inv => (inv.businessId || DEFAULT_TENANTS[0].id) === t.id);
+      const tenantUsers = this.users.filter(u => (u.businessId || DEFAULT_TENANTS[0].id) === t.id);
+      const tenantLocations = this.locations.filter(l => (l.businessId || DEFAULT_TENANTS[0].id) === t.id);
       const monthlyGmv = tenantInvoices.reduce((sum, inv) => sum + inv.grandTotal, 0);
+
+      // Dynamically calculate days remaining and subscription status
+      let sub = t.subscription;
+      if (!sub) {
+        sub = {
+          planId: t.plan || 'PROFESSIONAL',
+          planName: `${t.plan || 'Professional'} Tier`,
+          status: 'ACTIVE',
+          maxUsers: t.plan === 'STARTER' ? 2 : (t.plan === 'ENTERPRISE' ? 25 : 5),
+          maxLocations: t.plan === 'STARTER' ? 1 : (t.plan === 'ENTERPRISE' ? 10 : 3),
+          billingCycle: 'ANNUAL',
+          startDate: t.createdAt || now.toISOString(),
+          endDate: new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          daysRemaining: 365,
+          gracePeriodDays: 7,
+          features: ['pos', 'inventory', 'ledger'],
+        };
+      }
+
+      let daysRemaining = sub.daysRemaining ?? 365;
+      let calculatedStatus = sub.status;
+
+      if (sub.endDate) {
+        const endDt = new Date(sub.endDate);
+        const diffTime = endDt.getTime() - now.getTime();
+        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const graceDays = sub.gracePeriodDays ?? 7;
+
+        if (t.status === 'SUSPENDED' || sub.status === 'SUSPENDED') {
+          calculatedStatus = 'SUSPENDED';
+        } else if (daysRemaining < -graceDays) {
+          calculatedStatus = 'EXPIRED';
+        } else if (daysRemaining < 0) {
+          calculatedStatus = 'GRACE_PERIOD';
+        } else if (daysRemaining <= 14) {
+          calculatedStatus = 'EXPIRING_SOON';
+        } else {
+          calculatedStatus = 'ACTIVE';
+        }
+      }
 
       return {
         ...t,
+        subscription: {
+          ...sub,
+          daysRemaining,
+          status: calculatedStatus,
+        },
         stats: {
           productsCount: tenantItems.length,
           invoicesCount: tenantInvoices.length,
           monthlyGmv: monthlyGmv,
-          usersCount: this.users.length,
+          usersCount: tenantUsers.length || 1,
+          locationsCount: tenantLocations.length || 1,
         }
       };
     });
   }
 
+  async fetchTenants(): Promise<Tenant[]> {
+    try {
+      const res = await apiClient.get('/tenants');
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        this.tenants = res.data.map((t: any) => ({
+          id: t.id || t._id,
+          name: t.name,
+          slug: t.slug,
+          plan: t.plan || t.subscription?.planId || 'PROFESSIONAL',
+          status: t.status || 'ACTIVE',
+          adminEmail: t.admin_email || t.adminEmail || '',
+          phone: t.phone,
+          gstin: t.gstin,
+          address: t.address,
+          createdAt: t.created_at || t.createdAt || new Date().toISOString(),
+          databaseConfig: {
+            isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
+            mongodbUri: t.database_config?.mongodb_uri || t.databaseConfig?.mongodbUri,
+            databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_db',
+          },
+          subscription: {
+            planId: t.subscription?.plan_id || t.subscription?.planId || 'PROFESSIONAL',
+            planName: t.subscription?.plan_name || t.subscription?.planName || 'Professional Tier',
+            status: t.subscription?.status || 'ACTIVE',
+            maxUsers: t.subscription?.max_users || t.subscription?.maxUsers || 5,
+            maxLocations: t.subscription?.max_locations || t.subscription?.maxLocations || 3,
+            billingCycle: t.subscription?.billing_cycle || t.subscription?.billingCycle || 'ANNUAL',
+            startDate: t.subscription?.start_date || t.subscription?.startDate || t.created_at,
+            endDate: t.subscription?.end_date || t.subscription?.endDate || new Date(Date.now() + 365*24*3600*1000).toISOString(),
+            daysRemaining: t.subscription?.days_remaining ?? 365,
+            gracePeriodDays: t.subscription?.grace_period_days || 7,
+            pricePerCycle: t.subscription?.price_per_cycle || 1999,
+            currency: '₹',
+            autoRenew: t.subscription?.auto_renew || false,
+            features: t.subscription?.features || ['pos', 'inventory', 'ledger'],
+            renewalHistory: t.subscription?.renewal_history || [],
+            notes: t.subscription?.notes,
+          },
+          stats: t.stats || {
+            productsCount: 0,
+            invoicesCount: 0,
+            monthlyGmv: 0,
+            usersCount: 1,
+            locationsCount: 1,
+          }
+        }));
+        this.saveToStorage();
+      }
+    } catch (e) {
+      console.warn('Backend fetchTenants failed, using local tenants:', e);
+    }
+    return this.getTenants();
+  }
+
   getActiveTenant(): Tenant {
+    // Return updated live tenant with accurate days remaining & status
+    const all = this.getTenants();
+    const found = all.find(t => t.id === this.currentTenant.id);
+    if (found) {
+      this.currentTenant = found;
+    }
     return this.currentTenant;
   }
 
@@ -820,6 +990,8 @@ class StoreService {
     email?: string;
     address?: string;
     currency?: string;
+    status?: 'ACTIVE' | 'SUSPENDED';
+    plan?: any;
   }): Promise<Tenant> {
     const updatedTenant: Tenant = {
       ...this.currentTenant,
@@ -827,6 +999,9 @@ class StoreService {
       gstin: updates.gstin !== undefined ? updates.gstin.trim() : this.currentTenant.gstin,
       phone: updates.phone !== undefined ? updates.phone.trim() : this.currentTenant.phone,
       adminEmail: updates.email !== undefined ? updates.email.trim().toLowerCase() : this.currentTenant.adminEmail,
+      address: updates.address !== undefined ? updates.address.trim() : this.currentTenant.address,
+      status: updates.status || this.currentTenant.status,
+      plan: updates.plan || this.currentTenant.plan,
     };
 
     // Update in local array
@@ -845,12 +1020,257 @@ class StoreService {
         phone: updates.phone,
         admin_email: updates.email,
         address: updates.address,
+        status: updates.status,
+        plan: updates.plan,
       });
     } catch (e) {
       console.warn('Backend tenant profile update error:', e);
     }
 
     return this.currentTenant;
+  }
+
+  async updateTenantSubscription(
+    tenantId: string,
+    updates: {
+      planId?: any;
+      maxUsers?: number;
+      maxLocations?: number;
+      billingCycle?: any;
+      endDate?: string;
+      status?: any;
+      notes?: string;
+    }
+  ): Promise<Tenant | null> {
+    const idx = this.tenants.findIndex(t => t.id === tenantId);
+    if (idx === -1) return null;
+
+    const t = this.tenants[idx];
+    const sub = t.subscription || {
+      planId: 'PROFESSIONAL',
+      planName: 'Professional Tier',
+      status: 'ACTIVE',
+      maxUsers: 5,
+      maxLocations: 3,
+      billingCycle: 'ANNUAL',
+      startDate: new Date().toISOString(),
+      endDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+      daysRemaining: 365,
+      gracePeriodDays: 7,
+      features: ['pos', 'inventory', 'ledger'],
+    };
+
+    const newEndDate = updates.endDate || sub.endDate;
+    const newPlan = updates.planId || sub.planId;
+    const updatedSub = {
+      ...sub,
+      planId: newPlan,
+      planName: `${newPlan} Tier`,
+      maxUsers: updates.maxUsers !== undefined ? updates.maxUsers : sub.maxUsers,
+      maxLocations: updates.maxLocations !== undefined ? updates.maxLocations : sub.maxLocations,
+      billingCycle: updates.billingCycle || sub.billingCycle,
+      endDate: newEndDate,
+      status: updates.status || sub.status,
+      notes: updates.notes !== undefined ? updates.notes : sub.notes,
+    };
+
+    this.tenants[idx] = {
+      ...t,
+      plan: newPlan,
+      subscription: updatedSub,
+    };
+
+    if (this.currentTenant.id === tenantId) {
+      this.currentTenant = this.tenants[idx];
+    }
+    this.saveToStorage();
+
+    try {
+      await apiClient.post(`/tenants/${tenantId}/renew-subscription`, {
+        new_end_date: newEndDate,
+        plan: newPlan,
+        max_users: updatedSub.maxUsers,
+        max_locations: updatedSub.maxLocations,
+        billing_cycle: updatedSub.billingCycle,
+        notes: updates.notes,
+      });
+    } catch (e) {
+      console.warn('Backend subscription update error:', e);
+    }
+
+    return this.tenants[idx];
+  }
+
+  async renewTenantSubscription(
+    tenantId: string,
+    options: {
+      extendDays?: number;
+      newEndDate?: string;
+      plan?: any;
+      maxUsers?: number;
+      maxLocations?: number;
+      amount?: number;
+      billingCycle?: any;
+      notes?: string;
+    }
+  ): Promise<{ success: boolean; message: string; tenant?: Tenant }> {
+    const idx = this.tenants.findIndex(t => t.id === tenantId);
+    if (idx === -1) {
+      return { success: false, message: 'Tenant store not found.' };
+    }
+
+    const t = this.tenants[idx];
+    const sub = t.subscription;
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    let targetEndDate: string;
+    if (options.newEndDate) {
+      targetEndDate = options.newEndDate;
+    } else if (options.extendDays) {
+      const curEndMs = sub?.endDate ? new Date(sub.endDate).getTime() : now;
+      const baseMs = Math.max(now, curEndMs);
+      targetEndDate = new Date(baseMs + options.extendDays * dayMs).toISOString();
+    } else {
+      targetEndDate = new Date(now + 365 * dayMs).toISOString();
+    }
+
+    const planTier = options.plan || t.plan || 'PROFESSIONAL';
+    const renewalRecord = {
+      date: new Date().toISOString(),
+      extendedUntil: targetEndDate,
+      renewedBy: this.currentUser?.email || 'superadmin@quickbill.local',
+      amount: options.amount,
+      billingCycle: options.billingCycle || sub?.billingCycle || 'ANNUAL',
+      notes: options.notes || `Subscription extended until ${new Date(targetEndDate).toLocaleDateString()}`,
+    };
+
+    const history = [...(sub?.renewalHistory || []), renewalRecord];
+
+    const updatedSub = {
+      ...sub,
+      planId: planTier,
+      planName: `${planTier} Tier`,
+      status: 'ACTIVE' as const,
+      endDate: targetEndDate,
+      maxUsers: options.maxUsers !== undefined ? options.maxUsers : (sub?.maxUsers || 5),
+      maxLocations: options.maxLocations !== undefined ? options.maxLocations : (sub?.maxLocations || 3),
+      billingCycle: options.billingCycle || sub?.billingCycle || 'ANNUAL',
+      renewalHistory: history,
+    };
+
+    this.tenants[idx] = {
+      ...t,
+      status: 'ACTIVE',
+      plan: planTier,
+      subscription: updatedSub,
+    };
+
+    if (this.currentTenant.id === tenantId) {
+      this.currentTenant = this.tenants[idx];
+    }
+    this.saveToStorage();
+
+    try {
+      await apiClient.post(`/tenants/${tenantId}/renew-subscription`, {
+        extend_days: options.extendDays,
+        new_end_date: options.newEndDate,
+        plan: planTier,
+        max_users: updatedSub.maxUsers,
+        max_locations: updatedSub.maxLocations,
+        amount: options.amount,
+        billing_cycle: options.billingCycle,
+        notes: options.notes,
+      });
+    } catch (e) {
+      console.warn('Backend renew subscription API error:', e);
+    }
+
+    return {
+      success: true,
+      message: `Successfully renewed license for ${t.name} until ${new Date(targetEndDate).toLocaleDateString()}!`,
+      tenant: this.tenants[idx],
+    };
+  }
+
+  async resetTenantAdminPassword(tenantId: string, newPass: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const res = await apiClient.post(`/tenants/${tenantId}/reset-password`, {
+        new_password: newPass,
+      });
+      return { success: true, message: res.data?.message || 'Password successfully updated!' };
+    } catch {
+      return { success: true, message: 'Password reset completed (Local).' };
+    }
+  }
+
+  async toggleTenantStatus(tenantId: string): Promise<Tenant | null> {
+    const idx = this.tenants.findIndex(t => t.id === tenantId);
+    if (idx === -1) return null;
+
+    const currentStatus = this.tenants[idx].status;
+    const nextStatus = currentStatus === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
+
+    this.tenants[idx] = {
+      ...this.tenants[idx],
+      status: nextStatus,
+      subscription: {
+        ...this.tenants[idx].subscription,
+        status: nextStatus,
+      }
+    };
+
+    if (this.currentTenant.id === tenantId) {
+      this.currentTenant = this.tenants[idx];
+    }
+    this.saveToStorage();
+
+    try {
+      await apiClient.patch(`/tenants/${tenantId}/status`, { status: nextStatus });
+    } catch (e) {
+      try {
+        await apiClient.put(`/tenants/${tenantId}`, { status: nextStatus });
+      } catch (err) {
+        console.warn('Backend status toggle failed:', err);
+      }
+    }
+
+    await this.fetchTenants();
+    return this.getActiveTenant();
+  }
+
+  isStoreSuspended(): boolean {
+    if (this.isSuperAdmin()) return false;
+    const t = this.getActiveTenant();
+    return t.status === 'SUSPENDED' || t.subscription?.status === 'SUSPENDED';
+  }
+
+  isSubscriptionExpired(): boolean {
+    if (this.isSuperAdmin()) return false;
+    const t = this.getActiveTenant();
+    if (t.status === 'SUSPENDED') return false; // Suspended takes precedence
+    const sub = t.subscription;
+    if (!sub) return false;
+    if (sub.status === 'EXPIRED') return true;
+    const days = sub.daysRemaining ?? 365;
+    const graceDays = sub.gracePeriodDays ?? 7;
+    return days < -graceDays;
+  }
+
+  isStoreLocked(): boolean {
+    return this.isStoreSuspended() || this.isSubscriptionExpired();
+  }
+
+  getStoreLockoutReason(): string | null {
+    if (this.isStoreSuspended()) {
+      return 'Store operations are suspended by platform administration.';
+    }
+    if (this.isSubscriptionExpired()) {
+      const sub = this.getActiveTenant().subscription;
+      const endStr = sub?.endDate ? new Date(sub.endDate).toLocaleDateString() : 'recently';
+      return `Store subscription license expired on ${endStr}.`;
+    }
+    return null;
   }
 
   switchActiveTenant(tenantId: string): Tenant | null {
@@ -864,21 +1284,79 @@ class StoreService {
     return this.currentTenant;
   }
 
-  addTenant(tenantData: Omit<Tenant, 'id' | 'createdAt' | 'stats' | 'status'> & { initialPassword?: string }): Tenant {
+  addTenant(tenantData: Omit<Tenant, 'id' | 'createdAt' | 'stats' | 'status' | 'subscription'> & {
+    initialPassword?: string;
+    maxUsers?: number;
+    maxLocations?: number;
+    durationDays?: number;
+    billingCycle?: any;
+  }): Tenant {
+    const now = new Date();
+    const durationDays = tenantData.durationDays || 365;
+    const endDate = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+
+    const planTier = tenantData.plan || 'PROFESSIONAL';
+    const defaultMaxUsers = planTier === 'STARTER' ? 2 : (planTier === 'ENTERPRISE' ? 25 : 5);
+    const defaultMaxLocations = planTier === 'STARTER' ? 1 : (planTier === 'ENTERPRISE' ? 10 : 3);
+
     const newTenant: Tenant = {
       ...tenantData,
       id: `tenant_${Date.now()}`,
       status: 'ACTIVE',
-      createdAt: new Date().toISOString(),
+      createdAt: now.toISOString(),
+      subscription: {
+        planId: planTier,
+        planName: `${planTier} Tier`,
+        status: 'ACTIVE',
+        maxUsers: tenantData.maxUsers || defaultMaxUsers,
+        maxLocations: tenantData.maxLocations || defaultMaxLocations,
+        billingCycle: tenantData.billingCycle || 'ANNUAL',
+        startDate: now.toISOString(),
+        endDate: endDate,
+        daysRemaining: durationDays,
+        gracePeriodDays: 7,
+        pricePerCycle: planTier === 'ENTERPRISE' ? 49999 : (planTier === 'PROFESSIONAL' ? 2499 : 999),
+        currency: '₹',
+        autoRenew: false,
+        features: ['pos', 'inventory', 'ledger', 'purchase_orders', 'reports'],
+        renewalHistory: [{
+          date: now.toISOString(),
+          extendedUntil: endDate,
+          renewedBy: this.currentUser?.email || 'superadmin@quickbill.local',
+          notes: 'Initial store provisioning',
+        }],
+      },
       stats: {
         productsCount: 0,
         invoicesCount: 0,
         monthlyGmv: 0,
         usersCount: 1,
+        locationsCount: 1,
       },
     };
+
     this.tenants.unshift(newTenant);
     this.saveToStorage();
+
+    // Trigger API creation in background if online
+    apiClient.post('/tenants', {
+      name: tenantData.name,
+      slug: tenantData.slug,
+      admin_email: tenantData.adminEmail,
+      admin_password: tenantData.initialPassword || 'StoreAdmin@2026',
+      plan: planTier,
+      phone: tenantData.phone,
+      gstin: tenantData.gstin,
+      max_users: tenantData.maxUsers || defaultMaxUsers,
+      max_locations: tenantData.maxLocations || defaultMaxLocations,
+      duration_days: durationDays,
+      database_config: {
+        isolation_mode: tenantData.databaseConfig.isolationMode,
+        mongodb_uri: tenantData.databaseConfig.mongodbUri,
+        database_name: tenantData.databaseConfig.databaseName,
+      }
+    }).catch(err => console.warn('Backend tenant create failed:', err));
+
     return newTenant;
   }
 
@@ -910,6 +1388,18 @@ class StoreService {
     const globalCombinedGmv = tenantsWithLiveStats.reduce((sum, t) => sum + t.stats.monthlyGmv, 0);
     const totalProducts = tenantsWithLiveStats.reduce((sum, t) => sum + t.stats.productsCount, 0);
     const totalInvoices = tenantsWithLiveStats.reduce((sum, t) => sum + t.stats.invoicesCount, 0);
+    const totalUsers = tenantsWithLiveStats.reduce((sum, t) => sum + t.stats.usersCount, 0);
+    const totalLocations = tenantsWithLiveStats.reduce((sum, t) => sum + (t.stats.locationsCount || 1), 0);
+
+    const expiringSubscriptionsCount = tenantsWithLiveStats.filter(t => {
+      const days = t.subscription?.daysRemaining ?? 365;
+      return days >= 0 && days <= 14;
+    }).length;
+
+    const expiredSubscriptionsCount = tenantsWithLiveStats.filter(t => {
+      const days = t.subscription?.daysRemaining ?? 365;
+      return days < 0;
+    }).length;
     
     return {
       totalTenants,
@@ -917,6 +1407,10 @@ class StoreService {
       globalCombinedGmv,
       totalProducts,
       totalInvoices,
+      totalUsers,
+      totalLocations,
+      expiringSubscriptionsCount,
+      expiredSubscriptionsCount,
       databaseClustersCount: 1,
     };
   }

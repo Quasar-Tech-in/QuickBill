@@ -4,7 +4,7 @@ import {
   LayoutDashboard, 
   ReceiptText, 
   Package, 
-  ShoppingBag,
+  ShoppingBag, 
   Users, 
   BookOpen, 
   FileText, 
@@ -12,7 +12,8 @@ import {
   Settings, 
   Sparkles, 
   ShieldCheck, 
-  LogOut 
+  LogOut,
+  Lock
 } from 'lucide-react';
 import { store } from '../services/store';
 
@@ -20,6 +21,17 @@ interface SidebarProps {
   activeTab?: string;
   onTabChange?: (tab: string) => void;
   onLogout?: () => void;
+}
+
+interface NavItem {
+  id: string;
+  path: string;
+  label: string;
+  icon: any;
+  badge?: string;
+  isSuper?: boolean;
+  roles?: string[];
+  isLockedWhenStoreSuspended?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogout }) => {
@@ -30,14 +42,58 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
   const currentUser = store.getCurrentUser();
   const userRole = currentUser?.role || 'TENANT_ADMIN';
   const isSuperAdmin = userRole === 'SUPER_ADMIN';
+  const isStoreLocked = !isSuperAdmin && store.isStoreLocked();
 
-  const allNavItems = [
+  // Super Admin dedicated navigation items
+  const superAdminNavItems: NavItem[] = [
+    {
+      id: 'dashboard',
+      path: '/dashboard',
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+      badge: 'Analytics',
+      isSuper: true
+    },
+    {
+      id: 'superadmin',
+      path: '/superadmin',
+      label: 'Super Admin Hub',
+      icon: ShieldCheck,
+      badge: 'Control Plane',
+      isSuper: true
+    },
+    {
+      id: 'workspace-preview',
+      path: '/workspace-preview',
+      label: 'Workspace Preview',
+      icon: Sparkles,
+      badge: 'Simulator',
+      isSuper: true
+    }
+  ];
+
+  // Tenant operations navigation items
+  const tenantNavItems: NavItem[] = [
     { 
       id: 'dashboard', 
       path: '/dashboard',
       label: 'Dashboard', 
       icon: LayoutDashboard, 
-      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
+      roles: ['TENANT_ADMIN', 'MANAGER'] 
+    },
+    { 
+      id: 'reports', 
+      path: '/reports',
+      label: 'Reports & Analytics', 
+      icon: BarChart3, 
+      roles: ['TENANT_ADMIN', 'MANAGER'] 
+    },
+    { 
+      id: 'transactions', 
+      path: '/invoices',
+      label: userRole === 'CASHIER' ? 'Counter Receipts' : 'Invoices & Bills', 
+      icon: FileText, 
+      roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
     },
     { 
       id: 'pos', 
@@ -45,71 +101,60 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
       label: 'POS Billing', 
       icon: ReceiptText, 
       badge: 'Fast', 
-      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
+      roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
+      isLockedWhenStoreSuspended: true
     },
     { 
       id: 'inventory', 
       path: '/inventory',
       label: 'Inventory & Items', 
       icon: Package, 
-      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
+      roles: ['TENANT_ADMIN', 'MANAGER'],
+      isLockedWhenStoreSuspended: true
     },
     { 
       id: 'purchase-orders', 
       path: '/purchase-orders',
       label: 'Purchase Orders', 
       icon: ShoppingBag, 
-      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
+      roles: ['TENANT_ADMIN', 'MANAGER'],
+      isLockedWhenStoreSuspended: true
     },
     { 
       id: 'parties', 
       path: '/parties',
       label: userRole === 'CASHIER' ? 'Customer Directory' : 'Parties & CRM', 
       icon: Users, 
-      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
+      roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
+      isLockedWhenStoreSuspended: true
     },
     { 
       id: 'ledger', 
       path: '/ledger',
       label: 'Ledger & Expenses', 
       icon: BookOpen, 
-      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
-    },
-    { 
-      id: 'transactions', 
-      path: '/invoices',
-      label: userRole === 'CASHIER' ? 'Counter Receipts' : 'Invoices & Bills', 
-      icon: FileText, 
-      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
-    },
-    { 
-      id: 'reports', 
-      path: '/reports',
-      label: 'Reports & Analytics', 
-      icon: BarChart3, 
-      roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'MANAGER'] 
-    },
-    { 
-      id: 'superadmin', 
-      path: '/superadmin',
-      label: 'Super Admin', 
-      icon: ShieldCheck, 
-      badge: 'Multi-Tenant', 
-      isSuper: true, 
-      roles: ['SUPER_ADMIN'] 
+      roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
+      isLockedWhenStoreSuspended: true
     },
     { 
       id: 'settings', 
       path: '/settings',
-      label: 'Settings & DB', 
+      label: 'Settings & License', 
       icon: Settings, 
-      roles: ['SUPER_ADMIN', 'TENANT_ADMIN'] 
+      roles: ['TENANT_ADMIN'],
+      isLockedWhenStoreSuspended: true
     },
   ];
 
-  const navItems = allNavItems.filter(item => item.roles.includes(userRole));
+  const navItems: NavItem[] = isSuperAdmin 
+    ? superAdminNavItems 
+    : tenantNavItems.filter(item => item.roles?.includes(userRole));
 
-  const handleItemClick = (item: typeof allNavItems[0]) => {
+  const handleItemClick = (item: NavItem) => {
+    if (isStoreLocked && item.isLockedWhenStoreSuspended) {
+      navigate('/dashboard');
+      return;
+    }
     if (onTabChange) {
       onTabChange(item.id);
     }
@@ -132,6 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
       <nav className="sidebar-nav">
         {navItems.map((item) => {
           const Icon = item.icon;
+          const isItemLocked = isStoreLocked && item.isLockedWhenStoreSuspended;
           const isActive = 
             location.pathname === item.path || 
             (item.id === 'transactions' && location.pathname === '/transactions') ||
@@ -142,25 +188,51 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
               key={item.id}
               onClick={() => handleItemClick(item)}
               className={`nav-link ${isActive ? 'active' : ''}`}
-              style={{ width: '100%', border: 'none', background: isActive ? undefined : 'transparent', textAlign: 'left' }}
+              title={isItemLocked ? 'Feature locked: Store is currently suspended / expired' : undefined}
+              style={{ 
+                width: '100%', 
+                border: 'none', 
+                background: isActive ? undefined : 'transparent', 
+                textAlign: 'left',
+                opacity: isItemLocked ? 0.55 : 1,
+                cursor: isItemLocked ? 'not-allowed' : 'pointer'
+              }}
             >
               <Icon size={18} color={item.isSuper ? '#a5b4fc' : undefined} />
               <span style={{ flex: 1, color: item.isSuper && !isActive ? '#c7d2fe' : undefined, fontWeight: item.isSuper ? 600 : undefined }}>
                 {item.label}
               </span>
-              {item.badge && (
+              {isItemLocked ? (
                 <span
                   style={{
-                    backgroundColor: item.isSuper ? 'rgba(79, 70, 229, 0.4)' : 'rgba(239, 68, 68, 0.2)',
-                    color: item.isSuper ? '#c7d2fe' : '#f87171',
-                    fontSize: '0.68rem',
+                    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                    color: '#f87171',
+                    fontSize: '0.65rem',
                     fontWeight: 700,
-                    padding: '2px 6px',
+                    padding: '2px 5px',
                     borderRadius: 4,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3
                   }}
                 >
-                  {item.badge}
+                  <Lock size={10} /> Locked
                 </span>
+              ) : (
+                item.badge && (
+                  <span
+                    style={{
+                      backgroundColor: item.isSuper ? 'rgba(79, 70, 229, 0.4)' : 'rgba(239, 68, 68, 0.2)',
+                      color: item.isSuper ? '#c7d2fe' : '#f87171',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                    }}
+                  >
+                    {item.badge}
+                  </span>
+                )
               )}
             </button>
           );

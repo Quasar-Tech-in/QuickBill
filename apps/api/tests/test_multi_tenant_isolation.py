@@ -12,10 +12,76 @@ TENANT_B_ID = "65f2a1b9a000000000000002"
 async def init_db():
     try:
         await connect_to_mongo()
+        db = db_manager.get_primary_database()
+        from bson import ObjectId
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        
+        # Ensure test tenant A
+        await db.tenants.update_one(
+            {"_id": ObjectId(TENANT_A_ID)},
+            {"$set": {
+                "_id": ObjectId(TENANT_A_ID),
+                "name": "QuickBill Enterprise Retail",
+                "slug": "quickbill-enterprise",
+                "plan": "ENTERPRISE",
+                "status": "ACTIVE",
+                "subscription": {
+                    "plan": "ENTERPRISE",
+                    "status": "ACTIVE",
+                    "startDate": now.isoformat(),
+                    "endDate": (now + timedelta(days=365)).isoformat(),
+                    "billingCycle": "ANNUAL",
+                    "pricePerCycle": 49999.0,
+                    "maxUsers": 50,
+                    "maxLocations": 20,
+                    "autoRenew": True
+                },
+                "databaseConfig": {
+                    "isolationMode": "SHARED",
+                    "databaseName": "quickbill_db"
+                }
+            }},
+            upsert=True
+        )
+
+        # Ensure test tenant B
+        await db.tenants.update_one(
+            {"_id": ObjectId(TENANT_B_ID)},
+            {"$set": {
+                "_id": ObjectId(TENANT_B_ID),
+                "name": "Apex Supermart West",
+                "slug": "apex-supermart",
+                "plan": "PROFESSIONAL",
+                "status": "ACTIVE",
+                "subscription": {
+                    "plan": "PROFESSIONAL",
+                    "status": "ACTIVE",
+                    "startDate": now.isoformat(),
+                    "endDate": (now + timedelta(days=180)).isoformat(),
+                    "billingCycle": "MONTHLY",
+                    "pricePerCycle": 2499.0,
+                    "maxUsers": 10,
+                    "maxLocations": 3,
+                    "autoRenew": True
+                },
+                "databaseConfig": {
+                    "isolationMode": "SHARED",
+                    "databaseName": "quickbill_db"
+                }
+            }},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"Error in init_db fixture: {e}")
+    yield
+    # Clean up test tenant B after test run to leave DB clean
+    try:
+        db = db_manager.get_primary_database()
+        from bson import ObjectId
+        await db.tenants.delete_one({"_id": ObjectId(TENANT_B_ID)})
     except Exception:
         pass
-    yield
-    # keep connection or close
 
 @pytest.fixture
 def superadmin_token():
@@ -236,5 +302,168 @@ async def test_category_crud_and_expense_type_isolation(superadmin_token):
         # 5. Verify it is gone from database
         verify_res = await ac.get("/api/v1/categories?type=EXPENSE", headers=headers_tenant_a)
         assert not any(c["_id"] == cat_id for c in verify_res.json())
+
+
+@pytest.mark.asyncio
+async def test_super_admin_subscription_renewal_and_quotas(superadmin_token):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        headers = {"Authorization": f"Bearer {superadmin_token}"}
+        
+        # 1. List tenants and verify subscription object exists
+        tenants_res = await ac.get("/api/v1/tenants", headers=headers)
+        assert tenants_res.status_code == 200
+        tenants = tenants_res.json()
+        assert len(tenants) >= 1
+        t1 = tenants[0]
+        assert "subscription" in t1
+        assert "max_users" in t1["subscription"]
+        assert "max_locations" in t1["subscription"]
+        assert "days_remaining" in t1["subscription"]
+
+        # 2. Renew subscription for tenant
+        renew_res = await ac.post(
+            f"/api/v1/tenants/{t1['id']}/renew-subscription",
+            json={
+                "extend_days": 30,
+                "plan": "ENTERPRISE",
+                "max_users": 25,
+                "max_locations": 10,
+                "amount": 49999.0,
+                "notes": "Automated test renewal +30 days"
+            },
+            headers=headers
+        )
+        assert renew_res.status_code == 200
+        renew_data = renew_res.json()
+        assert renew_data["success"] is True
+        assert renew_data["status"] == "ACTIVE"
+        assert renew_data["maxUsers"] == 25
+        assert renew_data["maxLocations"] == 10
+
+        # 3. Test database link test endpoint
+        ping_res = await ac.post(
+            "/api/v1/tenants/test-db-connection",
+            json={
+                "mongodb_uri": "mongodb://admin:secretpassword@localhost:27017/?authSource=admin",
+                "database_name": "quickbill_db"
+            },
+            headers=headers
+        )
+        assert ping_res.status_code == 200
+        assert "status" in ping_res.json()
+
+
+@pytest.mark.asyncio
+async def test_store_suspension_login_and_operational_lockdown(superadmin_token):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        sa_headers = {"Authorization": f"Bearer {superadmin_token}"}
+        primary_db = db_manager.get_primary_database()
+        from app.core.security import get_password_hash
+        from bson import ObjectId
+
+        # 1. Ensure test store owner and cashier exist in Store B
+        hashed_pw = get_password_hash("StoreStaff@2026")
+        await primary_db.users.update_one(
+            {"email": "cashier_b@store.local"},
+            {"$set": {
+                "name": "Store B Cashier",
+                "email": "cashier_b@store.local",
+                "passwordHash": hashed_pw,
+                "roles": ["CASHIER"],
+                "tenantId": ObjectId(TENANT_B_ID),
+                "authorizedTenantIds": [TENANT_B_ID],
+                "isActive": True
+            }},
+            upsert=True
+        )
+        await primary_db.users.update_one(
+            {"email": "owner_b@store.local"},
+            {"$set": {
+                "name": "Store B Owner",
+                "email": "owner_b@store.local",
+                "passwordHash": hashed_pw,
+                "roles": ["TENANT_ADMIN"],
+                "tenantId": ObjectId(TENANT_B_ID),
+                "authorizedTenantIds": [TENANT_B_ID],
+                "isActive": True
+            }},
+            upsert=True
+        )
+
+        # 2. Super Admin suspends Store B
+        suspend_res = await ac.patch(
+            f"/api/v1/tenants/{TENANT_B_ID}/status",
+            json={"status": "SUSPENDED"},
+            headers=sa_headers
+        )
+        assert suspend_res.status_code == 200
+        assert suspend_res.json()["status"] == "SUSPENDED"
+
+        # Verify DB document
+        b_doc = await primary_db.tenants.find_one({"_id": ObjectId(TENANT_B_ID)})
+        assert b_doc["status"] == "SUSPENDED"
+        assert b_doc.get("subscription", {}).get("status") == "SUSPENDED"
+
+        # 3. Cashier login must be FORBIDDEN (403)
+        cashier_login = await ac.post("/api/v1/auth/login", json={
+            "email": "cashier_b@store.local",
+            "password": "StoreStaff@2026"
+        })
+        assert cashier_login.status_code == 403
+        assert "suspended" in cashier_login.json()["detail"].lower()
+
+        # 4. Store Owner login must SUCCEED (200) in restricted mode
+        owner_login = await ac.post("/api/v1/auth/login", json={
+            "email": "owner_b@store.local",
+            "password": "StoreStaff@2026"
+        })
+        assert owner_login.status_code == 200
+        owner_data = owner_login.json()
+        assert owner_data["store_status"] == "SUSPENDED"
+        assert owner_data["is_store_locked"] is True
+        owner_token = owner_data["access_token"]
+        owner_headers = {
+            "Authorization": f"Bearer {owner_token}",
+            "X-Business-ID": TENANT_B_ID
+        }
+
+        # 5. POS billing creation must be BLOCKED (403)
+        pos_res = await ac.post("/api/v1/sales", json={
+            "customerName": "Walkin Customer",
+            "items": [{
+                "itemId": "item_001",
+                "name": "Test Product",
+                "quantity": 1,
+                "salePrice": 100.0,
+                "taxRate": 18.0
+            }],
+            "paymentMode": "CASH",
+            "amountPaid": 118.0
+        }, headers=owner_headers)
+        assert pos_res.status_code == 403
+        assert "locked" in pos_res.json()["detail"].lower()
+
+        # 6. Read-only analytics (list sales) must SUCCEED (200)
+        sales_list_res = await ac.get("/api/v1/sales", headers=owner_headers)
+        assert sales_list_res.status_code == 200
+
+        # 7. Super Admin activates Store B
+        activate_res = await ac.patch(
+            f"/api/v1/tenants/{TENANT_B_ID}/status",
+            json={"status": "ACTIVE"},
+            headers=sa_headers
+        )
+        assert activate_res.status_code == 200
+        assert activate_res.json()["status"] == "ACTIVE"
+
+        # 8. Cashier login now SUCCEEDS
+        cashier_login_active = await ac.post("/api/v1/auth/login", json={
+            "email": "cashier_b@store.local",
+            "password": "StoreStaff@2026"
+        })
+        assert cashier_login_active.status_code == 200
+        assert cashier_login_active.json()["store_status"] == "ACTIVE"
+
+
 
 

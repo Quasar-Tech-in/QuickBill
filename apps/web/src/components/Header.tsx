@@ -11,6 +11,7 @@ import {
   Check,
   MapPin,
   AlertTriangle,
+  Sparkles,
   X
 } from 'lucide-react';
 import { store } from '../services/store';
@@ -113,77 +114,54 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="top-header">
       <div className="header-left">
-        {/* Store Context Display: Interactive Switcher for SuperAdmin, Static Isolated Badge for Tenants */}
+        {/* Store Context Display: Clean Governance Hub Badge for SuperAdmin, Static Isolated Badge for Tenants */}
         {isSuperAdmin ? (
-          <div className="header-tenant-selector" ref={tenantMenuRef}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 8, 
+                backgroundColor: '#0f172a', 
+                color: '#ffffff', 
+                padding: '6px 14px', 
+                borderRadius: '10px',
+                border: '1px solid #334155',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+              }}
+            >
+              <ShieldCheck size={16} color="#818cf8" />
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#94a3b8', fontWeight: 700, lineHeight: 1 }}>
+                  Control Hub
+                </span>
+                <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#ffffff', lineHeight: 1.2 }}>
+                  Global Super Admin
+                </span>
+              </div>
+            </div>
+
             <button
               type="button"
-              className={`tenant-select-trigger ${isTenantMenuOpen ? 'open' : ''}`}
-              onClick={() => setIsTenantMenuOpen(!isTenantMenuOpen)}
-              title="Switch Active Store / Business Tenant (Super Admin Only)"
+              className="btn btn-xs"
+              onClick={() => onNavigate('workspace-preview')}
+              style={{
+                backgroundColor: '#eef2ff',
+                color: '#4f46e5',
+                border: '1px solid #c7d2fe',
+                fontWeight: 700,
+                fontSize: '0.76rem',
+                padding: '5px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                borderRadius: 8,
+                cursor: 'pointer'
+              }}
             >
-              <div className="tenant-trigger-icon">
-                <Building size={14} />
-              </div>
-              <div className="tenant-trigger-text">
-                <span className="tenant-trigger-label">Store</span>
-                <span className="tenant-trigger-name">{activeTenant.name}</span>
-              </div>
-              <span className="tenant-slug-badge">{activeTenant.slug}</span>
-              <ChevronDown size={14} className={`chevron-indicator ${isTenantMenuOpen ? 'rotated' : ''}`} />
+              <Sparkles size={13} />
+              <span>Workspace Preview</span>
             </button>
-
-            {/* Tenant Dropdown Popover */}
-            {isTenantMenuOpen && (
-              <div className="tenant-dropdown-popover">
-                <div className="tenant-popover-header">
-                  <span className="popover-heading">Switch Active Business Store</span>
-                  <span className="popover-count">{tenants.length} provisioned</span>
-                </div>
-                <div className="tenant-list-scroll">
-                  {tenants.map((t) => {
-                    const isCurrent = t.id === activeTenant.id;
-                    return (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className={`tenant-list-item ${isCurrent ? 'selected' : ''}`}
-                        onClick={() => handleSelectTenant(t.id)}
-                      >
-                        <div className="tenant-item-avatar">
-                          {t.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <div className="tenant-item-details">
-                          <div className="tenant-item-name-row">
-                            <span className="tenant-item-name">{t.name}</span>
-                            {isCurrent && <Check size={14} className="tenant-check-icon" />}
-                          </div>
-                          <div className="tenant-item-meta">
-                            <span className="tenant-item-slug">{t.slug}</span>
-                            <span className="tenant-item-db">
-                              {t.databaseConfig.isolationMode === 'CUSTOM_CLUSTER' ? '⚡ Cluster' :
-                               t.databaseConfig.isolationMode === 'DEDICATED_DATABASE' ? '🗄️ Isolated DB' : '🔗 Shared'}
-                            </span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="tenant-popover-footer">
-                  <button 
-                    className="popover-manage-link"
-                    onClick={() => {
-                      setIsTenantMenuOpen(false);
-                      onNavigate('superadmin');
-                    }}
-                  >
-                    <ShieldCheck size={13} />
-                    <span>Manage All Stores in Governance Plane</span>
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         ) : (
           /* Static Tenant Badge (Isolated Customer Store View - No Cross-tenant Leaks) */

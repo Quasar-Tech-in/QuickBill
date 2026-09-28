@@ -229,6 +229,23 @@ async def create_location(
     tenant_id = current_user.default_business_id or "65f2a1b9a000000000000001"
     clean_code = req.code.strip().upper()
 
+    # Check subscription maxLocations quota (unless Super Admin)
+    if "SUPER_ADMIN" not in current_user.roles and tenant_id:
+        t_oid = ObjectId(tenant_id) if ObjectId.is_valid(tenant_id) else None
+        tenant_doc = await primary_db.tenants.find_one({"_id": t_oid}) if t_oid else None
+        if tenant_doc:
+            sub = tenant_doc.get("subscription", {})
+            max_locs = sub.get("maxLocations", 3)
+            current_locs_count = await primary_db.locations.count_documents({
+                "businessId": str(tenant_id),
+                "isActive": True
+            })
+            if current_locs_count >= max_locs:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Subscription branch limit reached ({current_locs_count}/{max_locs} locations). Please contact Super Admin to upgrade your subscription plan."
+                )
+
     existing = await primary_db.locations.find_one({"businessId": tenant_id, "code": clean_code})
     if existing:
         raise HTTPException(

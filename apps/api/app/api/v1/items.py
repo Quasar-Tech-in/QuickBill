@@ -13,7 +13,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from app.core.config import settings
 from app.core.database import get_tenant_db
-from app.core.security import get_current_business_id
+from app.core.security import get_current_business_id, enforce_active_store_operations
 from app.schemas.common import PaginatedResponse
 from app.schemas.item import ItemCreate, ItemUpdate, ItemResponse
 from app.repositories.item_repository import ItemRepository
@@ -91,7 +91,7 @@ async def list_items(
 @router.post("", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
 async def create_item(
     payload: ItemCreate,
-    business_id: str = Depends(get_current_business_id),
+    business_id: str = Depends(enforce_active_store_operations),
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
@@ -211,7 +211,7 @@ async def get_item(
 async def update_item(
     item_id: str,
     payload: ItemUpdate,
-    business_id: str = Depends(get_current_business_id),
+    business_id: str = Depends(enforce_active_store_operations),
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
@@ -254,7 +254,7 @@ async def update_item(
 async def adjust_item_stock(
     item_id: str,
     payload: dict,
-    business_id: str = Depends(get_current_business_id),
+    business_id: str = Depends(enforce_active_store_operations),
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
@@ -299,7 +299,7 @@ async def adjust_item_stock(
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_item(
     item_id: str,
-    business_id: str = Depends(get_current_business_id),
+    business_id: str = Depends(enforce_active_store_operations),
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)

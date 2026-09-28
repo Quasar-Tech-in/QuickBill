@@ -1,28 +1,79 @@
-from typing import List, Optional
-from datetime import datetime, timezone
+from typing import List, Optional, Any, Dict
+from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from motor.motor_asyncio import AsyncIOMotorClient
-from app.core.security import TokenPayload, get_current_user
+from app.core.security import TokenPayload, get_current_user, get_password_hash
 from app.core.config import settings
 from app.core.database import get_database
 
 router = APIRouter(prefix="/tenants", tags=["Super Admin Multi-Tenancy"])
+
+def is_super_admin(user: TokenPayload) -> bool:
+    normalized_roles = [r.upper() for r in user.roles]
+    return "SUPER_ADMIN" in normalized_roles or "SUPERADMIN" in normalized_roles
+
+def is_tenant_admin(user: TokenPayload) -> bool:
+    normalized_roles = [r.upper() for r in user.roles]
+    return "TENANT_ADMIN" in normalized_roles or is_super_admin(user)
+
+# Default Plan Quotas
+PLAN_DEFAULTS = {
+    "STARTER": {"max_users": 2, "max_locations": 1, "features": ["pos", "inventory", "ledger"]},
+    "PROFESSIONAL": {"max_users": 5, "max_locations": 3, "features": ["pos", "inventory", "ledger", "purchase_orders", "reports", "multi_location"]},
+    "ENTERPRISE": {"max_users": 25, "max_locations": 10, "features": ["pos", "inventory", "ledger", "purchase_orders", "reports", "multi_location", "custom_db", "barcode_labels", "export_data"]},
+    "CUSTOM": {"max_users": 50, "max_locations": 20, "features": ["pos", "inventory", "ledger", "purchase_orders", "reports", "multi_location", "custom_db", "barcode_labels", "export_data"]}
+}
 
 class DatabaseConfig(BaseModel):
     isolation_mode: str = Field(default="SHARED", description="SHARED | DEDICATED_DATABASE | CUSTOM_CLUSTER")
     mongodb_uri: Optional[str] = None
     database_name: str = "quickbill_db"
 
+class SubscriptionRenewalHistoryItem(BaseModel):
+    date: Optional[str] = None
+    extended_until: Optional[str] = Field(default=None, alias="extendedUntil")
+    renewed_by: Optional[str] = Field(default="Super Administrator", alias="renewedBy")
+    amount: Optional[float] = None
+    billing_cycle: Optional[str] = Field(default=None, alias="billingCycle")
+    notes: Optional[str] = None
+    previous_end_date: Optional[str] = Field(default=None, alias="previousEndDate")
+
+    class Config:
+        populate_by_name = True
+
+class TenantSubscriptionModel(BaseModel):
+    plan_id: str = "PROFESSIONAL"
+    plan_name: str = "Professional Tier"
+    status: str = "ACTIVE"  # ACTIVE | EXPIRING_SOON | GRACE_PERIOD | EXPIRED | SUSPENDED | TRIAL
+    max_users: int = 5
+    max_locations: int = 3
+    billing_cycle: str = "ANNUAL"  # MONTHLY | QUARTERLY | ANNUAL | LIFETIME | CUSTOM
+    start_date: str
+    end_date: str
+    days_remaining: int = 365
+    grace_period_days: int = 7
+    price_per_cycle: Optional[float] = None
+    currency: str = "₹"
+    auto_renew: bool = False
+    features: List[str] = []
+    renewal_history: Optional[List[SubscriptionRenewalHistoryItem]] = []
+    notes: Optional[str] = None
+
 class TenantCreateRequest(BaseModel):
     name: str
     slug: str
     admin_email: str
     admin_password: str
-    plan: str = "PROFESSIONAL"  # STARTER, PROFESSIONAL, ENTERPRISE
+    plan: str = "PROFESSIONAL"  # STARTER, PROFESSIONAL, ENTERPRISE, CUSTOM
     gstin: Optional[str] = None
     phone: Optional[str] = None
+    address: Optional[str] = None
+    max_users: Optional[int] = None
+    max_locations: Optional[int] = None
+    billing_cycle: Optional[str] = "ANNUAL"
+    duration_days: Optional[int] = 365
     database_config: DatabaseConfig
 
 class TenantResponse(BaseModel):
@@ -31,81 +82,190 @@ class TenantResponse(BaseModel):
     slug: str
     plan: str
     status: str
+    admin_email: str
+    phone: Optional[str] = None
+    gstin: Optional[str] = None
+    address: Optional[str] = None
     created_at: str
     database_config: DatabaseConfig
-    stats: dict
+    subscription: TenantSubscriptionModel
+    stats: Dict[str, Any]
 
 class TestConnectionRequest(BaseModel):
     mongodb_uri: str
     database_name: Optional[str] = "quickbill_db"
 
+class SubscriptionRenewRequest(BaseModel):
+    extend_days: Optional[int] = None
+    new_end_date: Optional[str] = None
+    plan: Optional[str] = None
+    max_users: Optional[int] = None
+    max_locations: Optional[int] = None
+    amount: Optional[float] = None
+    billing_cycle: Optional[str] = None
+    notes: Optional[str] = None
+
+class TenantStatusUpdateRequest(BaseModel):
+    status: str  # ACTIVE | SUSPENDED
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str
+
+def calculate_subscription_status(end_date_str: str, base_status: str = "ACTIVE", grace_days: int = 7) -> (str, int):
+    try:
+        # Normalize ISO string
+        clean_str = end_date_str.replace("Z", "+00:00")
+        end_dt = datetime.fromisoformat(clean_str)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return base_status, 365
+
+    now = datetime.now(timezone.utc)
+    delta_days = (end_dt.date() - now.date()).days
+
+    if base_status == "SUSPENDED":
+        return "SUSPENDED", delta_days
+    if delta_days < -grace_days:
+        return "EXPIRED", delta_days
+    elif delta_days < 0:
+        return "GRACE_PERIOD", delta_days
+    elif delta_days <= 14:
+        return "EXPIRING_SOON", delta_days
+    else:
+        return "ACTIVE", delta_days
+
 @router.get("", response_model=List[TenantResponse])
 async def list_tenants(user: TokenPayload = Depends(get_current_user)):
-    # Demonstration seed tenants
-    return [
-        TenantResponse(
-            id="65f2a1b9a000000000000001",
-            name="QuickBill Enterprise Main Store",
-            slug="main-store-01",
-            plan="ENTERPRISE",
-            status="ACTIVE",
-            created_at="2026-01-15T10:00:00Z",
-            database_config=DatabaseConfig(
-                isolation_mode="SHARED",
-                mongodb_uri=settings.MONGODB_URI,
-                database_name="quickbill_db"
-            ),
-            stats={
-                "productsCount": 6,
-                "invoicesCount": 2,
-                "monthlyGmv": 6149.0,
-                "usersCount": 4
+    primary_db = get_database()
+    now = datetime.now(timezone.utc)
+    
+    # Query all tenants from DB
+    cursor = primary_db.tenants.find({})
+    db_tenants = await cursor.to_list(length=100)
+    
+    results = []
+    
+    # Fallback to seed primary tenant if primary_db.tenants is empty
+    if not db_tenants:
+        end_date_1 = (now + timedelta(days=290)).isoformat()
+
+        db_tenants = [
+            {
+                "_id": ObjectId("65f2a1b9a000000000000001"),
+                "name": "QuickBill Enterprise Retail",
+                "slug": "quickbill-main",
+                "plan": "ENTERPRISE",
+                "status": "ACTIVE",
+                "adminEmail": "admin@quickbill.local",
+                "phone": "+91 9876543210",
+                "gstin": "07AABCB1234F1Z5",
+                "address": "Ground Floor, Metro Retail Plaza, Sector 18, New Delhi",
+                "createdAt": "2026-01-15T10:00:00Z",
+                "databaseConfig": {
+                    "isolationMode": "DEDICATED_DATABASE",
+                    "mongodbUri": f"mongodb://admin:secretpassword@localhost:27017/quickbill_main_db?authSource=admin",
+                    "databaseName": "quickbill_main_db"
+                },
+                "subscription": {
+                    "planId": "ENTERPRISE",
+                    "planName": "Enterprise Tier",
+                    "status": "ACTIVE",
+                    "maxUsers": 25,
+                    "maxLocations": 10,
+                    "billingCycle": "ANNUAL",
+                    "startDate": "2026-01-15T10:00:00Z",
+                    "endDate": end_date_1,
+                    "pricePerCycle": 49999.0,
+                    "features": PLAN_DEFAULTS["ENTERPRISE"]["features"]
+                },
+                "stats": {
+                    "productsCount": 32,
+                    "invoicesCount": 3,
+                    "monthlyGmv": 12450.0,
+                    "usersCount": 3,
+                    "locationsCount": 3
+                }
             }
-        ),
-        TenantResponse(
-            id="65f2a1b9a000000000000002",
-            name="Apex Retail Supermart",
-            slug="apex-retail-west",
-            plan="PROFESSIONAL",
-            status="ACTIVE",
-            created_at="2026-02-01T14:30:00Z",
-            database_config=DatabaseConfig(
-                isolation_mode="DEDICATED_DATABASE",
-                mongodb_uri=settings.MONGODB_URI,
-                database_name="quickbill_apex_db"
-            ),
-            stats={
-                "productsCount": 142,
-                "invoicesCount": 89,
-                "monthlyGmv": 128450.0,
-                "usersCount": 8
-            }
-        ),
-        TenantResponse(
-            id="65f2a1b9a000000000000003",
-            name="Metro Tech Hardware & Spares",
-            slug="metro-tech-spares",
-            plan="ENTERPRISE",
-            status="ACTIVE",
-            created_at="2026-02-18T09:15:00Z",
-            database_config=DatabaseConfig(
-                isolation_mode="CUSTOM_CLUSTER",
-                mongodb_uri="mongodb://admin:secretpassword@localhost:27017/quickbill_metrotech_db?authSource=admin",
-                database_name="quickbill_metrotech_db"
-            ),
-            stats={
-                "productsCount": 320,
-                "invoicesCount": 210,
-                "monthlyGmv": 349800.0,
-                "usersCount": 12
-            }
+        ]
+
+    for t in db_tenants:
+        tid_str = str(t.get("_id", t.get("id", "")))
+        plan_str = t.get("plan", "PROFESSIONAL").upper()
+        
+        # Pull or build subscription
+        sub_doc = t.get("subscription", {})
+        sub_plan = sub_doc.get("planId", plan_str)
+        default_limits = PLAN_DEFAULTS.get(sub_plan, PLAN_DEFAULTS["PROFESSIONAL"])
+        
+        sub_end_date = sub_doc.get("endDate") or (now + timedelta(days=365)).isoformat()
+        sub_start_date = sub_doc.get("startDate") or t.get("createdAt", now.isoformat())
+        if isinstance(sub_start_date, datetime):
+            sub_start_date = sub_start_date.isoformat()
+        if isinstance(sub_end_date, datetime):
+            sub_end_date = sub_end_date.isoformat()
+
+        calculated_status, days_left = calculate_subscription_status(
+            sub_end_date,
+            base_status=t.get("status", "ACTIVE")
         )
-    ]
+
+        subscription_model = TenantSubscriptionModel(
+            plan_id=sub_plan,
+            plan_name=sub_doc.get("planName", f"{sub_plan.title()} Tier"),
+            status=calculated_status,
+            max_users=sub_doc.get("maxUsers", default_limits["max_users"]),
+            max_locations=sub_doc.get("maxLocations", default_limits["max_locations"]),
+            billing_cycle=sub_doc.get("billingCycle", "ANNUAL"),
+            start_date=sub_start_date,
+            end_date=sub_end_date,
+            days_remaining=days_left,
+            grace_period_days=sub_doc.get("gracePeriodDays", 7),
+            price_per_cycle=sub_doc.get("pricePerCycle", 999.0),
+            currency="₹",
+            auto_renew=sub_doc.get("autoRenew", False),
+            features=sub_doc.get("features", default_limits["features"]),
+            renewal_history=sub_doc.get("renewalHistory", []),
+            notes=sub_doc.get("notes")
+        )
+
+        db_cfg = t.get("databaseConfig", {})
+        db_config_model = DatabaseConfig(
+            isolation_mode=db_cfg.get("isolationMode", db_cfg.get("isolation_mode", "SHARED")),
+            mongodb_uri=db_cfg.get("mongodbUri", db_cfg.get("mongodb_uri", settings.MONGODB_URI)),
+            database_name=db_cfg.get("databaseName", db_cfg.get("database_name", "quickbill_db"))
+        )
+
+        stats_doc = t.get("stats", {
+            "productsCount": 0,
+            "invoicesCount": 0,
+            "monthlyGmv": 0.0,
+            "usersCount": 1,
+            "locationsCount": 1
+        })
+
+        results.append(TenantResponse(
+            id=tid_str,
+            name=t.get("name", "Untitled Store"),
+            slug=t.get("slug", "store"),
+            plan=sub_plan,
+            status=t.get("status", "ACTIVE"),
+            admin_email=t.get("adminEmail", t.get("admin_email", "")),
+            phone=t.get("phone"),
+            gstin=t.get("gstin"),
+            address=t.get("address"),
+            created_at=str(t.get("createdAt", now.isoformat())),
+            database_config=db_config_model,
+            subscription=subscription_model,
+            stats=stats_doc
+        ))
+
+    return results
 
 @router.post("/test-db-connection")
 async def test_db_connection(req: TestConnectionRequest):
     try:
-        client = AsyncIOMotorClient(req.mongodb_uri, serverSelectionTimeoutMS=2000)
+        client = AsyncIOMotorClient(req.mongodb_uri, serverSelectionTimeoutMS=2500)
         db = client[req.database_name or "quickbill_db"]
         await db.command("ping")
         client.close()
@@ -127,6 +287,8 @@ class TenantUpdateRequest(BaseModel):
     phone: Optional[str] = None
     admin_email: Optional[str] = None
     address: Optional[str] = None
+    status: Optional[str] = None
+    plan: Optional[str] = None
 
 @router.put("/{tenant_id}")
 async def update_tenant_profile(
@@ -134,14 +296,13 @@ async def update_tenant_profile(
     req: TenantUpdateRequest,
     user: TokenPayload = Depends(get_current_user)
 ):
-    if "SUPER_ADMIN" not in user.roles and "TENANT_ADMIN" not in user.roles:
+    if not is_tenant_admin(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Store Administrators can update the business profile."
+            detail="Only Store Administrators or Super Admins can update the business profile."
         )
 
-    # If not Super Admin, ensure tenant user can only update their own tenant
-    if "SUPER_ADMIN" not in user.roles and user.default_business_id != tenant_id:
+    if not is_super_admin(user) and user.default_business_id != tenant_id:
         raise HTTPException(status_code=403, detail="Unauthorized access to modify this store profile.")
 
     primary_db = get_database()
@@ -155,12 +316,21 @@ async def update_tenant_profile(
     if req.phone is not None:
         update_data["phone"] = req.phone.strip()
     if req.admin_email is not None:
-        update_data["adminEmail"] = req.admin_email.strip()
+        update_data["adminEmail"] = req.admin_email.strip().lower()
     if req.address is not None:
         update_data["address"] = req.address.strip()
+    if req.status is not None and is_super_admin(user):
+        clean_status = req.status.strip().upper()
+        update_data["status"] = clean_status
+        update_data["subscription.status"] = clean_status
+    if req.plan is not None and is_super_admin(user):
+        update_data["plan"] = req.plan.upper()
+        update_data["subscription.planId"] = req.plan.upper()
+        update_data["subscription.planName"] = f"{req.plan.upper().title()} Tier"
 
-    if update_data and t_oid:
-        await primary_db.tenants.update_one({"_id": t_oid}, {"$set": update_data})
+    if update_data:
+        query = {"_id": t_oid} if t_oid else {"slug": tenant_id}
+        await primary_db.tenants.update_one(query, {"$set": update_data})
 
     return {
         "success": True,
@@ -169,21 +339,275 @@ async def update_tenant_profile(
         "profile": update_data
     }
 
+@router.patch("/{tenant_id}/status")
+async def update_tenant_status(
+    tenant_id: str,
+    req: TenantStatusUpdateRequest,
+    user: TokenPayload = Depends(get_current_user)
+):
+    if not is_super_admin(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super Admin authorization required to modify store status."
+        )
+
+    clean_status = req.status.strip().upper()
+    if clean_status not in ("ACTIVE", "SUSPENDED"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be either ACTIVE or SUSPENDED."
+        )
+
+    primary_db = get_database()
+    t_oid = ObjectId(tenant_id) if ObjectId.is_valid(tenant_id) else None
+    query = {"_id": t_oid} if t_oid else {"slug": tenant_id}
+
+    update_payload = {
+        "status": clean_status,
+        "subscription.status": clean_status,
+        "updatedAt": datetime.now(timezone.utc)
+    }
+
+    result = await primary_db.tenants.update_one(query, {"$set": update_payload})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Tenant store not found.")
+
+    return {
+        "success": True,
+        "message": f"Store status updated to {clean_status}",
+        "tenantId": tenant_id,
+        "status": clean_status
+    }
+
+@router.post("/{tenant_id}/renew-subscription")
+async def renew_tenant_subscription(
+    tenant_id: str,
+    req: SubscriptionRenewRequest,
+    user: TokenPayload = Depends(get_current_user)
+):
+    if not is_super_admin(user):
+        raise HTTPException(status_code=403, detail="Super Admin authorization required to renew subscriptions.")
+
+    primary_db = get_database()
+    t_oid = ObjectId(tenant_id) if ObjectId.is_valid(tenant_id) else None
+    
+    tenant = await primary_db.tenants.find_one({"_id": t_oid}) if t_oid else None
+    now = datetime.now(timezone.utc)
+    
+    current_sub = tenant.get("subscription", {}) if tenant else {}
+    current_end_str = current_sub.get("endDate")
+    
+    # Calculate new end date
+    if req.new_end_date:
+        new_end_date = req.new_end_date
+    elif req.extend_days:
+        try:
+            cur_end = datetime.fromisoformat(current_end_str.replace("Z", "+00:00")) if current_end_str else now
+            base_date = max(now, cur_end)
+            new_end_date = (base_date + timedelta(days=req.extend_days)).isoformat()
+        except Exception:
+            new_end_date = (now + timedelta(days=req.extend_days)).isoformat()
+    else:
+        new_end_date = (now + timedelta(days=365)).isoformat()
+
+    plan_name = (req.plan or (tenant.get("plan") if tenant else "PROFESSIONAL")).upper()
+    defaults = PLAN_DEFAULTS.get(plan_name, PLAN_DEFAULTS["PROFESSIONAL"])
+    
+    max_u = req.max_users if req.max_users is not None else current_sub.get("maxUsers", defaults["max_users"])
+    max_l = req.max_locations if req.max_locations is not None else current_sub.get("maxLocations", defaults["max_locations"])
+
+    renewal_record = {
+        "date": now.isoformat(),
+        "extendedUntil": new_end_date,
+        "renewedBy": user.email,
+        "amount": req.amount,
+        "billingCycle": req.billing_cycle or current_sub.get("billingCycle", "ANNUAL"),
+        "notes": req.notes
+    }
+
+    sub_update = {
+        "subscription.planId": plan_name,
+        "subscription.planName": f"{plan_name.title()} Tier",
+        "subscription.status": "ACTIVE",
+        "subscription.endDate": new_end_date,
+        "subscription.maxUsers": max_u,
+        "subscription.maxLocations": max_l,
+        "status": "ACTIVE"
+    }
+
+    if t_oid:
+        await primary_db.tenants.update_one(
+            {"_id": t_oid},
+            {
+                "$set": sub_update,
+                "$push": {"subscription.renewalHistory": renewal_record}
+            }
+        )
+
+    return {
+        "success": True,
+        "message": f"Tenant subscription renewed until {new_end_date} successfully!",
+        "tenantId": tenant_id,
+        "newEndDate": new_end_date,
+        "status": "ACTIVE",
+        "maxUsers": max_u,
+        "maxLocations": max_l
+    }
+
+@router.post("/{tenant_id}/reset-password")
+async def reset_tenant_password(
+    tenant_id: str,
+    req: ResetPasswordRequest,
+    user: TokenPayload = Depends(get_current_user)
+):
+    if not is_super_admin(user):
+        raise HTTPException(status_code=403, detail="Super Admin authorization required to reset credentials.")
+
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    primary_db = get_database()
+    t_oid = ObjectId(tenant_id) if ObjectId.is_valid(tenant_id) else None
+    
+    hashed = get_password_hash(req.new_password)
+    
+    # Update admin user for this tenant
+    res = await primary_db.users.update_many(
+        {"$or": [{"tenantId": t_oid}, {"tenantId": tenant_id}], "roles": "TENANT_ADMIN"},
+        {"$set": {"passwordHash": hashed, "hashedPassword": hashed}}
+    )
+
+    return {
+        "success": True,
+        "message": "Tenant administrator credentials have been successfully updated.",
+        "matchedUsers": res.matched_count
+    }
+
 @router.post("", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
 async def create_tenant(req: TenantCreateRequest, user: TokenPayload = Depends(get_current_user)):
-    new_tenant_id = f"tenant_{int(datetime.now().timestamp())}"
+    if not is_super_admin(user):
+        raise HTTPException(status_code=403, detail="Super Admin authorization required to provision new tenants.")
+
+    primary_db = get_database()
+    now = datetime.now(timezone.utc)
+    clean_email = req.admin_email.strip().lower()
+    
+    plan_tier = req.plan.upper()
+    defaults = PLAN_DEFAULTS.get(plan_tier, PLAN_DEFAULTS["PROFESSIONAL"])
+    max_u = req.max_users if req.max_users is not None else defaults["max_users"]
+    max_l = req.max_locations if req.max_locations is not None else defaults["max_locations"]
+    duration = req.duration_days if req.duration_days else 365
+    end_date = (now + timedelta(days=duration)).isoformat()
+
+    sub_doc = {
+        "planId": plan_tier,
+        "planName": f"{plan_tier.title()} Tier",
+        "status": "ACTIVE",
+        "maxUsers": max_u,
+        "maxLocations": max_l,
+        "billingCycle": req.billing_cycle or "ANNUAL",
+        "startDate": now.isoformat(),
+        "endDate": end_date,
+        "gracePeriodDays": 7,
+        "pricePerCycle": 1999.0 if plan_tier == "PROFESSIONAL" else (4999.0 if plan_tier == "ENTERPRISE" else 999.0),
+        "features": defaults["features"],
+        "renewalHistory": [{
+            "date": now.isoformat(),
+            "extendedUntil": end_date,
+            "renewedBy": user.email,
+            "notes": "Initial provisioning"
+        }]
+    }
+
+    new_tenant_doc = {
+        "name": req.name.strip(),
+        "slug": req.slug.strip().lower(),
+        "plan": plan_tier,
+        "status": "ACTIVE",
+        "adminEmail": clean_email,
+        "phone": req.phone,
+        "gstin": req.gstin,
+        "address": req.address,
+        "createdAt": now,
+        "databaseConfig": {
+            "isolationMode": req.database_config.isolation_mode,
+            "mongodbUri": req.database_config.mongodb_uri or settings.MONGODB_URI,
+            "databaseName": req.database_config.database_name
+        },
+        "subscription": sub_doc,
+        "stats": {
+            "productsCount": 0,
+            "invoicesCount": 0,
+            "monthlyGmv": 0.0,
+            "usersCount": 1,
+            "locationsCount": 1
+        }
+    }
+
+    insert_res = await primary_db.tenants.insert_one(new_tenant_doc)
+    new_tenant_id = str(insert_res.inserted_id)
+
+    # Provision default location for new tenant
+    default_loc_doc = {
+        "businessId": new_tenant_id,
+        "name": "Main Store Outlet",
+        "code": "MAIN-01",
+        "address": req.address or "Main Branch Counter",
+        "phone": req.phone,
+        "isDefault": True,
+        "isActive": True,
+        "createdAt": now
+    }
+    loc_res = await primary_db.locations.insert_one(default_loc_doc)
+    default_loc_id = str(loc_res.inserted_id)
+
+    # Provision tenant admin user
+    hashed_pw = get_password_hash(req.admin_password)
+    admin_user_doc = {
+        "email": clean_email,
+        "name": f"{req.name.strip()} Administrator",
+        "passwordHash": hashed_pw,
+        "hashedPassword": hashed_pw,
+        "roles": ["TENANT_ADMIN"],
+        "isSystemRoot": False,
+        "tenantId": ObjectId(new_tenant_id),
+        "authorizedTenantIds": [new_tenant_id],
+        "assignedLocationIds": [default_loc_id],
+        "isActive": True,
+        "createdAt": now
+    }
+    await primary_db.users.insert_one(admin_user_doc)
+
     return TenantResponse(
         id=new_tenant_id,
         name=req.name,
         slug=req.slug,
-        plan=req.plan,
+        plan=plan_tier,
         status="ACTIVE",
-        created_at=datetime.utcnow().isoformat() + "Z",
+        admin_email=clean_email,
+        phone=req.phone,
+        gstin=req.gstin,
+        address=req.address,
+        created_at=now.isoformat(),
         database_config=req.database_config,
+        subscription=TenantSubscriptionModel(
+            plan_id=plan_tier,
+            plan_name=f"{plan_tier.title()} Tier",
+            status="ACTIVE",
+            max_users=max_u,
+            max_locations=max_l,
+            billing_cycle=req.billing_cycle or "ANNUAL",
+            start_date=now.isoformat(),
+            end_date=end_date,
+            days_remaining=duration,
+            grace_period_days=7,
+            features=defaults["features"]
+        ),
         stats={
             "productsCount": 0,
             "invoicesCount": 0,
             "monthlyGmv": 0.0,
-            "usersCount": 1
+            "usersCount": 1,
+            "locationsCount": 1
         }
     )

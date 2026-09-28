@@ -2,7 +2,7 @@ from typing import Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.database import get_tenant_db
-from app.core.security import get_current_user, get_current_business_id, TokenPayload
+from app.core.security import get_current_user, get_current_business_id, enforce_active_store_operations, TokenPayload
 from app.schemas.common import PaginatedResponse
 from app.schemas.sale import SaleCreateRequest, SaleUpdateRequest, SaleResponse
 from app.services.sale_service import SaleService
@@ -77,7 +77,7 @@ async def list_sales(
 async def create_sale(
     payload: SaleCreateRequest,
     user: TokenPayload = Depends(get_current_user),
-    business_id: str = Depends(get_current_business_id),
+    business_id: str = Depends(enforce_active_store_operations),
 ):
     db = await get_tenant_db(business_id)
     service = SaleService(db)
@@ -114,7 +114,7 @@ async def update_sale_return(
     sale_id: str,
     payload: SaleUpdateRequest,
     user: TokenPayload = Depends(get_current_user),
-    business_id: str = Depends(get_current_business_id),
+    business_id: str = Depends(enforce_active_store_operations),
 ):
     db = await get_tenant_db(business_id)
     service = SaleService(db)

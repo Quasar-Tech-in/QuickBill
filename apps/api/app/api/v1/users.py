@@ -91,7 +91,50 @@ async def create_store_user(
         )
 
     primary_db = get_database()
+    tenant_id = ObjectId(current_user.default_business_id) if ObjectId.is_valid(current_user.default_business_id) else current_user.default_business_id
     
+    # Check tenant status (suspension / expiration)
+    if "SUPER_ADMIN" not in current_user.roles and tenant_id:
+        tenant_doc = await primary_db.tenants.find_one({"_id": tenant_id})
+        if tenant_doc:
+            if tenant_doc.get("status") == "SUSPENDED" or tenant_doc.get("subscription", {}).get("status") == "SUSPENDED":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="User management is locked: Store account is currently suspended."
+                )
+            sub = tenant_doc.get("subscription", {})
+            end_date_str = sub.get("endDate") or sub.get("end_date")
+            if end_date_str:
+                try:
+                    clean_str = end_date_str.replace("Z", "+00:00")
+                    end_dt = datetime.fromisoformat(clean_str)
+                    if end_dt.tzinfo is None:
+                        end_dt = end_dt.replace(tzinfo=timezone.utc)
+                    now_dt = datetime.now(timezone.utc)
+                    grace_days = sub.get("gracePeriodDays") or sub.get("grace_period_days") or 7
+                    delta_days = (end_dt.date() - now_dt.date()).days
+                    if delta_days < -grace_days:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="User management is locked: Store subscription license has expired."
+                        )
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
+
+            max_users = sub.get("maxUsers", 5)
+            # Count existing active users for this tenant
+            current_users_count = await primary_db.users.count_documents({
+                "$or": [{"tenantId": tenant_id}, {"tenantId": str(tenant_id)}],
+                "isActive": True
+            })
+            if current_users_count >= max_users:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Subscription user limit reached ({current_users_count}/{max_users} staff users). Please contact Super Admin to upgrade your subscription plan."
+                )
+
     # Check if user already exists
     existing = await primary_db.users.find_one({"email": clean_email})
     if existing:
@@ -100,7 +143,6 @@ async def create_store_user(
             detail=f"User with email '{clean_email}' already exists."
         )
 
-    tenant_id = ObjectId(current_user.default_business_id) if ObjectId.is_valid(current_user.default_business_id) else current_user.default_business_id
     now = datetime.now(timezone.utc)
     hashed = get_password_hash(req.password)
 
@@ -143,6 +185,17 @@ async def update_store_user(
         )
 
     primary_db = get_database()
+    tenant_id = ObjectId(current_user.default_business_id) if ObjectId.is_valid(current_user.default_business_id) else current_user.default_business_id
+
+    # Check tenant status (suspension / expiration)
+    if "SUPER_ADMIN" not in current_user.roles and tenant_id:
+        tenant_doc = await primary_db.tenants.find_one({"_id": tenant_id})
+        if tenant_doc and (tenant_doc.get("status") == "SUSPENDED" or tenant_doc.get("subscription", {}).get("status") == "SUSPENDED"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User management is locked: Store account is currently suspended."
+            )
+
     target_oid = ObjectId(user_id) if ObjectId.is_valid(user_id) else None
     if not target_oid:
         raise HTTPException(status_code=400, detail="Invalid user ID format.")
@@ -198,6 +251,17 @@ async def delete_store_user(
         raise HTTPException(status_code=400, detail="Cannot delete your own active administrator account.")
 
     primary_db = get_database()
+    tenant_id = ObjectId(current_user.default_business_id) if ObjectId.is_valid(current_user.default_business_id) else current_user.default_business_id
+
+    # Check tenant status (suspension / expiration)
+    if "SUPER_ADMIN" not in current_user.roles and tenant_id:
+        tenant_doc = await primary_db.tenants.find_one({"_id": tenant_id})
+        if tenant_doc and (tenant_doc.get("status") == "SUSPENDED" or tenant_doc.get("subscription", {}).get("status") == "SUSPENDED"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User management is locked: Store account is currently suspended."
+            )
+
     target_oid = ObjectId(user_id) if ObjectId.is_valid(user_id) else None
     if not target_oid:
         raise HTTPException(status_code=400, detail="Invalid user ID format.")

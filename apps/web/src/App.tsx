@@ -20,13 +20,15 @@ import { TransactionsView } from './views/TransactionsView';
 import { ReportsView } from './views/ReportsView';
 import { SettingsView } from './views/SettingsView';
 import { SuperAdminView } from './views/SuperAdminView';
+import { SuperAdminDashboardView } from './views/SuperAdminDashboardView';
+import { WorkspacePreviewView } from './views/WorkspacePreviewView';
 import { TenantLoginView } from './views/TenantLoginView';
 import { SuperAdminLoginView } from './views/SuperAdminLoginView';
 import { InvoicePrintModal } from './components/InvoicePrintModal';
 import { store } from './services/store';
 import { Invoice, Tenant, User } from './types';
 
-import { AlertTriangle, RefreshCw, LogOut, Lock } from 'lucide-react';
+import { AlertTriangle, RefreshCw, LogOut, Lock, ShieldCheck, Clock, ArrowRight } from 'lucide-react';
 
 // Helper to determine the landing route based on user role
 const getDefaultPathForRole = (user: User | null): string => {
@@ -63,6 +65,14 @@ const AppLayout: React.FC<AppLayoutProps> = ({
   });
   const [isRefreshingLocations, setIsRefreshingLocations] = useState(false);
 
+  const activeTenant = store.getActiveTenant();
+  const isSuperAdmin = currentUser.role === 'SUPER_ADMIN';
+  const isViewingAsTenant = isSuperAdmin && location.pathname !== '/superadmin' && location.pathname !== '/workspace-preview' && location.pathname !== '/dashboard';
+
+  const sub = activeTenant?.subscription;
+  const daysRemaining = sub?.daysRemaining ?? 365;
+  const isExpiringSoon = !isSuperAdmin && daysRemaining <= 14;
+
   // Sync and fetch locations on mount or tenant switch
   const checkActiveLocations = async () => {
     if (!isStaffNonAdmin) return;
@@ -83,10 +93,19 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     }
   }, [currentUser]);
 
-  // Enforce role-based route access guard
+  // Enforce role-based route access guard and store status lockout
   useEffect(() => {
     const role = currentUser.role;
     const path = location.pathname;
+
+    // Enforce store suspension / expiration lockout guard for tenant users
+    if (!isSuperAdmin && store.isStoreLocked()) {
+      const lockedPaths = ['/pos', '/inventory', '/purchase-orders', '/parties', '/ledger', '/settings'];
+      if (lockedPaths.some(p => path === p || path.startsWith(p + '/'))) {
+        navigate('/dashboard', { replace: true });
+        return;
+      }
+    }
 
     if (role === 'CASHIER') {
       const allowedCashierPaths = ['/pos', '/invoices', '/transactions', '/parties', '/ledger'];
@@ -103,7 +122,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
         navigate('/dashboard', { replace: true });
       }
     }
-  }, [currentUser, location.pathname, navigate]);
+  }, [currentUser, location.pathname, navigate, isSuperAdmin]);
 
   // If non-admin staff has 0 active branch locations available
   const isBranchLockedOut = isStaffNonAdmin && activeLocationsList.length === 0;
@@ -125,6 +144,80 @@ const AppLayout: React.FC<AppLayoutProps> = ({
 
       {/* Main Content Area */}
       <div className="main-wrapper">
+        {/* Super Admin Tenant Impersonation Top Floating Banner */}
+        {isViewingAsTenant && (
+          <div 
+            style={{
+              backgroundColor: '#1e1b4b',
+              color: '#ffffff',
+              padding: '8px 24px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: '0.82rem',
+              borderBottom: '1px solid #312e81',
+              flexWrap: 'wrap',
+              gap: 10,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 22, height: 22, borderRadius: '50%', backgroundColor: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <ShieldCheck size={13} color="#ffffff" />
+              </div>
+              <span>
+                <strong>Super Admin Workspace Mode:</strong> Viewing <strong>{activeTenant.name}</strong> ({activeTenant.plan} Tier • Expires: {sub?.endDate ? new Date(sub.endDate).toLocaleDateString() : 'Active'})
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button 
+                type="button" 
+                className="btn btn-xs" 
+                style={{ backgroundColor: '#4f46e5', color: '#ffffff', border: 'none', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+                onClick={() => navigate('/superadmin')}
+              >
+                <span>Return to Super Admin Hub</span>
+                <ArrowRight size={12} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Tenant License Expiration Alert Banner */}
+        {isExpiringSoon && (
+          <div 
+            style={{
+              backgroundColor: daysRemaining < 0 ? '#fef2f2' : '#fffbeb',
+              color: daysRemaining < 0 ? '#991b1b' : '#92400e',
+              padding: '8px 24px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: '0.82rem',
+              borderBottom: `1px solid ${daysRemaining < 0 ? '#fca5a5' : '#fde68a'}`,
+              fontWeight: 600
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Clock size={15} />
+              <span>
+                {daysRemaining < 0 
+                  ? `License expired ${Math.abs(daysRemaining)} day(s) ago. Please contact Super Admin to renew your subscription.`
+                  : `Your store subscription expires in ${daysRemaining} day(s) (${sub?.endDate ? new Date(sub.endDate).toLocaleDateString() : ''}). Please contact Super Admin for renewal.`}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-xs btn-secondary"
+              onClick={() => navigate('/settings')}
+              style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+            >
+              View License
+            </button>
+          </div>
+        )}
+
         <Header 
           isBackendOnline={isBackendOnline} 
           onQuickSale={() => navigate('/pos')} 
@@ -352,10 +445,14 @@ export const App: React.FC = () => {
             <Route 
               path="/dashboard" 
               element={
-                <DashboardView 
-                  onNavigate={() => {}} 
-                  onViewInvoice={(inv) => setViewingInvoice(inv)} 
-                />
+                currentUser.role === 'SUPER_ADMIN' ? (
+                  <SuperAdminDashboardView onNavigateToTab={() => {}} />
+                ) : (
+                  <DashboardView 
+                    onNavigate={() => {}} 
+                    onViewInvoice={(inv) => setViewingInvoice(inv)} 
+                  />
+                )
               } 
             />
             <Route 
@@ -385,6 +482,16 @@ export const App: React.FC = () => {
               path="/superadmin" 
               element={
                 <SuperAdminView 
+                  onTenantSwitched={(tenant) => {
+                    handleTenantSwitched(tenant);
+                  }} 
+                />
+              } 
+            />
+            <Route 
+              path="/workspace-preview" 
+              element={
+                <WorkspacePreviewView 
                   onTenantSwitched={(tenant) => {
                     handleTenantSwitched(tenant);
                   }} 

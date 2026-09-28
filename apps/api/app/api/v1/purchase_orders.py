@@ -4,7 +4,7 @@ import secrets
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.database import get_database, get_tenant_db
-from app.core.security import get_current_user, get_current_business_id, TokenPayload
+from app.core.security import get_current_user, get_current_business_id, enforce_active_store_operations, TokenPayload
 from app.schemas.common import PaginatedResponse
 from app.schemas.purchase_orders import (
     PurchaseOrderCreate,
@@ -164,7 +164,7 @@ async def list_purchase_orders(
 @router.post("", response_model=PurchaseOrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_purchase_order(
     payload: PurchaseOrderCreate,
-    business_id: str = Depends(get_current_business_id),
+    business_id: str = Depends(enforce_active_store_operations),
     current_user: TokenPayload = Depends(get_current_user)
 ):
     if "CASHIER" in current_user.roles and len(current_user.roles) == 1:

@@ -45,14 +45,7 @@ class MultiTenantDatabaseManager:
             # If tenant not found or default store, return primary DB
             return primary
             
-        # 2. Check tenant lifecycle status
-        if tenant.get("status") == "SUSPENDED":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Store tenant account is suspended. Contact Super Administrator."
-            )
-
-        # 3. Dynamic Database Resolution based on onboarding database_config
+        # 2. Dynamic Database Resolution based on onboarding database_config
         db_config = tenant.get("databaseConfig", {})
         isolation_mode = db_config.get("isolationMode", "SHARED")
         target_db_name = db_config.get("databaseName", settings.DATABASE_NAME)

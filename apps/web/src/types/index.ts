@@ -240,6 +240,38 @@ export interface DashboardStats {
   netProfit: number;
 }
 
+export type SubscriptionStatus = 'ACTIVE' | 'EXPIRING_SOON' | 'GRACE_PERIOD' | 'EXPIRED' | 'SUSPENDED' | 'TRIAL';
+export type BillingCycle = 'MONTHLY' | 'QUARTERLY' | 'ANNUAL' | 'LIFETIME' | 'CUSTOM';
+export type PlanTier = 'STARTER' | 'PROFESSIONAL' | 'ENTERPRISE' | 'CUSTOM';
+
+export interface SubscriptionRenewalHistory {
+  date: string;
+  extendedUntil: string;
+  renewedBy: string;
+  amount?: number;
+  billingCycle?: BillingCycle;
+  notes?: string;
+}
+
+export interface TenantSubscription {
+  planId: PlanTier;
+  planName: string;
+  status: SubscriptionStatus;
+  maxUsers: number;
+  maxLocations: number;
+  billingCycle: BillingCycle;
+  startDate: string;
+  endDate: string; // ISO string for expiration date
+  daysRemaining?: number;
+  gracePeriodDays?: number; // default: 7
+  pricePerCycle?: number;
+  currency?: string;
+  autoRenew?: boolean;
+  features: string[]; // ['pos', 'inventory', 'ledger', 'purchase_orders', 'reports', 'multi_location', 'custom_db', 'barcode_labels', 'export_data']
+  renewalHistory?: SubscriptionRenewalHistory[];
+  notes?: string;
+}
+
 export interface TenantDatabaseConfig {
   isolationMode: 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER';
   mongodbUri?: string;
@@ -250,7 +282,7 @@ export interface Tenant {
   id: string;
   name: string;
   slug: string;
-  plan: 'STARTER' | 'PROFESSIONAL' | 'ENTERPRISE';
+  plan: PlanTier;
   status: 'ACTIVE' | 'SUSPENDED';
   adminEmail: string;
   phone?: string;
@@ -258,11 +290,13 @@ export interface Tenant {
   address?: string;
   createdAt: string;
   databaseConfig: TenantDatabaseConfig;
+  subscription: TenantSubscription;
   stats: {
     productsCount: number;
     invoicesCount: number;
     monthlyGmv: number;
     usersCount: number;
+    locationsCount?: number;
   };
 }
 
@@ -272,6 +306,10 @@ export interface PlatformStats {
   globalCombinedGmv: number;
   totalProducts: number;
   totalInvoices: number;
+  totalUsers: number;
+  totalLocations: number;
+  expiringSubscriptionsCount: number;
+  expiredSubscriptionsCount: number;
   databaseClustersCount: number;
 }
 
