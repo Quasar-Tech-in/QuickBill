@@ -1382,9 +1382,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       {/* MODAL 1: PROVISION NEW TENANT */}
       {/* ========================================================================= */}
       {isCreateModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsCreateModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 700 }}>
-            <div className="card-header">
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: 700, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="card-header" style={{ flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: 'var(--primary-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-600)' }}>
                   <Building size={18} />
@@ -1399,8 +1399,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               </button>
             </div>
 
-            <form onSubmit={handleCreateTenant} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 18, maxHeight: '65vh', overflowY: 'auto' }}>
+            <form onSubmit={handleCreateTenant} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 18, maxHeight: 'calc(90vh - 140px)', overflowY: 'auto', flex: 1, padding: '20px 24px' }}>
                 {/* 1. Business Profile */}
                 <div>
                   <span style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--primary-600)', letterSpacing: '0.05em' }}>
@@ -1560,7 +1560,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                 </div>
               </div>
 
-              <div className="modal-footer" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--neutral-200)' }}>
+              <div className="modal-footer" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--neutral-200)', flexShrink: 0, background: 'var(--neutral-50)' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsCreateModalOpen(false)}>
                   Cancel
                 </button>
@@ -1577,9 +1577,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       {/* MODAL 2: SUBSCRIPTION RENEWAL & QUOTA MODAL */}
       {/* ========================================================================= */}
       {isRenewalModalOpen && selectedTenant && (
-        <div className="modal-overlay" onClick={() => setIsRenewalModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 580 }}>
-            <div className="card-header">
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: 580, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="card-header" style={{ flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <CreditCard size={18} color="var(--primary-600)" />
                 <div>
@@ -1594,8 +1594,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               </button>
             </div>
 
-            <form onSubmit={handleExecuteRenewal} style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <form onSubmit={handleExecuteRenewal} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16, maxHeight: 'calc(90vh - 140px)', overflowY: 'auto', flex: 1, padding: '20px 24px' }}>
                 {/* Current Status Info */}
                 <div style={{ backgroundColor: 'var(--neutral-50)', padding: 12, borderRadius: 8, display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
                   <div>
@@ -1721,11 +1721,11 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                 </div>
               </div>
 
-              <div className="modal-footer" style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--neutral-200)' }}>
+              <div className="modal-footer" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--neutral-200)', flexShrink: 0, background: 'var(--neutral-50)' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsRenewalModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button type="submit" className="btn btn-primary" style={{ fontWeight: 700 }}>
                   Confirm License Renewal
                 </button>
               </div>
@@ -1738,9 +1738,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       {/* MODAL 3: EDIT TENANT PROFILE */}
       {/* ========================================================================= */}
       {isEditTenantModalOpen && selectedTenant && (
-        <div className="modal-overlay" onClick={() => setIsEditTenantModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
-            <div className="card-header">
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: 520, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="card-header" style={{ flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Edit3 size={18} color="var(--primary-600)" />
                 <h3 className="card-title">Edit Store Profile</h3>
@@ -1750,61 +1750,63 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               </button>
             </div>
 
-            <form onSubmit={handleSaveEditTenant} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div className="form-group">
-                <label className="form-label">Store / Company Name</label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={editTenantForm.name}
-                  onChange={(e) => setEditTenantForm({ ...editTenantForm, name: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Admin Email</label>
-                <input
-                  type="email"
-                  required
-                  className="form-input"
-                  value={editTenantForm.adminEmail}
-                  onChange={(e) => setEditTenantForm({ ...editTenantForm, adminEmail: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <form onSubmit={handleSaveEditTenant} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: 'calc(90vh - 140px)', overflowY: 'auto', flex: 1, padding: '20px 24px' }}>
                 <div className="form-group">
-                  <label className="form-label">Phone</label>
+                  <label className="form-label">Store / Company Name</label>
+                  <input
+                    type="text"
+                    required
+                    className="form-input"
+                    value={editTenantForm.name}
+                    onChange={(e) => setEditTenantForm({ ...editTenantForm, name: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Admin Email</label>
+                  <input
+                    type="email"
+                    required
+                    className="form-input"
+                    value={editTenantForm.adminEmail}
+                    onChange={(e) => setEditTenantForm({ ...editTenantForm, adminEmail: e.target.value })}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Phone</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={editTenantForm.phone}
+                      onChange={(e) => setEditTenantForm({ ...editTenantForm, phone: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">GSTIN</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={editTenantForm.gstin}
+                      onChange={(e) => setEditTenantForm({ ...editTenantForm, gstin: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Address</label>
                   <input
                     type="text"
                     className="form-input"
-                    value={editTenantForm.phone}
-                    onChange={(e) => setEditTenantForm({ ...editTenantForm, phone: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">GSTIN</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={editTenantForm.gstin}
-                    onChange={(e) => setEditTenantForm({ ...editTenantForm, gstin: e.target.value })}
+                    value={editTenantForm.address}
+                    onChange={(e) => setEditTenantForm({ ...editTenantForm, address: e.target.value })}
                   />
                 </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Address</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={editTenantForm.address}
-                  onChange={(e) => setEditTenantForm({ ...editTenantForm, address: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <div className="modal-footer" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--neutral-200)', flexShrink: 0, background: 'var(--neutral-50)' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsEditTenantModalOpen(false)}>
                   Cancel
                 </button>
@@ -1821,9 +1823,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       {/* MODAL 4: RESET STORE ADMIN PASSWORD */}
       {/* ========================================================================= */}
       {isResetPwModalOpen && selectedTenant && (
-        <div className="modal-overlay" onClick={() => setIsResetPwModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
-            <div className="card-header">
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: 440, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="card-header" style={{ flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <KeyRound size={18} color="var(--primary-600)" />
                 <h3 className="card-title">Reset Store Admin Password</h3>
@@ -1833,36 +1835,38 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               </button>
             </div>
 
-            <form onSubmit={handleResetPassword} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <p style={{ fontSize: '0.82rem', color: 'var(--neutral-600)', margin: 0 }}>
-                Reset master credentials for <strong>{selectedTenant.name}</strong> ({selectedTenant.adminEmail}).
-              </p>
+            <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: 'calc(90vh - 140px)', overflowY: 'auto', flex: 1, padding: '20px 24px' }}>
+                <p style={{ fontSize: '0.82rem', color: 'var(--neutral-600)', margin: 0 }}>
+                  Reset master credentials for <strong>{selectedTenant.name}</strong> ({selectedTenant.adminEmail}).
+                </p>
 
-              <div className="form-group">
-                <label className="form-label">New Store Password</label>
-                <input
-                  type="password"
-                  required
-                  className="form-input"
-                  placeholder="At least 6 characters"
-                  value={resetPwForm.newPassword}
-                  onChange={(e) => setResetPwForm({ ...resetPwForm, newPassword: e.target.value })}
-                />
+                <div className="form-group">
+                  <label className="form-label">New Store Password</label>
+                  <input
+                    type="password"
+                    required
+                    className="form-input"
+                    placeholder="At least 6 characters"
+                    value={resetPwForm.newPassword}
+                    onChange={(e) => setResetPwForm({ ...resetPwForm, newPassword: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Confirm New Password</label>
+                  <input
+                    type="password"
+                    required
+                    className="form-input"
+                    placeholder="Re-enter new password"
+                    value={resetPwForm.confirmPassword}
+                    onChange={(e) => setResetPwForm({ ...resetPwForm, confirmPassword: e.target.value })}
+                  />
+                </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Confirm New Password</label>
-                <input
-                  type="password"
-                  required
-                  className="form-input"
-                  placeholder="Re-enter new password"
-                  value={resetPwForm.confirmPassword}
-                  onChange={(e) => setResetPwForm({ ...resetPwForm, confirmPassword: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <div className="modal-footer" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--neutral-200)', flexShrink: 0, background: 'var(--neutral-50)' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsResetPwModalOpen(false)}>
                   Cancel
                 </button>
@@ -1879,9 +1883,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       {/* MODAL 5: RENEWAL HISTORY AUDIT */}
       {/* ========================================================================= */}
       {isHistoryModalOpen && selectedTenant && (
-        <div className="modal-overlay" onClick={() => setIsHistoryModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
-            <div className="card-header">
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: 600, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="card-header" style={{ flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Clock size={18} color="var(--primary-600)" />
                 <h3 className="card-title">Renewal History & Audit Trail</h3>
@@ -1891,7 +1895,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               </button>
             </div>
 
-            <div style={{ padding: 20, maxHeight: 350, overflowY: 'auto' }}>
+            <div style={{ padding: '20px 24px', maxHeight: 'calc(90vh - 140px)', overflowY: 'auto', flex: 1 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {selectedTenant.subscription?.renewalHistory?.map((h, idx) => (
                   <div key={idx} style={{ padding: 12, borderRadius: 8, backgroundColor: 'var(--neutral-50)', border: '1px solid var(--neutral-200)', fontSize: '0.8rem' }}>
@@ -1908,7 +1912,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               </div>
             </div>
 
-            <div className="modal-footer" style={{ padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--neutral-200)' }}>
+            <div className="modal-footer" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--neutral-200)', flexShrink: 0, background: 'var(--neutral-50)' }}>
               <button className="btn btn-secondary" onClick={() => setIsHistoryModalOpen(false)}>
                 Close
               </button>
@@ -1921,9 +1925,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       {/* MODAL 6: TEST MONGO CONNECTION */}
       {/* ========================================================================= */}
       {isTestDbOpen && (
-        <div className="modal-overlay" onClick={() => setIsTestDbOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
-            <div className="card-header">
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: 540, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="card-header" style={{ flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Database size={18} color="var(--primary-600)" />
                 <h3 className="card-title">Test MongoDB Link</h3>
@@ -1933,7 +1937,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               </button>
             </div>
 
-            <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14, maxHeight: 'calc(90vh - 140px)', overflowY: 'auto', flex: 1 }}>
               <div className="form-group">
                 <label className="form-label">Connection String</label>
                 <input
@@ -1943,7 +1947,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                   onChange={(e) => setTestUri(e.target.value)}
                 />
               </div>
-              <div className="form-group">
+              <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Target Database</label>
                 <input
                   type="text"
@@ -1958,16 +1962,16 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                   {testResult.message}
                 </div>
               )}
+            </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setIsTestDbOpen(false)}>
-                  Close
-                </button>
-                <button type="button" className="btn btn-primary" onClick={() => handleTestConnection(testUri, testDbName)}>
-                  <RefreshCw size={14} className={testResult?.testing ? 'spin' : ''} />
-                  <span>Execute Ping</span>
-                </button>
-              </div>
+            <div className="modal-footer" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--neutral-200)', flexShrink: 0, background: 'var(--neutral-50)' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setIsTestDbOpen(false)}>
+                Close
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => handleTestConnection(testUri, testDbName)}>
+                <RefreshCw size={14} className={testResult?.testing ? 'spin' : ''} />
+                <span>Execute Ping</span>
+              </button>
             </div>
           </div>
         </div>
