@@ -20,10 +20,13 @@ import {
   RotateCw,
   Divide,
   Calculator,
-  Scale
+  Scale,
+  QrCode
 } from 'lucide-react';
 import { Item, Party, CartItem, Invoice, ItemCategory } from '../types';
 import { store } from '../services/store';
+import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
+import { WebcamScannerModal } from '../components/WebcamScannerModal';
 
 // Helper to parse decimal numbers or fraction expressions (e.g. "4/30", "6/12", "1 4/12", "1+4/12")
 const parseFractionString = (str: string): number | null => {
@@ -105,6 +108,35 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     wholeUnits: '0',
     partsGiven: '1',
     totalParts: '12',
+  });
+
+  const [isWebcamOpen, setIsWebcamOpen] = useState(false);
+
+  // Global Hardware USB Barcode Scanner Handler
+  const handleGlobalBarcodeScan = (scannedCode: string) => {
+    const clean = scannedCode.trim();
+    let publicId = clean;
+    if (clean.startsWith('ITEM:')) {
+      publicId = clean.replace('ITEM:', '').trim();
+    }
+
+    const matchedItem = items.find(
+      (it) =>
+        it.id === clean ||
+        it.publicItemId === publicId ||
+        it.publicItemId === clean ||
+        it.sku === clean ||
+        it.barcode === clean
+    );
+
+    if (matchedItem) {
+      handleAddToCart(matchedItem);
+    }
+  };
+
+  useBarcodeScanner({
+    onScan: handleGlobalBarcodeScan,
+    enabled: true,
   });
 
   // Subscribe to store posCart updates (e.g. when cleared upon location switch)
@@ -776,6 +808,31 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                   </button>
                 )}
               </div>
+
+              {/* Webcam Camera Scanner Button */}
+              <button
+                type="button"
+                onClick={() => setIsWebcamOpen(true)}
+                title="Open Webcam Camera Scanner"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1.5px solid var(--primary-500)',
+                  backgroundColor: 'var(--primary-50)',
+                  color: 'var(--primary-700)',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
+                <QrCode size={16} color="var(--primary-600)" />
+                <span>Webcam Scanner</span>
+              </button>
 
               {/* Multi-Select Category Dropdown matching InventoryView */}
               <div style={{ position: 'relative', flexShrink: 0 }} ref={categoryDropdownRef}>
@@ -2388,6 +2445,12 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           </div>
         );
       })()}
+
+      <WebcamScannerModal
+        isOpen={isWebcamOpen}
+        onClose={() => setIsWebcamOpen(false)}
+        onScanSuccess={handleGlobalBarcodeScan}
+      />
     </div>
   );
 };

@@ -13,51 +13,55 @@ class LabelService:
     def generate_single_thermal_50x30(
         config: LabelPrintConfig, store_name: str
     ) -> bytes:
-        """Generates a 50mm x 30mm standard product thermal sticker PDF."""
+        """
+        Generates a 50mm x 30mm standard product thermal sticker PDF.
+        Clean 2-column layout preventing MRP & Price collision.
+        """
         buffer = BytesIO()
         width, height = 50 * mm, 30 * mm
         c = canvas.Canvas(buffer, pagesize=(width, height))
 
+        display_store = config.store_name or store_name or "QuickBill Store"
+        raw_payload = (config.public_item_id or config.barcode or config.sku or "ITM-1001").replace("ITEM:", "").strip()
+
         for _ in range(config.quantity):
-            # Border / Margins
-            display_store = config.store_name or store_name or "QuickBill Store"
-            
-            # Header - Store Name
+            # Outer boundary line guide
+            c.setLineWidth(0.3)
+            c.setStrokeColorRGB(0.85, 0.85, 0.85)
+            c.rect(1 * mm, 1 * mm, 48 * mm, 28 * mm)
+
+            # 1. Header - Store Name
             if config.show_store_name:
                 c.setFont("Helvetica-Bold", 7)
-                c.drawCentredString(25 * mm, 26 * mm, display_store[:30])
+                c.drawCentredString(25 * mm, 25.5 * mm, display_store[:28])
 
-            # Item Name
+            # 2. Item Name
             c.setFont("Helvetica-Bold", 8)
-            c.drawCentredString(25 * mm, 22.5 * mm, config.item_name[:26])
+            c.drawCentredString(25 * mm, 21.5 * mm, config.item_name[:26])
 
-            # Barcode or QR Code
-            barcode_payload = config.public_item_id or config.barcode or config.sku or "ITEM-1001"
-            if not barcode_payload.startswith("ITEM:"):
-                barcode_payload = f"ITEM:{barcode_payload}"
-
-            # Render Code128 barcode
+            # 3. Centered Code128 Barcode (barWidth=0.45)
             try:
-                bc = code128.Code128(barcode_payload.replace("ITEM:", ""), barHeight=9 * mm, barWidth=0.85)
-                bc.drawOn(c, 7 * mm, 11 * mm)
+                bc = code128.Code128(raw_payload, barHeight=7.5 * mm, barWidth=0.45)
+                bc.drawOn(c, 11 * mm, 11 * mm)
+                c.setFont("Helvetica", 5.5)
+                c.drawCentredString(25 * mm, 8 * mm, raw_payload)
             except Exception:
-                c.setFont("Helvetica", 6)
-                c.drawCentredString(25 * mm, 14 * mm, barcode_payload)
+                c.setFont("Helvetica", 5.5)
+                c.drawCentredString(25 * mm, 11 * mm, raw_payload)
 
-            # Footer: SKU and Prices
-            c.setFont("Helvetica", 6.5)
-            footer_parts = []
+            # 4. Footer Layout (Clean 2-column alignment)
+            c.setFont("Helvetica", 5.5)
             if config.show_sku and config.sku:
-                footer_parts.append(f"SKU: {config.sku[:12]}")
+                c.drawString(3 * mm, 3.5 * mm, f"SKU: {config.sku[:12]}")
+
+            # Draw MRP right-aligned above sale price
             if config.show_mrp and config.mrp:
-                footer_parts.append(f"MRP: ₹{config.mrp:,.2f}")
-            
-            if footer_parts:
-                c.drawString(4 * mm, 5.5 * mm, " | ".join(footer_parts))
+                c.setFont("Helvetica", 5.5)
+                c.drawRightString(47 * mm, 7.5 * mm, f"MRP: Rs. {config.mrp:,.2f}")
 
             if config.show_price and config.sale_price:
-                c.setFont("Helvetica-Bold", 9)
-                c.drawRightString(46 * mm, 5 * mm, f"₹{config.sale_price:,.2f}")
+                c.setFont("Helvetica-Bold", 8)
+                c.drawRightString(47 * mm, 3.5 * mm, f"Rs. {config.sale_price:,.2f}")
 
             c.showPage()
 
@@ -73,13 +77,14 @@ class LabelService:
         Generates 70mm x 12mm Dumbbell / Jewelry String Tag PDF.
         Left Wing (0 - 28mm): Store, Product Name, Bold Price.
         Middle Bridge (28 - 42mm): Thin non-adhesive bridge outline.
-        Right Wing (42 - 70mm): Barcode + SKU.
+        Right Wing (42 - 70mm): Barcode + SKU (barWidth=0.23 for strict 22mm width).
         """
         buffer = BytesIO()
         width, height = 70 * mm, 12 * mm
         c = canvas.Canvas(buffer, pagesize=(width, height))
 
         display_store = config.store_name or store_name or "QuickBill"
+        raw_code = (config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
 
         for _ in range(config.quantity):
             # --- LEFT WING (0mm to 28mm) ---
@@ -91,18 +96,17 @@ class LabelService:
             c.drawString(2 * mm, 5.5 * mm, config.item_name[:20])
 
             if config.show_price and config.sale_price:
-                c.setFont("Helvetica-Bold", 7.5)
-                c.drawString(2 * mm, 2 * mm, f"₹{config.sale_price:,.2f}")
+                c.setFont("Helvetica-Bold", 7)
+                c.drawString(2 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
 
             # --- MIDDLE BRIDGE MARKER (28mm to 42mm) ---
             c.setLineWidth(0.3)
             c.setStrokeColorRGB(0.7, 0.7, 0.7)
-            c.rect(28 * mm, 3.5 * mm, 14 * mm, 5 * mm) # Bridge visual guide
+            c.rect(28 * mm, 3.5 * mm, 14 * mm, 5 * mm) # Bridge cutout guide
 
             # --- RIGHT WING (42mm to 70mm) ---
-            raw_code = config.barcode or config.sku or "ITM-01"
             try:
-                bc = code128.Code128(raw_code, barHeight=6 * mm, barWidth=0.7)
+                bc = code128.Code128(raw_code, barHeight=5.5 * mm, barWidth=0.23)
                 bc.drawOn(c, 44 * mm, 4.5 * mm)
             except Exception:
                 c.setFont("Helvetica", 5)
@@ -141,7 +145,6 @@ class LabelService:
         cell_w = usable_w / cols
         cell_h = usable_h / rows
 
-        # Expand configurations by quantity
         all_labels: List[LabelPrintConfig] = []
         for cfg in configs:
             for _ in range(cfg.quantity):
@@ -159,16 +162,14 @@ class LabelService:
             col = slot_on_page % cols
             row = slot_on_page // cols
 
-            # Calculate top-left of cell (ReportLab origin is bottom-left)
             cell_x = margin_x + (col * cell_w)
             cell_y = page_h - margin_y - ((row + 1) * cell_h)
 
-            # Draw Cell Border (Dashed Guide)
+            # Draw Cell Border
             c.setLineWidth(0.2)
-            c.setStrokeColorRGB(0.85, 0.85, 0.85)
+            c.setStrokeColorRGB(0.8, 0.8, 0.8)
             c.rect(cell_x, cell_y, cell_w, cell_h)
 
-            # Render Label Content Inside Cell
             display_store = cfg.store_name or store_name or "QuickBill"
             cx = cell_x + (cell_w / 2)
 
@@ -179,10 +180,10 @@ class LabelService:
             c.drawCentredString(cx, cell_y + cell_h - (7.5 * mm), cfg.item_name[:24])
 
             # Barcode
-            raw_code = cfg.barcode or cfg.public_item_id or cfg.sku or "ITEM-101"
+            raw_code = (cfg.barcode or cfg.public_item_id or cfg.sku or "ITEM-101").replace("ITEM:", "")
             try:
                 bar_h = 7 * mm if cols >= 4 else 9 * mm
-                bc = code128.Code128(raw_code, barHeight=bar_h, barWidth=0.6 if cols >= 4 else 0.75)
+                bc = code128.Code128(raw_code, barHeight=bar_h, barWidth=0.45 if cols >= 4 else 0.55)
                 bc.drawOn(c, cell_x + (4 * mm), cell_y + (6 * mm))
             except Exception:
                 c.setFont("Helvetica", 6)
@@ -190,7 +191,7 @@ class LabelService:
 
             if cfg.show_price and cfg.sale_price:
                 c.setFont("Helvetica-Bold", 8)
-                c.drawCentredString(cx, cell_y + (2 * mm), f"₹ {cfg.sale_price:,.2f}")
+                c.drawCentredString(cx, cell_y + (2 * mm), f"Rs. {cfg.sale_price:,.2f}")
 
             index += 1
 
@@ -233,7 +234,7 @@ class LabelService:
         c.drawString(6 * mm, 118 * mm, f"TRACKING / ORDER ID: {order_id}")
 
         try:
-            bc = code128.Code128(ship_payload, barHeight=18 * mm, barWidth=1.1)
+            bc = code128.Code128(ship_payload, barHeight=18 * mm, barWidth=0.85)
             bc.drawOn(c, 10 * mm, 95 * mm)
         except Exception:
             c.setFont("Helvetica", 8)

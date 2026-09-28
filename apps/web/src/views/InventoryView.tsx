@@ -27,12 +27,14 @@ import {
   Sparkles,
   Eye,
   Check,
-  Boxes
+  Boxes,
+  Printer
 } from 'lucide-react';
 import { Item, StoreLocation, ItemLocationInventory, ItemCategory, ItemImage } from '../types';
 import { store } from '../services/store';
 import { StatusBadge } from '../components/StatusBadge';
 import { QRModal } from '../components/QRModal';
+import { PrintLabelModal } from '../components/PrintLabelModal';
 import { CustomSelect } from '../components/CustomSelect';
 import { Pagination } from '../components/Pagination';
 import { SyncInventoryModal } from '../components/SyncInventoryModal';
@@ -71,6 +73,7 @@ export const InventoryView: React.FC = () => {
 
   // Modals
   const [selectedItemForQR, setSelectedItemForQR] = useState<Item | null>(null);
+  const [printLabelTarget, setPrintLabelTarget] = useState<Item | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
 
@@ -1065,6 +1068,14 @@ export const InventoryView: React.FC = () => {
                         >
                           <QrCode size={14} color="var(--primary-600)" />
                         </button>
+                        <button
+                          className="btn btn-secondary btn-icon btn-sm"
+                          title="Print Barcode & String Labels"
+                          onClick={() => setPrintLabelTarget(item)}
+                          style={{ padding: 5 }}
+                        >
+                          <Printer size={14} color="var(--primary-600)" />
+                        </button>
                         {canManage && (
                           <button
                             className="btn btn-secondary btn-icon btn-sm"
@@ -1119,6 +1130,18 @@ export const InventoryView: React.FC = () => {
       {selectedItemForQR && (
         <QRModal item={selectedItemForQR} onClose={() => setSelectedItemForQR(null)} />
       )}
+
+      {/* Print Label Modal */}
+      <PrintLabelModal
+        isOpen={!!printLabelTarget}
+        onClose={() => setPrintLabelTarget(null)}
+        itemName={printLabelTarget?.name}
+        itemSku={printLabelTarget?.sku}
+        itemPrice={printLabelTarget?.salePrice}
+        itemMrp={printLabelTarget?.mrp}
+        publicItemId={printLabelTarget?.publicItemId}
+        defaultStockCount={printLabelTarget?.currentStock}
+      />
 
       {/* Add / Edit Product Modal */}
       {isAddModalOpen && (

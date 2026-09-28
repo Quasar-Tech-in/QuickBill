@@ -13,7 +13,8 @@ import {
   Sparkles, 
   ShieldCheck, 
   LogOut,
-  Lock
+  Lock,
+  Truck
 } from 'lucide-react';
 import { store } from '../services/store';
 
@@ -118,6 +119,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
       label: 'Purchase Orders', 
       icon: ShoppingBag, 
       roles: ['TENANT_ADMIN', 'MANAGER'],
+      isLockedWhenStoreSuspended: true
+    },
+    { 
+      id: 'shipping', 
+      path: '/shipping',
+      label: 'Shipping & Dispatch', 
+      icon: Truck, 
+      roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
       isLockedWhenStoreSuspended: true
     },
     { 
