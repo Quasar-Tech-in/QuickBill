@@ -50,9 +50,8 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
   const [step, setStep] = useState<AuthStep>('CREDENTIALS');
 
   // Step 1 Form state
-  const [email, setEmail] = useState<string>('superadmin@quickbill.local');
-  const [password, setPassword] = useState<string>('superadmin123');
-  const [securityKey, setSecurityKey] = useState<string>('QB-ROOT-AUTH-99');
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
 
   // 2FA Verification / Setup state
@@ -281,14 +280,6 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
     }
   };
 
-  const handleFillSuperAdminDemo = () => {
-    setEmail('superadmin@quickbill.local');
-    setPassword('superadmin123');
-    setSecurityKey('QB-ROOT-AUTH-99');
-    setFieldErrors({});
-    setAuthError(null);
-  };
-
   return (
     <div className="superadmin-auth-container">
       {/* Background Matrix & Neon Glow Effects */}
@@ -426,20 +417,6 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
                   )}
                 </div>
 
-                <div className="superadmin-input-group">
-                  <label className="superadmin-label">
-                    <KeyRound size={14} color="#c084fc" />
-                    <span>Cluster Access Token / Security PIN</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="superadmin-input"
-                    placeholder="QB-ROOT-AUTH-99"
-                    value={securityKey}
-                    onChange={(e) => setSecurityKey(e.target.value)}
-                  />
-                </div>
-
                 {/* Authenticate CTA */}
                 <button
                   type="submit"
@@ -457,25 +434,6 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
                   )}
                 </button>
               </form>
-
-              {/* Dev Test Helper Auto-Fill */}
-              <div className="superadmin-demo-box">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.76rem', color: '#e9d5ff', fontWeight: 600 }}>
-                    ⚡ Development Master Test Key:
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleFillSuperAdminDemo}
-                    className="superadmin-fill-btn"
-                  >
-                    Auto-Fill Master Test Key
-                  </button>
-                </div>
-                <div className="superadmin-creds-preview">
-                  <code>superadmin@quickbill.local</code> • <code>superadmin123</code>
-                </div>
-              </div>
             </>
           )}
 

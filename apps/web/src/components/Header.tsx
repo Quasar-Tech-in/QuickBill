@@ -12,7 +12,13 @@ import {
   MapPin,
   AlertTriangle,
   Sparkles,
-  X
+  X,
+  KeyRound,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  CheckCircle2,
+  Lock
 } from 'lucide-react';
 import { store } from '../services/store';
 import { Tenant, StoreLocation } from '../types';
@@ -47,6 +53,18 @@ export const Header: React.FC<HeaderProps> = ({
   const [locations, setLocations] = useState<StoreLocation[]>(store.getLocations());
   const [activeLocation, setActiveLocationState] = useState<StoreLocation>(store.getActiveLocation());
   const [pendingLocationChange, setPendingLocationChange] = useState<StoreLocation | null>(null);
+
+  // Change Password Modal State
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const tenantMenuRef = useRef<HTMLDivElement>(null);
@@ -107,6 +125,46 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleCancelLocationChange = () => {
     setPendingLocationChange(null);
+  };
+
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(null);
+
+    if (!currentPassword) {
+      setPasswordError('Please enter your current password.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 4) {
+      setPasswordError('New password must be at least 4 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New password and confirm password do not match.');
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    try {
+      const res = await store.changePassword(currentPassword, newPassword);
+      if (res.success) {
+        setPasswordSuccess(res.message || 'Password successfully updated!');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => {
+          setIsChangePasswordModalOpen(false);
+          setPasswordSuccess(null);
+        }, 1800);
+      } else {
+        setPasswordError(res.error || 'Failed to update password. Please check your current password.');
+      }
+    } catch (err: any) {
+      setPasswordError(err.message || 'An error occurred while updating your password.');
+    } finally {
+      setIsUpdatingPassword(false);
+    }
   };
 
   const canSwitchLocation = isSuperAdmin || isStoreAdmin || locations.length > 1;
@@ -421,6 +479,27 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
                 </button>
 
+                {/* Change Password Menu Item */}
+                <button
+                  type="button"
+                  className="account-menu-item"
+                  onClick={() => {
+                    setIsAccountMenuOpen(false);
+                    setPasswordError(null);
+                    setPasswordSuccess(null);
+                    setCurrentPassword('');
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setIsChangePasswordModalOpen(true);
+                  }}
+                >
+                  <KeyRound size={16} color="var(--neutral-500)" />
+                  <div className="account-item-text">
+                    <span className="account-item-title">Update Password</span>
+                    <span className="account-item-desc">Change your account security key</span>
+                  </div>
+                </button>
+
                 <div className="account-menu-divider" />
 
                 {/* Sign Out Action */}
@@ -513,6 +592,233 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* CHANGE PASSWORD MODAL */}
+      {isChangePasswordModalOpen && (
+        <div 
+          className="modal-overlay" 
+          onClick={() => !isUpdatingPassword && setIsChangePasswordModalOpen(false)} 
+          style={{ zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <div 
+            className="modal-content" 
+            onClick={(e) => e.stopPropagation()} 
+            style={{ 
+              maxWidth: 440, 
+              width: '100%', 
+              backgroundColor: '#ffffff', 
+              borderRadius: '16px', 
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+            }}
+          >
+            {/* Header */}
+            <div style={{ 
+              padding: '16px 20px', 
+              borderBottom: '1px solid var(--neutral-200)', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between',
+              backgroundColor: 'var(--neutral-50)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ 
+                  width: 36, 
+                  height: 36, 
+                  borderRadius: 8, 
+                  backgroundColor: 'var(--primary-100)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  color: 'var(--primary-700)' 
+                }}>
+                  <KeyRound size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                    Update Account Password
+                  </h3>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
+                    {currentUser?.email}
+                  </span>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => !isUpdatingPassword && setIsChangePasswordModalOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--neutral-400)', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <form onSubmit={handleChangePasswordSubmit} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              
+              {/* Error Message */}
+              {passwordError && (
+                <div style={{ 
+                  backgroundColor: '#fef2f2', 
+                  border: '1px solid #fecaca', 
+                  color: '#b91c1c', 
+                  padding: '10px 12px', 
+                  borderRadius: '8px', 
+                  fontSize: '0.82rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                  <span>{passwordError}</span>
+                </div>
+              )}
+
+              {/* Success Message */}
+              {passwordSuccess && (
+                <div style={{ 
+                  backgroundColor: '#f0fdf4', 
+                  border: '1px solid #bbf7d0', 
+                  color: '#15803d', 
+                  padding: '10px 12px', 
+                  borderRadius: '8px', 
+                  fontSize: '0.82rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+                  <span>{passwordSuccess}</span>
+                </div>
+              )}
+
+              {/* Current Password */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Lock size={13} color="var(--primary-600)" />
+                  <span>Current Password</span>
+                </label>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type={showCurrentPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Enter existing password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 36px 9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--neutral-300)',
+                      fontSize: '0.88rem'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    style={{ position: 'absolute', right: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--neutral-400)' }}
+                  >
+                    {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* New Password */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <KeyRound size={13} color="var(--primary-600)" />
+                    <span>New Password</span>
+                  </label>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Min 4 characters</span>
+                </div>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Enter new strong password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 36px 9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--neutral-300)',
+                      fontSize: '0.88rem'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    style={{ position: 'absolute', right: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--neutral-400)' }}
+                  >
+                    {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm New Password */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Check size={13} color="var(--primary-600)" />
+                  <span>Confirm New Password</span>
+                </label>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Re-enter new password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 36px 9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--neutral-300)',
+                      fontSize: '0.88rem'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    style={{ position: 'absolute', right: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--neutral-400)' }}
+                  >
+                    {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button
+                  type="button"
+                  disabled={isUpdatingPassword}
+                  className="btn btn-secondary"
+                  onClick={() => setIsChangePasswordModalOpen(false)}
+                  style={{ fontSize: '0.84rem', fontWeight: 700, padding: '8px 16px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingPassword}
+                  className="btn btn-primary"
+                  style={{ fontSize: '0.84rem', fontWeight: 800, padding: '8px 18px', display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  {isUpdatingPassword ? (
+                    <span>Saving...</span>
+                  ) : (
+                    <>
+                      <KeyRound size={15} />
+                      <span>Update Password</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+            </form>
           </div>
         </div>
       )}

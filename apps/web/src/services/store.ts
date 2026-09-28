@@ -512,6 +512,25 @@ class StoreService {
     }
   }
 
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+      const res = await apiClient.post('/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+      return {
+        success: true,
+        message: res.data?.message || 'Password successfully updated.'
+      };
+    } catch (err: any) {
+      const errMsg = err.response?.data?.detail || err.message;
+      return {
+        success: false,
+        error: typeof errMsg === 'string' ? errMsg : 'Failed to update password. Please check your current password.'
+      };
+    }
+  }
+
   logout() {
     this.currentUser = null;
     this.isSuperAdminMode = false;

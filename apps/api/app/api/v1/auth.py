@@ -59,22 +59,18 @@ class Confirm2FASetupRequest(BaseModel):
 class Confirm2FASetupResponse(TokenResponse):
     backup_codes: List[str] = []
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
 @router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, primary_db = Depends(get_database)):
     clean_email = req.email.strip().lower()
 
     if not clean_email or not req.password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email and password are required."
-        )
-
-    try:
-        primary_db = get_database()
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database service unavailable. Please check system health."
         )
 
     user = await primary_db.users.find_one({"email": clean_email})
@@ -108,6 +104,14 @@ async def login(req: LoginRequest):
 
     normalized_roles = [r.upper() for r in roles]
     is_super_admin = "SUPER_ADMIN" in normalized_roles or "SUPERADMIN" in normalized_roles
+
+    # Strictly disallow Super Admin login from the standard store login endpoint to enforce MFA
+    if is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Super Administrator accounts must authenticate exclusively via the dedicated Master Control Portal with Multi-Factor Authentication (MFA)."
+        )
+
     is_store_owner = "TENANT_ADMIN" in normalized_roles or is_super_admin
 
     store_status = "ACTIVE"
@@ -454,6 +458,58 @@ async def superadmin_reset_2fa(user: TokenPayload = Depends(get_current_user), p
     return {
         "success": True,
         "message": "Two-factor authentication reset. You will be prompted to re-scan the QR code on your next login."
+    }
+
+@router.post("/change-password")
+async def change_password(
+    req: ChangePasswordRequest,
+    user: TokenPayload = Depends(get_current_user),
+    primary_db = Depends(get_database)
+):
+    """
+    Allows any authenticated user (Super Admin, Store Owner, Manager, Cashier) to securely update their password.
+    """
+    if not req.current_password or not req.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password and new password are required."
+        )
+
+    if len(req.new_password) < 4:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be at least 4 characters long."
+        )
+
+    user_doc = await primary_db.users.find_one({"_id": ObjectId(user.sub)})
+    if not user_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User account record not found."
+        )
+
+    stored_hash = user_doc.get("passwordHash") or user_doc.get("hashedPassword", "")
+    if not verify_password(req.current_password, stored_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect. Please verify and try again."
+        )
+
+    new_hash = get_password_hash(req.new_password)
+    now = datetime.now(timezone.utc)
+
+    await primary_db.users.update_one(
+        {"_id": ObjectId(user.sub)},
+        {"$set": {
+            "passwordHash": new_hash,
+            "hashedPassword": new_hash,
+            "updatedAt": now
+        }}
+    )
+
+    return {
+        "success": True,
+        "message": "Password successfully updated. You can now use your new password."
     }
 
 @router.get("/me")

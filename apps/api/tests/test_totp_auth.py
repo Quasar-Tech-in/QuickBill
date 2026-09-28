@@ -158,3 +158,89 @@ async def test_non_superadmin_forbidden_from_superadmin_login(override_db):
         })
         assert resp.status_code == 403
         assert "Super Administrator role required" in resp.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_superadmin_blocked_from_standard_login(override_db):
+    # Super Admin user in DB
+    user_id = ObjectId()
+    admin_doc = {
+        "_id": user_id,
+        "email": "superadmin@quickbill.local",
+        "hashedPassword": get_password_hash("superadmin123"),
+        "name": "Super Admin User",
+        "roles": ["SUPER_ADMIN"],
+        "isActive": True,
+    }
+    await override_db.users.insert_one(admin_doc)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/v1/auth/login", json={
+            "email": "superadmin@quickbill.local",
+            "password": "superadmin123"
+        })
+        assert resp.status_code == 403
+        assert "Super Administrator accounts must authenticate exclusively via the dedicated Master Control Portal" in resp.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_change_password_and_relogin(override_db):
+    user_id = ObjectId()
+    cashier_doc = {
+        "_id": user_id,
+        "email": "staff@store.com",
+        "hashedPassword": get_password_hash("oldpass123"),
+        "name": "Store Staff",
+        "roles": ["CASHIER"],
+        "isActive": True,
+    }
+    await override_db.users.insert_one(cashier_doc)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # Step 1: Login with old password
+        login_res = await ac.post("/api/v1/auth/login", json={
+            "email": "staff@store.com",
+            "password": "oldpass123"
+        })
+        assert login_res.status_code == 200
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Step 2: Attempt change password with wrong current password
+        bad_change = await ac.post("/api/v1/auth/change-password", json={
+            "current_password": "wrongpassword",
+            "new_password": "newsecretpass456"
+        }, headers=headers)
+        assert bad_change.status_code == 400
+        assert "Current password is incorrect" in bad_change.json()["detail"]
+
+        # Step 3: Attempt change password with too short password
+        short_change = await ac.post("/api/v1/auth/change-password", json={
+            "current_password": "oldpass123",
+            "new_password": "ab"
+        }, headers=headers)
+        assert short_change.status_code == 400
+        assert "at least 4 characters" in short_change.json()["detail"]
+
+        # Step 4: Successful change password
+        good_change = await ac.post("/api/v1/auth/change-password", json={
+            "current_password": "oldpass123",
+            "new_password": "newsecretpass456"
+        }, headers=headers)
+        assert good_change.status_code == 200
+        assert good_change.json()["success"] is True
+
+        # Step 5: Old password fails login
+        old_login = await ac.post("/api/v1/auth/login", json={
+            "email": "staff@store.com",
+            "password": "oldpass123"
+        })
+        assert old_login.status_code == 401
+
+        # Step 6: New password succeeds login
+        new_login = await ac.post("/api/v1/auth/login", json={
+            "email": "staff@store.com",
+            "password": "newsecretpass456"
+        })
+        assert new_login.status_code == 200
+        assert new_login.json()["email"] == "staff@store.com"

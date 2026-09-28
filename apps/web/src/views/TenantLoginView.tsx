@@ -5,23 +5,25 @@ import {
   Mail, 
   Store, 
   ArrowRight, 
-  ShieldCheck, 
   CheckCircle2, 
   AlertCircle, 
-  AlertTriangle,
-  WifiOff,
-  RefreshCw,
+  AlertTriangle, 
+  WifiOff, 
+  RefreshCw, 
   Eye, 
   EyeOff, 
   ReceiptText, 
   Package, 
   BarChart3, 
-  Zap,
-  Layers,
-  X
+  Zap, 
+  Layers, 
+  X,
+  HelpCircle,
+  Building2,
+  Users,
+  KeyRound
 } from 'lucide-react';
 import { store } from '../services/store';
-import { useNavigate } from 'react-router-dom';
 import { User } from '../types';
 
 interface TenantLoginViewProps {
@@ -38,12 +40,11 @@ interface ClassifiedError {
 
 export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
   onLoginSuccess,
-  onNavigateToSuperAdmin,
 }) => {
-  const navigate = useNavigate();
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState<boolean>(false);
   const [authError, setAuthError] = useState<ClassifiedError | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [loading, setLoading] = useState<boolean>(false);
@@ -115,7 +116,14 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
         const rawError = result.error || 'Authentication failed.';
         
         // Categorize error for distinct user guidance
-        if (rawError.toLowerCase().includes('deactivated') || rawError.toLowerCase().includes('suspended')) {
+        if (rawError.includes('Super Administrator accounts must authenticate')) {
+          setAuthError({
+            type: 'warning',
+            title: 'Master Control Account',
+            message: 'Super Administrator accounts must authenticate exclusively via the dedicated Master Control Portal with Multi-Factor Authentication.',
+            actionHint: 'Please navigate directly to the Super Admin portal.'
+          });
+        } else if (rawError.toLowerCase().includes('deactivated') || rawError.toLowerCase().includes('suspended')) {
           setAuthError({
             type: 'warning',
             title: 'Account Inactive / Suspended',
@@ -363,7 +371,25 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
                   <Lock size={15} color="var(--primary-600)" />
                   <span>Password</span>
                 </label>
-                <span className="password-hint">Min 4 characters</span>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPasswordModal(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--primary-600)',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: '0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <HelpCircle size={13} />
+                  <span>Forgot password?</span>
+                </button>
               </div>
               <div className={`input-with-icon-wrapper password-wrapper ${fieldErrors.password ? 'input-error-border' : ''}`}>
                 <input
@@ -415,34 +441,171 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
             </button>
           </form>
 
-          {/* Super Admin Control Plane Entry Banner */}
-          <div className="superadmin-access-card" style={{ marginTop: 32 }}>
-            <div className="superadmin-access-info">
-              <div className="superadmin-badge-icon">
-                <ShieldCheck size={20} color="#7c3aed" />
-              </div>
-              <div>
-                <h4>Super Admin Control Plane</h4>
-                <p>Platform governance & tenant database manager</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                if (onNavigateToSuperAdmin) {
-                  onNavigateToSuperAdmin();
-                }
-                navigate('/superadmin/login');
-              }}
-              className="btn-launch-superadmin"
-            >
-              <span>Control Plane</span>
-              <ArrowRight size={14} />
-            </button>
-          </div>
-
         </div>
       </div>
+
+      {/* FORGOT PASSWORD GUIDANCE MODAL */}
+      {showForgotPasswordModal && (
+        <div 
+          className="modal-overlay" 
+          onClick={() => setShowForgotPasswordModal(false)}
+          style={{ zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+        >
+          <div 
+            className="modal-content" 
+            onClick={(e) => e.stopPropagation()}
+            style={{ 
+              maxWidth: 480, 
+              width: '100%', 
+              backgroundColor: '#ffffff', 
+              borderRadius: '16px', 
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Header */}
+            <div style={{ 
+              padding: '18px 24px', 
+              borderBottom: '1px solid var(--neutral-200)', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between',
+              backgroundColor: 'var(--neutral-50)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 8,
+                  backgroundColor: 'var(--primary-100)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--primary-700)'
+                }}>
+                  <KeyRound size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                    Password Reset Guide
+                  </h3>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
+                    Account recovery procedure by role
+                  </span>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowForgotPasswordModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--neutral-400)',
+                  padding: 4,
+                  borderRadius: 6
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              
+              {/* Business Owner Card */}
+              <div style={{
+                border: '1px solid var(--primary-200)',
+                backgroundColor: 'var(--primary-50)',
+                borderRadius: '12px',
+                padding: '16px',
+                display: 'flex',
+                gap: '14px',
+                alignItems: 'flex-start'
+              }}>
+                <div style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--primary-600)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  marginTop: 2
+                }}>
+                  <Building2 size={16} />
+                </div>
+                <div>
+                  <h4 style={{ margin: '0 0 4px 0', fontSize: '0.92rem', fontWeight: 800, color: 'var(--primary-900)' }}>
+                    Are you a Business / Store Owner?
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--primary-800)', lineHeight: 1.45 }}>
+                    To safeguard your store and financial records, master credential resets are managed by central administration. Please reach out to the <strong>Platform Administrator</strong> or support desk at:
+                  </p>
+                  <div style={{ marginTop: '8px', display: 'inline-block', background: '#ffffff', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--primary-200)', fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary-700)' }}>
+                    support@quickbill.platform
+                  </div>
+                </div>
+              </div>
+
+              {/* Staff / Cashier / Manager Card */}
+              <div style={{
+                border: '1px solid var(--neutral-200)',
+                backgroundColor: 'var(--neutral-50)',
+                borderRadius: '12px',
+                padding: '16px',
+                display: 'flex',
+                gap: '14px',
+                alignItems: 'flex-start'
+              }}>
+                <div style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--neutral-700)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  marginTop: 2
+                }}>
+                  <Users size={16} />
+                </div>
+                <div>
+                  <h4 style={{ margin: '0 0 4px 0', fontSize: '0.92rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                    Are you a Store Manager or Cashier?
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--neutral-700)', lineHeight: 1.45 }}>
+                    Please contact your <strong>Store Owner or Business Administrator</strong>. They can instantly reset or update your password directly from the store dashboard under <strong>Settings &rarr; Staff & Users</strong>.
+                  </p>
+                </div>
+              </div>
+
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => setShowForgotPasswordModal(false)}
+                className="btn btn-primary"
+                style={{
+                  width: '100%',
+                  marginTop: '8px',
+                  padding: '10px',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  borderRadius: '8px'
+                }}
+              >
+                Understood, Return to Sign In
+              </button>
+
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
