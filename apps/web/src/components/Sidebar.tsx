@@ -141,8 +141,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
       path: '/settings',
       label: 'Settings & License', 
       icon: Settings, 
-      roles: ['TENANT_ADMIN'],
-      isLockedWhenStoreSuspended: true
+      roles: ['TENANT_ADMIN']
     },
   ];
 

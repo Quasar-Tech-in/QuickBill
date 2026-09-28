@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { 
   Users, 
   MapPin, 
@@ -49,7 +50,20 @@ interface ConfirmModalState {
 }
 
 export const SettingsView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'staff' | 'locations' | 'profile' | 'subscription' | 'health'>('staff');
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const requestedTab = (location.state as any)?.tab || searchParams.get('tab');
+  const isInitiallyLocked = store.isStoreLocked();
+  const defaultTab = (requestedTab as any) || (isInitiallyLocked ? 'subscription' : 'staff');
+
+  const [activeTab, setActiveTab] = useState<'staff' | 'locations' | 'profile' | 'subscription' | 'health'>(defaultTab);
+
+  useEffect(() => {
+    const qTab = (new URLSearchParams(location.search)).get('tab') || (location.state as any)?.tab;
+    if (qTab && ['staff', 'locations', 'profile', 'subscription', 'health'].includes(qTab)) {
+      setActiveTab(qTab as any);
+    }
+  }, [location.search, location.state]);
   const [users, setUsers] = useState<User[]>([]);
   const [locations, setLocations] = useState<StoreLocation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -796,8 +810,18 @@ export const SettingsView: React.FC = () => {
       {/* TAB 2: Locations & Branches Management */}
       {activeTab === 'locations' && (
         <div className="card">
+          {/* Store Locked Warning if suspended/expired */}
+          {isStoreLocked && (
+            <div style={{ backgroundColor: '#fef2f2', borderBottom: '1px solid #fecaca', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Lock size={18} color="#dc2626" />
+              <span style={{ fontSize: '0.85rem', color: '#991b1b', fontWeight: 600 }}>
+                Branch and counter location management is locked because this store is currently suspended or subscription expired.
+              </span>
+            </div>
+          )}
+
           {/* Quota Cap Warning if at limit */}
-          {isLocationsCapped && (
+          {!isStoreLocked && isLocationsCapped && (
             <div style={{ backgroundColor: '#fffbeb', borderBottom: '1px solid #fde68a', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <AlertTriangle size={18} color="#d97706" />
@@ -831,16 +855,17 @@ export const SettingsView: React.FC = () => {
               <button 
                 type="button" 
                 className="btn btn-primary btn-sm"
-                disabled={isLocationsCapped}
+                disabled={isLocationsCapped || isStoreLocked}
                 onClick={() => {
+                  if (isStoreLocked) return;
                   setLocFormError('');
                   setIsLocModalOpen(true);
                 }}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: isLocationsCapped ? 0.6 : 1 }}
-                title={isLocationsCapped ? "Branch limit reached for current plan tier" : "Add new branch location"}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: (isLocationsCapped || isStoreLocked) ? 0.6 : 1 }}
+                title={isStoreLocked ? "Branch management is locked while store is suspended" : isLocationsCapped ? "Branch limit reached for current plan tier" : "Add new branch location"}
               >
                 <Plus size={15} />
-                <span>{isLocationsCapped ? 'Branch Limit Reached' : 'Add Branch Location'}</span>
+                <span>{isStoreLocked ? 'Management Locked' : isLocationsCapped ? 'Branch Limit Reached' : 'Add Branch Location'}</span>
               </button>
             )}
           </div>

@@ -100,7 +100,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
 
     // Enforce store suspension / expiration lockout guard for tenant users
     if (!isSuperAdmin && store.isStoreLocked()) {
-      const lockedPaths = ['/pos', '/inventory', '/purchase-orders', '/parties', '/ledger', '/settings'];
+      const lockedPaths = ['/pos', '/inventory', '/purchase-orders', '/parties', '/ledger'];
       if (lockedPaths.some(p => path === p || path.startsWith(p + '/'))) {
         navigate('/dashboard', { replace: true });
         return;
@@ -210,7 +210,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
             <button
               type="button"
               className="btn btn-xs btn-secondary"
-              onClick={() => navigate('/settings')}
+              onClick={() => navigate('/settings?tab=subscription')}
               style={{ fontSize: '0.75rem', padding: '3px 8px' }}
             >
               View License

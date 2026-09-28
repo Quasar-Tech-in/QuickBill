@@ -305,7 +305,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <div 
               style={{
                 backgroundColor: 'rgba(255, 255, 255, 0.12)',
@@ -318,6 +318,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
             >
               📊 Read-Only Analytics Mode
             </div>
+
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => navigate('/settings?tab=subscription')}
+              style={{
+                backgroundColor: '#ffffff',
+                color: isSuspended ? '#991b1b' : '#92400e',
+                fontWeight: 800,
+                fontSize: '0.8rem',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '8px 16px',
+                borderRadius: 8,
+                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)',
+                cursor: 'pointer'
+              }}
+            >
+              <CreditCard size={15} />
+              <span>View License & Subscription</span>
+            </button>
           </div>
         </div>
       )}
