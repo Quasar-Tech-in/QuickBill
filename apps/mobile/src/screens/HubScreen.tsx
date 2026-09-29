@@ -1,0 +1,205 @@
+import React, { useState } from 'react';
+import { 
+  StyleSheet, 
+  View, 
+  Text, 
+  ScrollView, 
+  TouchableOpacity 
+} from 'react-native';
+import { colors } from '../theme/colors';
+import { PurchaseOrdersScreen } from './PurchaseOrdersScreen';
+import { PartiesScreen } from './PartiesScreen';
+import { LedgerScreen } from './LedgerScreen';
+import { ReportsScreen } from './ReportsScreen';
+import { SettingsScreen } from './SettingsScreen';
+import { ShippingDispatchScreen } from './ShippingDispatchScreen';
+
+type HubModule = 'MENU' | 'PO' | 'PARTIES' | 'LEDGER' | 'REPORTS' | 'SETTINGS' | 'DISPATCH';
+
+export const HubScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
+  const [activeModule, setActiveModule] = useState<HubModule>('MENU');
+
+  if (activeModule === 'PO') {
+    return (
+      <View style={{ flex: 1 }}>
+        <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
+          <Text style={styles.backHeaderText}>&larr; Back to Business Hub</Text>
+        </TouchableOpacity>
+        <PurchaseOrdersScreen />
+      </View>
+    );
+  }
+
+  if (activeModule === 'PARTIES') {
+    return (
+      <View style={{ flex: 1 }}>
+        <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
+          <Text style={styles.backHeaderText}>&larr; Back to Business Hub</Text>
+        </TouchableOpacity>
+        <PartiesScreen />
+      </View>
+    );
+  }
+
+  if (activeModule === 'LEDGER') {
+    return (
+      <View style={{ flex: 1 }}>
+        <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
+          <Text style={styles.backHeaderText}>&larr; Back to Business Hub</Text>
+        </TouchableOpacity>
+        <LedgerScreen />
+      </View>
+    );
+  }
+
+  if (activeModule === 'REPORTS') {
+    return (
+      <View style={{ flex: 1 }}>
+        <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
+          <Text style={styles.backHeaderText}>&larr; Back to Business Hub</Text>
+        </TouchableOpacity>
+        <ReportsScreen />
+      </View>
+    );
+  }
+
+  if (activeModule === 'SETTINGS') {
+    return (
+      <View style={{ flex: 1 }}>
+        <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
+          <Text style={styles.backHeaderText}>&larr; Back to Business Hub</Text>
+        </TouchableOpacity>
+        <SettingsScreen onLogout={onLogout} />
+      </View>
+    );
+  }
+
+  if (activeModule === 'DISPATCH') {
+    return (
+      <View style={{ flex: 1 }}>
+        <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
+          <Text style={styles.backHeaderText}>&larr; Back to Business Hub</Text>
+        </TouchableOpacity>
+        <ShippingDispatchScreen />
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Text style={styles.hubTitle}>🏢 Business Operations Hub</Text>
+      <Text style={styles.hubSub}>Access all backend business workflows on mobile</Text>
+
+      <View style={styles.moduleGrid}>
+        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('PO')}>
+          <View style={[styles.iconBox, { backgroundColor: '#e0e7ff' }]}>
+            <Text style={{ fontSize: 24 }}>📥</Text>
+          </View>
+          <Text style={styles.moduleName}>Purchase Orders</Text>
+          <Text style={styles.moduleDesc}>Supplier POs, Inwarding & Stock Receipts</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('PARTIES')}>
+          <View style={[styles.iconBox, { backgroundColor: '#dcfce7' }]}>
+            <Text style={{ fontSize: 24 }}>👥</Text>
+          </View>
+          <Text style={styles.moduleName}>Parties Directory</Text>
+          <Text style={styles.moduleDesc}>Customers, Suppliers & Outstanding Balances</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('LEDGER')}>
+          <View style={[styles.iconBox, { backgroundColor: '#fef3c7' }]}>
+            <Text style={{ fontSize: 24 }}>📖</Text>
+          </View>
+          <Text style={styles.moduleName}>Financial Ledger</Text>
+          <Text style={styles.moduleDesc}>Payment In/Out, Cash Register & Daybook</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('REPORTS')}>
+          <View style={[styles.iconBox, { backgroundColor: '#f3e8ff' }]}>
+            <Text style={{ fontSize: 24 }}>📊</Text>
+          </View>
+          <Text style={styles.moduleName}>Reports & Analytics</Text>
+          <Text style={styles.moduleDesc}>Sales, P&L Statement, Tax GST & Export</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('DISPATCH')}>
+          <View style={[styles.iconBox, { backgroundColor: '#ffedd5' }]}>
+            <Text style={{ fontSize: 24 }}>🚚</Text>
+          </View>
+          <Text style={styles.moduleName}>Shipping & Dispatch</Text>
+          <Text style={styles.moduleDesc}>Delivery Orders & Courier Tracking</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('SETTINGS')}>
+          <View style={[styles.iconBox, { backgroundColor: '#e2e8f0' }]}>
+            <Text style={{ fontSize: 24 }}>⚙️</Text>
+          </View>
+          <Text style={styles.moduleName}>Store Settings</Text>
+          <Text style={styles.moduleDesc}>Business Info, Multi-Branch & Hardware</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.surface.background },
+  content: { padding: 16, paddingBottom: 32 },
+  backHeader: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surface.border,
+  },
+  backHeaderText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primary[600],
+  },
+  hubTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: colors.neutral[900],
+  },
+  hubSub: {
+    fontSize: 12,
+    color: colors.neutral[600],
+    marginTop: 2,
+    marginBottom: 16,
+  },
+  moduleGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  moduleCard: {
+    width: '48%',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.surface.border,
+    marginBottom: 14,
+  },
+  iconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  moduleName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.neutral[900],
+  },
+  moduleDesc: {
+    fontSize: 11,
+    color: colors.neutral[600],
+    marginTop: 4,
+    lineHeight: 15,
+  },
+});
