@@ -111,25 +111,39 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Compute live financial totals
+  // Compute live financial totals (tax-inclusive MRP standard)
   const originalGrand = invoice.originalGrandTotal || invoice.grandTotal;
   let netSubtotal = 0;
   let netTax = 0;
+  let netGrandTotal = 0;
   let totalReturnedQty = 0;
+  let returnDeduction = 0;
 
   itemsState.forEach(it => {
     const activeQty = Math.max(0, Number((it.originalQty - it.returnedQty).toFixed(3)));
     totalReturnedQty += it.returnedQty;
     const gross = activeQty * it.unitPrice;
     const disc = it.discountPercent ? (gross * (it.discountPercent / 100)) : 0;
-    const taxable = Math.max(0, gross - disc);
-    const tax = taxable * (it.taxRate / 100);
+    const netLineInclusive = Math.max(0, gross - disc);
+    
+    // Extract taxable base from tax-inclusive amount: Base = Inclusive / (1 + TaxRate/100)
+    const taxable = it.taxRate > 0 ? (netLineInclusive * 100 / (100 + it.taxRate)) : netLineInclusive;
+    const tax = netLineInclusive - taxable;
+
     netSubtotal += taxable;
     netTax += tax;
+    netGrandTotal += netLineInclusive;
+
+    // Return value for returned quantity (tax-inclusive full product price)
+    const retGross = it.returnedQty * it.unitPrice;
+    const retDisc = it.discountPercent ? (retGross * (it.discountPercent / 100)) : 0;
+    returnDeduction += Math.max(0, retGross - retDisc);
   });
 
-  const netGrandTotal = Number((netSubtotal + netTax).toFixed(2));
-  const returnDeduction = Math.max(0, Number((originalGrand - netGrandTotal).toFixed(2)));
+  netSubtotal = Number(netSubtotal.toFixed(2));
+  netTax = Number(netTax.toFixed(2));
+  netGrandTotal = Number(netGrandTotal.toFixed(2));
+  returnDeduction = Number(returnDeduction.toFixed(2));
   const refundDue = invoice.paidAmount > netGrandTotal ? Number((invoice.paidAmount - netGrandTotal).toFixed(2)) : 0;
 
   // Handle manual typing into quantity field (allows fractions & decimals)
@@ -235,6 +249,9 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
           returnedQuantity: Number(it.returnedQty.toFixed(3)),
           returnReason: it.returnedQty > 0 ? it.returnReason : undefined,
           returnNote: it.returnedQty > 0 ? it.returnNote : undefined,
+          unitPrice: it.unitPrice,
+          taxRate: it.taxRate,
+          discount: it.discountPercent ? ((it.unitPrice * it.originalQty) * (it.discountPercent / 100)) : 0,
         })),
         returnNotes: returnNotes.trim() || undefined,
       };
@@ -394,11 +411,16 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
                         <td style={{ padding: '12px 14px', verticalAlign: 'top' }}>
                           <div style={{ fontWeight: 700, color: 'var(--neutral-900)' }}>{it.name}</div>
                           <div style={{ fontSize: '0.74rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-                            ₹{it.unitPrice.toFixed(2)} × {it.originalQty.toLocaleString(undefined, { maximumFractionDigits: 3 })} {it.unit} (Billed)
+                            ₹{it.unitPrice.toFixed(2)} / {it.unit} (MRP incl. {it.taxRate}% GST)
                           </div>
                           <div style={{ fontSize: '0.72rem', color: isFullyReturned ? 'var(--danger-700)' : 'var(--neutral-600)', fontWeight: 600, marginTop: 2 }}>
-                            Active Remaining: {activeQty.toLocaleString(undefined, { maximumFractionDigits: 3 })} {it.unit}
+                            Billed: {it.originalQty.toLocaleString(undefined, { maximumFractionDigits: 3 })} {it.unit} • Active: {activeQty.toLocaleString(undefined, { maximumFractionDigits: 3 })} {it.unit}
                           </div>
+                          {it.returnedQty > 0 && (
+                            <div style={{ fontSize: '0.72rem', color: 'var(--danger-600)', fontWeight: 700, marginTop: 2 }}>
+                              Refund Amount: ₹{(it.returnedQty * it.unitPrice * (1 - (it.discountPercent || 0) / 100)).toFixed(2)} (Full Product Value)
+                            </div>
+                          )}
                         </td>
 
                         {/* Return Quantity Stepper & Fraction Quick Tools */}

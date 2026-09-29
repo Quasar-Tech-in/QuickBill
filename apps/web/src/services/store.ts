@@ -2956,6 +2956,9 @@ class StoreService {
         returnedQuantity: number;
         returnReason?: string;
         returnNote?: string;
+        unitPrice?: number;
+        taxRate?: number;
+        discount?: number;
       }>;
       notes?: string;
       returnNotes?: string;
@@ -2964,6 +2967,7 @@ class StoreService {
     }
   ): Promise<Invoice> {
     const existing = this.invoices.find(i => i.id === invoiceId);
+    let updatedInvoice: Invoice | null = null;
     
     try {
       const payload = {
@@ -2973,6 +2977,9 @@ class StoreService {
           returnedQuantity: it.returnedQuantity,
           returnReason: it.returnReason,
           returnNote: it.returnNote,
+          unitPrice: it.unitPrice,
+          taxRate: it.taxRate,
+          discount: it.discount,
         })),
         notes: updateData.notes,
         returnNotes: updateData.returnNotes,
@@ -2981,74 +2988,91 @@ class StoreService {
 
       const res = await apiClient.put(`/sales/${invoiceId}`, payload);
       if (res.data) {
-        const updated = this.mapSaleDocToInvoice(res.data);
-        this.invoices = this.invoices.map(inv => inv.id === invoiceId ? updated : inv);
-        this.saveToStorage();
-        return updated;
+        updatedInvoice = this.mapSaleDocToInvoice(res.data);
       }
     } catch (err) {
       console.warn('Backend PUT /sales/{id} failed, applying local calculation fallback:', err);
     }
 
-    // Local in-memory calculation fallback
-    if (!existing) {
-      throw new Error('Invoice not found');
+    if (!updatedInvoice) {
+      if (!existing) {
+        throw new Error('Invoice not found');
+      }
+
+      const origGrand = existing.originalGrandTotal || existing.grandTotal;
+      let netSubtotal = 0;
+      let netTax = 0;
+      let anyReturn = false;
+      let allReturned = true;
+
+      const updatedItems = existing.items.map(item => {
+        const up = updateData.items.find(u => u.itemId === item.itemId);
+        const retQty = up ? up.returnedQuantity : (item.returnedQuantity || 0);
+        const activeQty = Math.max(0, item.quantity - retQty);
+        
+        if (retQty > 0) anyReturn = true;
+        if (activeQty > 0) allReturned = false;
+
+        const lineGross = activeQty * item.unitPrice;
+        const lineDisc = item.discountPercent ? (lineGross * (item.discountPercent / 100)) : 0;
+        const netLineInclusive = Math.max(0, lineGross - lineDisc);
+        const lineTaxable = item.taxRate > 0 ? (netLineInclusive * 100 / (100 + item.taxRate)) : netLineInclusive;
+        const lineTax = netLineInclusive - lineTaxable;
+        const lineTotal = netLineInclusive;
+
+        netSubtotal += lineTaxable;
+        netTax += lineTax;
+
+        return {
+          ...item,
+          returnedQuantity: retQty,
+          returnReason: up?.returnReason as any || item.returnReason,
+          returnNote: up?.returnNote || item.returnNote,
+          returnDate: retQty > 0 ? (item.returnDate || new Date().toISOString()) : undefined,
+          returnStatus: retQty >= item.quantity ? 'FULL' : (retQty > 0 ? 'PARTIAL' : 'NONE'),
+          total: Number(lineTotal.toFixed(2)),
+        };
+      });
+
+      const netGrand = Number((netSubtotal + netTax).toFixed(2));
+      const retTotal = Math.max(0, Number((origGrand - netGrand).toFixed(2)));
+      const newStatus = allReturned && anyReturn ? 'RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : existing.status);
+
+      updatedInvoice = {
+        ...existing,
+        items: updatedItems as any,
+        subtotal: Number(netSubtotal.toFixed(2)),
+        taxTotal: Number(netTax.toFixed(2)),
+        grandTotal: netGrand,
+        originalGrandTotal: origGrand,
+        returnTotal: retTotal,
+        hasReturns: anyReturn,
+        returnStatus: allReturned && anyReturn ? 'FULLY_RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : 'NONE'),
+        returnNotes: updateData.returnNotes || existing.returnNotes,
+        status: newStatus as any,
+        notes: updateData.notes !== undefined ? updateData.notes : existing.notes,
+      };
     }
 
-    const origGrand = existing.originalGrandTotal || existing.grandTotal;
-    let netSubtotal = 0;
-    let netTax = 0;
-    let anyReturn = false;
-    let allReturned = true;
+    // Restock returned quantities into local store inventory
+    if (existing) {
+      updateData.items.forEach(up => {
+        const prevSnap = existing.items.find(i => i.itemId === up.itemId);
+        const prevRet = prevSnap?.returnedQuantity || 0;
+        const deltaRet = up.returnedQuantity - prevRet;
+        if (deltaRet > 0 && up.returnReason !== 'DEFECTIVE_DAMAGED') {
+          this.adjustStock(up.itemId, deltaRet, existing.locationId);
+        }
+      });
 
-    const updatedItems = existing.items.map(item => {
-      const up = updateData.items.find(u => u.itemId === item.itemId);
-      const retQty = up ? up.returnedQuantity : (item.returnedQuantity || 0);
-      const activeQty = Math.max(0, item.quantity - retQty);
-      
-      if (retQty > 0) anyReturn = true;
-      if (activeQty > 0) allReturned = false;
+      const deltaReturnTotal = (updatedInvoice.returnTotal || 0) - (existing.returnTotal || 0);
+      if (deltaReturnTotal > 0 && existing.partyId && existing.balanceAmount > 0) {
+        const balanceDeduction = Math.min(deltaReturnTotal, existing.balanceAmount);
+        this.updatePartyBalance(existing.partyId, -balanceDeduction);
+      }
+    }
 
-      const lineGross = activeQty * item.unitPrice;
-      const lineDisc = item.discountPercent ? (lineGross * (item.discountPercent / 100)) : 0;
-      const lineTaxable = Math.max(0, lineGross - lineDisc);
-      const lineTax = lineTaxable * (item.taxRate / 100);
-      const lineTotal = lineTaxable + lineTax;
-
-      netSubtotal += lineTaxable;
-      netTax += lineTax;
-
-      return {
-        ...item,
-        returnedQuantity: retQty,
-        returnReason: up?.returnReason as any || item.returnReason,
-        returnNote: up?.returnNote || item.returnNote,
-        returnDate: retQty > 0 ? (item.returnDate || new Date().toISOString()) : undefined,
-        returnStatus: retQty >= item.quantity ? 'FULL' : (retQty > 0 ? 'PARTIAL' : 'NONE'),
-        total: Number(lineTotal.toFixed(2)),
-      };
-    });
-
-    const netGrand = Number((netSubtotal + netTax).toFixed(2));
-    const retTotal = Math.max(0, Number((origGrand - netGrand).toFixed(2)));
-    const newStatus = allReturned && anyReturn ? 'RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : existing.status);
-
-    const updatedInvoice: Invoice = {
-      ...existing,
-      items: updatedItems as any,
-      subtotal: Number(netSubtotal.toFixed(2)),
-      taxTotal: Number(netTax.toFixed(2)),
-      grandTotal: netGrand,
-      originalGrandTotal: origGrand,
-      returnTotal: retTotal,
-      hasReturns: anyReturn,
-      returnStatus: allReturned && anyReturn ? 'FULLY_RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : 'NONE'),
-      returnNotes: updateData.returnNotes || existing.returnNotes,
-      status: newStatus as any,
-      notes: updateData.notes !== undefined ? updateData.notes : existing.notes,
-    };
-
-    this.invoices = this.invoices.map(inv => inv.id === invoiceId ? updatedInvoice : inv);
+    this.invoices = this.invoices.map(inv => inv.id === invoiceId ? updatedInvoice! : inv);
     this.saveToStorage();
     return updatedInvoice;
   }

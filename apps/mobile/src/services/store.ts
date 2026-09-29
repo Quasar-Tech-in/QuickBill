@@ -540,6 +540,135 @@ class MobileStore {
     return createdInvoice;
   }
 
+  async updateInvoiceWithReturn(
+    invoiceId: string,
+    updateData: {
+      items: Array<{
+        itemId: string;
+        quantity: number;
+        returnedQuantity: number;
+        returnReason?: string;
+        returnNote?: string;
+        unitPrice?: number;
+        taxRate?: number;
+        discount?: number;
+      }>;
+      notes?: string;
+      returnNotes?: string;
+      paymentMode?: string;
+    }
+  ): Promise<Invoice> {
+    const existing = this.invoices.find(i => i.id === invoiceId);
+    let updatedInvoice: Invoice | null = null;
+
+    try {
+      const payload = {
+        items: updateData.items.map(it => ({
+          itemId: it.itemId,
+          quantity: it.quantity,
+          returnedQuantity: it.returnedQuantity,
+          returnReason: it.returnReason,
+          returnNote: it.returnNote,
+          unitPrice: it.unitPrice,
+          taxRate: it.taxRate,
+          discount: it.discount,
+        })),
+        notes: updateData.notes,
+        returnNotes: updateData.returnNotes,
+        paymentMode: updateData.paymentMode,
+      };
+
+      const res = await apiClient.put(`/sales/${invoiceId}`, payload);
+      if (res.data) {
+        const d = res.data;
+        updatedInvoice = {
+          ...(existing || {}),
+          id: d.id || d._id || invoiceId,
+          invoiceNumber: d.invoiceNumber || d.invoice_number || existing?.invoiceNumber || '',
+          businessId: d.businessId || existing?.businessId || '',
+          date: d.date || d.createdAt || existing?.date || new Date().toISOString(),
+          partyId: d.partyId || existing?.partyId,
+          partyName: d.partyNameSnapshot || d.party_name_snapshot || existing?.partyName || '',
+          partyPhone: d.partyPhoneSnapshot || d.party_phone_snapshot || existing?.partyPhone,
+          items: d.items || existing?.items || [],
+          subtotal: Number(d.subtotal || 0),
+          taxTotal: Number(d.taxTotal ?? d.tax_total ?? 0),
+          discountTotal: Number(d.discountTotal ?? d.discount_total ?? 0),
+          grandTotal: Number(d.grandTotal ?? d.grand_total ?? 0),
+          paidAmount: Number(d.paidAmount ?? d.paid_amount ?? 0),
+          balanceAmount: Number(d.balanceDue ?? d.balance_due ?? 0),
+          paymentMode: d.paymentMode || existing?.paymentMode || 'CASH',
+          status: d.status || existing?.status || 'CONFIRMED',
+          notes: d.notes || existing?.notes,
+        } as Invoice;
+      }
+    } catch (err) {
+      console.warn('Backend PUT /sales/{id} failed in mobile store, calculating locally:', err);
+    }
+
+    if (!updatedInvoice) {
+      if (!existing) throw new Error('Invoice not found');
+      
+      const origGrand = existing.grandTotal;
+      let netSubtotal = 0;
+      let netTax = 0;
+      let anyReturn = false;
+      let allReturned = true;
+
+      const updatedItems = existing.items.map(item => {
+        const up = updateData.items.find(u => u.itemId === item.itemId);
+        const retQty = up ? up.returnedQuantity : 0;
+        const activeQty = Math.max(0, item.quantity - retQty);
+
+        if (retQty > 0) anyReturn = true;
+        if (activeQty > 0) allReturned = false;
+
+        const lineGross = activeQty * item.unitPrice;
+        const lineDisc = item.discountPercent ? (lineGross * (item.discountPercent / 100)) : 0;
+        const netLineInclusive = Math.max(0, lineGross - lineDisc);
+        const lineTaxable = item.taxRate > 0 ? (netLineInclusive * 100 / (100 + item.taxRate)) : netLineInclusive;
+        const lineTax = netLineInclusive - lineTaxable;
+        const lineTotal = netLineInclusive;
+
+        netSubtotal += lineTaxable;
+        netTax += lineTax;
+
+        return {
+          ...item,
+          quantity: item.quantity,
+          returnedQuantity: retQty,
+          returnReason: up?.returnReason as any,
+          returnNote: up?.returnNote,
+          total: Number(lineTotal.toFixed(2)),
+        };
+      });
+
+      const netGrand = Number((netSubtotal + netTax).toFixed(2));
+      const newStatus = allReturned && anyReturn ? 'RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : existing.status);
+
+      updatedInvoice = {
+        ...existing,
+        items: updatedItems,
+        subtotal: Number(netSubtotal.toFixed(2)),
+        taxTotal: Number(netTax.toFixed(2)),
+        grandTotal: netGrand,
+        status: newStatus as any,
+      };
+    }
+
+    // Restock returned items
+    updateData.items.forEach(up => {
+      const match = this.items.find(i => i.id === up.itemId);
+      if (match && up.returnedQuantity > 0 && up.returnReason !== 'DEFECTIVE_DAMAGED') {
+        match.currentStock = Number((match.currentStock + up.returnedQuantity).toFixed(3));
+      }
+    });
+
+    this.invoices = this.invoices.map(inv => inv.id === invoiceId ? updatedInvoice! : inv);
+    this.notify();
+    return updatedInvoice;
+  }
+
   // --- Parties ---
   getParties(): Party[] {
     return [...this.parties];

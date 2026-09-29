@@ -368,7 +368,14 @@ class SaleService:
         original_grand_total = Decimal(str(invoice.get("originalGrandTotal") or invoice.get("grandTotal", "0.00")))
         
         # Map item snapshots from existing invoice
-        existing_items_map = {it.get("itemId") or str(it.get("item_id")): it for it in invoice.get("items", [])}
+        existing_items_map = {}
+        for it_snap in invoice.get("items", []):
+            if it_snap.get("itemId"):
+                existing_items_map[str(it_snap.get("itemId"))] = it_snap
+            if it_snap.get("skuSnapshot"):
+                existing_items_map[str(it_snap.get("skuSnapshot"))] = it_snap
+            if it_snap.get("nameSnapshot"):
+                existing_items_map[str(it_snap.get("nameSnapshot"))] = it_snap
 
         calc_inputs: List[LineItemCalcInput] = []
         updated_item_snapshots = []
@@ -376,7 +383,7 @@ class SaleService:
         all_fully_returned = True
 
         for it in request.items:
-            existing_snap = existing_items_map.get(it.item_id, {})
+            existing_snap = existing_items_map.get(str(it.item_id)) or existing_items_map.get(it.item_id) or {}
             name_snap = existing_snap.get("nameSnapshot") or existing_snap.get("name") or f"Item ({it.item_id})"
             sku_snap = existing_snap.get("skuSnapshot") or existing_snap.get("sku") or ""
             
@@ -420,12 +427,15 @@ class SaleService:
 
         return_total = max(Decimal("0.00"), original_grand_total - totals.grand_total)
 
-        # Build updated item snapshots
+        # Build updated item snapshots & inventory restock movements
         for idx, it in enumerate(request.items):
             calc_item = totals.items[idx]
             orig_qty = Decimal(str(it.quantity))
             ret_qty = Decimal(str(it.returned_quantity or "0.00"))
-            
+            existing_snap = existing_items_map.get(str(it.item_id)) or existing_items_map.get(it.item_id) or {}
+            prev_ret_qty = Decimal(str(existing_snap.get("returnedQuantity", "0.00")))
+            delta_ret_qty = ret_qty - prev_ret_qty
+
             ret_status = "FULL" if (ret_qty >= orig_qty and orig_qty > 0) else ("PARTIAL" if ret_qty > 0 else "NONE")
 
             updated_item_snapshots.append({
@@ -445,6 +455,49 @@ class SaleService:
                 "taxAmount": float(calc_item.tax_amount),
                 "lineTotal": float(calc_item.line_total)
             })
+
+            # If there is incremental returned quantity, restock inventory & record ledger movement
+            if delta_ret_qty > Decimal("0.00"):
+                target_item_oid = ObjectId(it.item_id) if ObjectId.is_valid(it.item_id) else None
+                or_clauses = [{"publicItemId": it.item_id}, {"id": it.item_id}, {"sku": it.item_id}, {"name": calc_item.name_snapshot}]
+                if target_item_oid:
+                    or_clauses.insert(0, {"_id": target_item_oid})
+
+                item_doc = await self.db.items.find_one({"$or": or_clauses})
+                actual_item_oid = item_doc["_id"] if item_doc else (target_item_oid or it.item_id)
+                
+                # Compute unit purchase cost inclusive of tax
+                tax_rate_val = float(item_doc.get("taxRate", 0.0) if item_doc else calc_item.tax_rate)
+                base_purchase = float(item_doc.get("purchasePrice") or item_doc.get("averageCostPrice") or calc_item.unit_price) if item_doc else float(calc_item.unit_price)
+                unit_purchase_cost_with_tax = base_purchase * (1.0 + (tax_rate_val / 100.0))
+
+                # If item is restockable, increment stock in catalog and location
+                if it.return_reason != "DEFECTIVE_DAMAGED":
+                    await self.db.items.update_one(
+                        {"_id": actual_item_oid},
+                        {"$inc": {"currentStock": float(delta_ret_qty)}}
+                    )
+                    if invoice.get("locationId"):
+                        await self.db.items.update_one(
+                            {"_id": actual_item_oid, "locations.locationId": invoice["locationId"]},
+                            {"$inc": {"locations.$.currentStock": float(delta_ret_qty)}}
+                        )
+
+                # Record inventory movement with unit cost with tax
+                movement_doc = {
+                    "businessId": b_oid,
+                    "itemId": actual_item_oid,
+                    "type": "SALE_RETURN" if it.return_reason != "DEFECTIVE_DAMAGED" else "DAMAGED",
+                    "referenceType": "INVOICE",
+                    "referenceId": s_oid,
+                    "referenceNumber": invoice.get("invoiceNumber", ""),
+                    "quantityChange": float(delta_ret_qty),
+                    "unitCost": round(unit_purchase_cost_with_tax, 2),
+                    "reason": it.return_reason or "RESTOCKABLE_RETURN",
+                    "notes": it.return_note or f"Return on invoice {invoice.get('invoiceNumber', '')}",
+                    "createdAt": now
+                }
+                await self.db.inventory_movements.insert_one(movement_doc)
 
         # Determine statuses
         if all_fully_returned and total_has_returns:
@@ -489,6 +542,32 @@ class SaleService:
             {"_id": s_oid},
             {"$set": update_fields}
         )
+
+        # Adjust party receivable / customer spent
+        delta_return_total = float(return_total) - float(invoice.get("returnTotal", 0.0) or 0.0)
+        if delta_return_total > 0 and invoice.get("partyId"):
+            p_oid = invoice["partyId"] if isinstance(invoice["partyId"], ObjectId) else (ObjectId(invoice["partyId"]) if ObjectId.is_valid(str(invoice["partyId"])) else None)
+            if p_oid:
+                prev_balance = float(invoice.get("balanceDue", 0.0) or 0.0)
+                reduc = min(delta_return_total, prev_balance)
+                await self.db.customers.update_one(
+                    {"_id": p_oid},
+                    {
+                        "$inc": {
+                            "totalSpent": -float(delta_return_total),
+                            "currentBalance": -float(reduc)
+                        },
+                        "$set": {"updatedAt": now}
+                    }
+                )
+                await self.db.parties.update_one(
+                    {"_id": p_oid},
+                    {
+                        "$inc": {
+                            "currentReceivable": -float(reduc)
+                        }
+                    }
+                )
 
         updated_doc = await self.db.invoices.find_one({"_id": s_oid})
         updated_doc["_id"] = str(updated_doc["_id"])

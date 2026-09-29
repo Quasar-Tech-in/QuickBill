@@ -13,7 +13,7 @@ class LineItemCalcInput(BaseModel):
     item_id: str
     name_snapshot: str
     sku_snapshot: str = ""
-    quantity: Decimal = Field(..., gt=0)
+    quantity: Decimal = Field(..., ge=0)
     unit_price: Decimal = Field(..., ge=0)
     discount: Decimal = Field(default=Decimal("0.00"), ge=0)
     tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
