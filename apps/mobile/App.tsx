@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from './src/theme/colors';
@@ -8,14 +8,33 @@ import { POSScreen } from './src/screens/POSScreen';
 import { ItemsScreen } from './src/screens/ItemsScreen';
 import { TransactionsScreen } from './src/screens/TransactionsScreen';
 import { HubScreen } from './src/screens/HubScreen';
+import { store } from './src/services/store';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => store.isAuthenticated());
   const [activeTab, setActiveTab] = useState<'Home' | 'POS' | 'Items' | 'Transactions' | 'Hub'>('Home');
+  const [currentUser, setCurrentUser] = useState(() => store.getActiveUser());
 
-  if (!isAuthenticated) {
+  useEffect(() => {
+    const unsubscribe = store.subscribe(() => {
+      setIsAuthenticated(store.isAuthenticated());
+      setCurrentUser(store.getActiveUser());
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = () => {
+    store.logout();
+    setIsAuthenticated(false);
+  };
+
+  if (!isAuthenticated || !currentUser) {
     return <LoginScreen onLoginSuccess={() => setIsAuthenticated(true)} />;
   }
+
+  const tenantDisplayName = currentUser.tenantName || 'QuickBill Store';
 
   return (
     <SafeAreaProvider>
@@ -29,16 +48,16 @@ export default function App() {
               <Text style={styles.logoBadgeText}>QB</Text>
             </View>
             <View>
-              <Text style={styles.appTitle}>QuickBill POS</Text>
-              <Text style={styles.branchSub}>Main Branch • Online 🟢</Text>
+              <Text style={styles.appTitle} numberOfLines={1}>{tenantDisplayName}</Text>
+              <Text style={styles.branchSub}>{currentUser.name} ({currentUser.role}) • Online 🟢</Text>
             </View>
           </View>
           
           <TouchableOpacity 
             style={styles.switchUserBtn}
-            onPress={() => setIsAuthenticated(false)}
+            onPress={handleLogout}
           >
-            <Text style={styles.switchUserText}>👤 Switch User</Text>
+            <Text style={styles.switchUserText}>👤 Sign Out</Text>
           </TouchableOpacity>
         </View>
 
@@ -48,7 +67,7 @@ export default function App() {
           {activeTab === 'POS' && <POSScreen />}
           {activeTab === 'Items' && <ItemsScreen />}
           {activeTab === 'Transactions' && <TransactionsScreen />}
-          {activeTab === 'Hub' && <HubScreen onLogout={() => setIsAuthenticated(false)} />}
+          {activeTab === 'Hub' && <HubScreen onLogout={handleLogout} />}
         </View>
 
         {/* 5-Tab Bottom Navigation Bar */}
@@ -114,6 +133,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
   },
   logoBadge: {
     width: 32,
@@ -129,7 +149,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   appTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
     color: colors.neutral[900],
   },

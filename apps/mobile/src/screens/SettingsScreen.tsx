@@ -18,7 +18,7 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onLogout }) => {
   const [business, setBusiness] = useState<Business>(() => store.getBusinessProfile());
-  const [user, setUser] = useState<User>(() => store.getActiveUser());
+  const [user, setUser] = useState<User | null>(() => store.getActiveUser());
 
   // Form states
   const [name, setName] = useState(business.name);
@@ -49,10 +49,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onLogout }) => {
           <Text style={styles.avatarText}>👤</Text>
         </View>
         <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={styles.userName}>{user.name}</Text>
-          <Text style={styles.userRole}>Role: {user.role} • {user.email}</Text>
+          <Text style={styles.userName}>{user?.name || 'Store User'}</Text>
+          <Text style={styles.userRole}>Role: {user?.role || 'CASHIER'} • {user?.email || 'N/A'}</Text>
           <View style={styles.rolePill}>
-            <Text style={styles.rolePillText}>✓ Full Manager & Cashier Permissions</Text>
+            <Text style={styles.rolePillText}>✓ Active Session</Text>
           </View>
         </View>
       </View>

@@ -1,80 +1,154 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { colors } from '../theme/colors';
+import { store } from '../services/store';
 
 interface LoginScreenProps {
-  onLoginSuccess: (token: string, businessId: string) => void;
+  onLoginSuccess: (token?: string, businessId?: string) => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
-  const [email, setEmail] = useState('admin@quickbill.local');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
+    if (!email.trim() || !password) {
+      Alert.alert('Required Fields', 'Please enter both your work email and password.');
+      return;
+    }
+
     setLoading(true);
     try {
-      // Direct mock / local backend test
-      setTimeout(() => {
-        setLoading(false);
-        onLoginSuccess('mock_jwt_token_admin', '65f2a1b9a000000000000001');
-      }, 600);
+      const result = await store.login(email, password);
+      setLoading(false);
+      if (result.success && result.user) {
+        onLoginSuccess(result.user.token, result.user.businessId);
+      } else {
+        Alert.alert('Authentication Failed', result.error || 'Invalid work email or password.');
+      }
     } catch (e: any) {
       setLoading(false);
-      Alert.alert('Login Failed', e.message || 'Please check your credentials.');
+      Alert.alert('Connection Error', e.message || 'Could not connect to store server.');
     }
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <View style={styles.header}>
-          <Text style={styles.brandTitle}>QuickBill</Text>
-          <Text style={styles.subtitle}>POS Billing & Inventory Management</Text>
-        </View>
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.card}>
+          <View style={styles.header}>
+            <View style={styles.logoBadge}>
+              <Text style={styles.logoBadgeText}>QB</Text>
+            </View>
+            <Text style={styles.brandTitle}>QuickBill Mobile</Text>
+            <Text style={styles.subtitle}>Sign in to your store workspace</Text>
+          </View>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Email Address</Text>
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-        </View>
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Work Email Address</Text>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              placeholder="e.g. cashier@quickbill.local"
+              placeholderTextColor={colors.neutral[400]}
+              autoCorrect={false}
+            />
+          </View>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-          />
-        </View>
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              placeholder="Enter your store password"
+              placeholderTextColor={colors.neutral[400]}
+            />
+          </View>
 
-        <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Sign In to Store</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </View>
+          <TouchableOpacity 
+            style={[styles.button, loading && styles.buttonDisabled]} 
+            onPress={handleLogin} 
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Sign In to Store</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.surface.background, justifyContent: 'center', padding: 20 },
-  card: { backgroundColor: colors.surface.card, padding: 24, borderRadius: 16, borderWidth: 1, borderColor: colors.surface.border },
+  container: { flex: 1, backgroundColor: colors.surface.background },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+  card: { 
+    backgroundColor: colors.surface.card, 
+    padding: 24, 
+    borderRadius: 20, 
+    borderWidth: 1, 
+    borderColor: colors.surface.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+  },
   header: { marginBottom: 24, alignItems: 'center' },
-  brandTitle: { fontSize: 28, fontWeight: '800', color: colors.primary[500] },
-  subtitle: { fontSize: 14, color: colors.neutral[400], marginTop: 4 },
+  logoBadge: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: colors.primary[500],
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  logoBadgeText: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  brandTitle: { fontSize: 24, fontWeight: '800', color: colors.neutral[900] },
+  subtitle: { fontSize: 13, color: colors.neutral[500], marginTop: 4, fontWeight: '500' },
   formGroup: { marginBottom: 16 },
   label: { fontSize: 13, fontWeight: '600', color: colors.neutral[700], marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: colors.neutral[200], borderRadius: 8, padding: 12, fontSize: 15, color: colors.neutral[900] },
-  button: { backgroundColor: colors.primary[500], padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 12 },
+  input: { 
+    borderWidth: 1, 
+    borderColor: colors.neutral[200], 
+    borderRadius: 10, 
+    padding: 12, 
+    fontSize: 15, 
+    color: colors.neutral[900],
+    backgroundColor: colors.neutral[50] 
+  },
+  button: { 
+    backgroundColor: colors.primary[500], 
+    padding: 15, 
+    borderRadius: 12, 
+    alignItems: 'center', 
+    marginTop: 12,
+    shadowColor: colors.primary[500],
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

@@ -473,7 +473,7 @@ export const InventoryView: React.FC = () => {
     setUploadStatusMsg('Saving product and processing images...');
 
     try {
-      const businessId = currentUser?.businessId || 'default_tenant';
+      const businessId = currentUser?.businessId || '';
       const itemId = editingItem?.id || `itm_${Date.now()}`;
 
       // 1. Upload newly staged images (only those with pendingCompressed) to Supabase Storage
@@ -620,7 +620,7 @@ export const InventoryView: React.FC = () => {
           urlsToDelete.push(itemToDelete.imageUrl);
         }
         if (urlsToDelete.length > 0) {
-          const businessId = currentUser?.businessId || 'default_tenant';
+          const businessId = currentUser?.businessId || '';
           deleteItemImages(businessId, urlsToDelete);
         }
       }

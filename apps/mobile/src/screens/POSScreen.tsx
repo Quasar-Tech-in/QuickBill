@@ -92,7 +92,7 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
 
   const categories = ['ALL', ...Array.from(new Set(items.map(i => i.category)))];
 
-  const handleCheckoutComplete = (saleDetails: {
+  const handleCheckoutComplete = async (saleDetails: {
     customerName: string;
     customerPhone: string;
     partyId?: string;
@@ -119,7 +119,7 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
       };
     });
 
-    const newInvoice = store.createInvoice({
+    const newInvoice = await store.createInvoice({
       partyId: saleDetails.partyId,
       partyName: saleDetails.customerName,
       partyPhone: saleDetails.customerPhone,

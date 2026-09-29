@@ -11,152 +11,6 @@ export const apiClient = axios.create({
   },
 });
 
-export const DEFAULT_EXPENSE_CATEGORIES: ExpenseCategory[] = [
-  { id: 'exp-cat-1', name: 'Electricity Bill', isCustom: false },
-  { id: 'exp-cat-2', name: 'Staff Salary & Wages', isCustom: false },
-  { id: 'exp-cat-3', name: 'Shop / Store Rent', isCustom: false },
-  { id: 'exp-cat-4', name: 'Maintenance & Repairs', isCustom: false },
-  { id: 'exp-cat-5', name: 'Tea & Refreshments', isCustom: false },
-  { id: 'exp-cat-6', name: 'Printing & Stationery', isCustom: false },
-  { id: 'exp-cat-7', name: 'Internet & Telephone', isCustom: false },
-  { id: 'exp-cat-8', name: 'Municipal / Trade Tax', isCustom: false },
-  { id: 'exp-cat-9', name: 'Packaging & Materials', isCustom: false },
-  { id: 'exp-cat-10', name: 'Logistics / Delivery', isCustom: false },
-];
-
-export const DEFAULT_CATEGORIES: ItemCategory[] = [
-  { id: 'cat-01', businessId: '65f2a1b9a000000000000001', name: 'Grocery', description: 'Packaged foods, staples, pulses & grains', createdAt: '2026-01-15T10:00:00Z' },
-  { id: 'cat-02', businessId: '65f2a1b9a000000000000001', name: 'Dairy & Eggs', description: 'Milk, cheese, butter, curd and farm eggs', createdAt: '2026-01-15T10:00:00Z' },
-  { id: 'cat-03', businessId: '65f2a1b9a000000000000001', name: 'Beverages', description: 'Juices, cold drinks, tea, coffee & energy drinks', createdAt: '2026-01-15T10:00:00Z' },
-  { id: 'cat-04', businessId: '65f2a1b9a000000000000001', name: 'Snacks & Sweets', description: 'Biscuits, chips, namkeen, chocolates & bakery', createdAt: '2026-01-15T10:00:00Z' },
-  { id: 'cat-05', businessId: '65f2a1b9a000000000000001', name: 'Personal Care', description: 'Soaps, haircare, skincare, oral care & grooming', createdAt: '2026-01-15T10:00:00Z' },
-  { id: 'cat-06', businessId: '65f2a1b9a000000000000001', name: 'Household & Cleaning', description: 'Detergents, cleaners, dishwash & kitchen essentials', createdAt: '2026-01-15T10:00:00Z' },
-  { id: 'cat-07', businessId: '65f2a1b9a000000000000001', name: 'Electronics & Gadgets', description: 'Cables, chargers, peripherals, accessories & batteries', createdAt: '2026-01-15T10:00:00Z' },
-  { id: 'cat-08', businessId: '65f2a1b9a000000000000001', name: 'Apparel & Lifestyle', description: 'Ready-to-wear clothing, innerwear & accessories', createdAt: '2026-01-15T10:00:00Z' },
-  { id: 'cat-09', businessId: '65f2a1b9a000000000000001', name: 'Stationery & Office', description: 'Books, notebooks, pens, markers & desk supplies', createdAt: '2026-01-15T10:00:00Z' },
-  { id: 'cat-10', businessId: '65f2a1b9a000000000000001', name: 'General Store', description: 'General merchandise & assorted counter items', createdAt: '2026-01-15T10:00:00Z' },
-];
-
-const nowMs = Date.now();
-const dayMs = 24 * 60 * 60 * 1000;
-
-const DEFAULT_TENANTS: Tenant[] = [
-  {
-    id: '65f2a1b9a000000000000001',
-    name: 'QuickBill Enterprise Retail',
-    slug: 'quickbill-main',
-    plan: 'ENTERPRISE',
-    status: 'ACTIVE',
-    adminEmail: 'admin@quickbill.local',
-    phone: '+91 9876543210',
-    gstin: '07AABCB1234F1Z5',
-    address: 'Ground Floor, Metro Retail Plaza, Sector 18, New Delhi',
-    createdAt: '2026-01-15T10:00:00Z',
-    databaseConfig: {
-      isolationMode: 'DEDICATED_DATABASE',
-      mongodbUri: 'mongodb://admin:secretpassword@localhost:27017/quickbill_main_db?authSource=admin',
-      databaseName: 'quickbill_main_db',
-    },
-    subscription: {
-      planId: 'ENTERPRISE',
-      planName: 'Enterprise Tier',
-      status: 'ACTIVE',
-      maxUsers: 25,
-      maxLocations: 10,
-      billingCycle: 'ANNUAL',
-      startDate: '2026-01-15T10:00:00Z',
-      endDate: new Date(nowMs + 290 * dayMs).toISOString(),
-      daysRemaining: 290,
-      gracePeriodDays: 7,
-      pricePerCycle: 49999.0,
-      currency: '₹',
-      autoRenew: true,
-      features: ['pos', 'inventory', 'ledger', 'purchase_orders', 'reports', 'multi_location', 'custom_db', 'barcode_labels', 'export_data'],
-      renewalHistory: [],
-      notes: 'Primary enterprise tenant',
-    },
-    stats: {
-      productsCount: 32,
-      invoicesCount: 2,
-      monthlyGmv: 2629.0,
-      usersCount: 3,
-      locationsCount: 3,
-    },
-  },
-];
-
-const DEFAULT_LOCATIONS: StoreLocation[] = [
-  {
-    id: '65f2a1b9a000000000000101',
-    businessId: '65f2a1b9a000000000000001',
-    name: 'Main Flagship Counter',
-    code: 'MAIN-01',
-    address: 'Ground Floor, Metro Retail Plaza, Sector 18',
-    phone: '+91 9876543210',
-    isDefault: true,
-    isActive: true,
-    createdAt: '2026-01-15T10:00:00Z',
-  },
-  {
-    id: '65f2a1b9a000000000000102',
-    businessId: '65f2a1b9a000000000000001',
-    name: 'Downtown Express Branch',
-    code: 'DT-02',
-    address: 'Shop 14, City Walk Center, Downtown',
-    phone: '+91 9811223344',
-    isDefault: false,
-    isActive: true,
-    createdAt: '2026-01-15T10:00:00Z',
-  },
-  {
-    id: '65f2a1b9a000000000000103',
-    businessId: '65f2a1b9a000000000000001',
-    name: 'Central Supply Warehouse',
-    code: 'WH-03',
-    address: 'Plot 8B, Industrial Logistics Park',
-    phone: '+91 9988776655',
-    isDefault: false,
-    isActive: true,
-    createdAt: '2026-01-15T10:00:00Z',
-  },
-];
-
-const DEFAULT_USERS: User[] = [
-  {
-    id: '65f2a1b9a000000000000011',
-    name: 'QuickBill Store Admin',
-    email: 'admin@quickbill.local',
-    role: 'TENANT_ADMIN',
-    businessId: '65f2a1b9a000000000000001',
-    tenantName: 'QuickBill Enterprise Retail',
-    assignedLocationIds: ['65f2a1b9a000000000000101', '65f2a1b9a000000000000102', '65f2a1b9a000000000000103'],
-    isActive: true,
-    createdAt: '2026-01-15T10:00:00Z',
-  },
-  {
-    id: '65f2a1b9a000000000000012',
-    name: 'Store Operations Manager',
-    email: 'manager@quickbill.local',
-    role: 'MANAGER',
-    businessId: '65f2a1b9a000000000000001',
-    tenantName: 'QuickBill Enterprise Retail',
-    assignedLocationIds: ['65f2a1b9a000000000000101', '65f2a1b9a000000000000102'],
-    isActive: true,
-    createdAt: '2026-01-15T10:00:00Z',
-  },
-  {
-    id: '65f2a1b9a000000000000013',
-    name: 'Main POS Billing Staff',
-    email: 'cashier@quickbill.local',
-    role: 'CASHIER',
-    businessId: '65f2a1b9a000000000000001',
-    tenantName: 'QuickBill Enterprise Retail',
-    assignedLocationIds: ['65f2a1b9a000000000000101'],
-    isActive: true,
-    createdAt: '2026-01-15T10:00:00Z',
-  },
-];
-
 class StoreService {
   private items: Item[] = [];
   private parties: Party[] = [];
@@ -169,8 +23,8 @@ class StoreService {
   private locations: StoreLocation[] = [];
   private users: User[] = [];
   private categories: ItemCategory[] = [];
-  private activeLocation: StoreLocation = DEFAULT_LOCATIONS[0];
-  private currentTenant: Tenant = DEFAULT_TENANTS[0];
+  private activeLocation: StoreLocation | null = null;
+  private currentTenant: Tenant | null = null;
   private isSuperAdminMode: boolean = false;
   private isOnline: boolean = false;
   private currentUser: User | null = null;
@@ -226,44 +80,36 @@ class StoreService {
       this.parties = savedParties ? JSON.parse(savedParties) : [];
       this.payments = savedPayments ? JSON.parse(savedPayments) : [];
       this.expenses = savedExpenses ? JSON.parse(savedExpenses) : [];
-      this.expenseCategories = savedExpCats ? JSON.parse(savedExpCats) : DEFAULT_EXPENSE_CATEGORIES;
-      if (savedTenants) {
-        try {
-          const parsed = JSON.parse(savedTenants);
-          const valid = Array.isArray(parsed) ? parsed.filter((t: any) => 
-            !['65f2a1b9a000000000000002', '65f2a1b9a000000000000003', '65f2a1b9a000000000000004'].includes(t.id) &&
-            !['apex-retail-west', 'metro-tech-spares', 'cloud-kitchen-east'].includes(t.slug)
-          ) : [];
-          this.tenants = valid.length > 0 ? valid : DEFAULT_TENANTS;
-        } catch {
-          this.tenants = DEFAULT_TENANTS;
-        }
-      } else {
-        this.tenants = DEFAULT_TENANTS;
-      }
-      this.locations = savedLocations ? JSON.parse(savedLocations) : DEFAULT_LOCATIONS;
-      this.users = savedUsers ? JSON.parse(savedUsers) : DEFAULT_USERS;
-      this.categories = savedCategories ? JSON.parse(savedCategories) : DEFAULT_CATEGORIES;
-      this.currentTenant = this.tenants[0] || DEFAULT_TENANTS[0];
+      this.expenseCategories = savedExpCats ? JSON.parse(savedExpCats) : [];
+      this.tenants = savedTenants ? JSON.parse(savedTenants) : [];
+      this.locations = savedLocations ? JSON.parse(savedLocations) : [];
+      this.users = savedUsers ? JSON.parse(savedUsers) : [];
+      this.categories = savedCategories ? JSON.parse(savedCategories) : [];
+      this.currentTenant = this.tenants[0] || null;
       this.isSuperAdminMode = savedSuperAdmin === 'true';
 
       if (savedActiveLocId) {
         const foundLoc = this.locations.find(l => l.id === savedActiveLocId);
-        if (foundLoc) this.activeLocation = foundLoc;
-        else this.activeLocation = this.locations[0] || DEFAULT_LOCATIONS[0];
+        this.activeLocation = foundLoc || this.locations[0] || null;
       } else {
-        this.activeLocation = this.locations[0] || DEFAULT_LOCATIONS[0];
+        this.activeLocation = this.locations[0] || null;
       }
 
       if (savedUser) {
-        this.currentUser = JSON.parse(savedUser);
+        try {
+          this.currentUser = JSON.parse(savedUser);
+        } catch {
+          this.currentUser = null;
+        }
       } else {
-        this.currentUser = DEFAULT_USERS[0];
+        this.currentUser = null;
       }
 
       const savedPOs = localStorage.getItem('qb_purchase_orders');
       this.purchaseOrders = savedPOs ? JSON.parse(savedPOs) : [];
-      this.purchaseOrders.forEach(po => { po.businessId = this.currentTenant.id; });
+      if (this.currentTenant?.id) {
+        this.purchaseOrders.forEach(po => { po.businessId = this.currentTenant!.id; });
+      }
 
     } catch {
       this.items = [];
@@ -271,14 +117,14 @@ class StoreService {
       this.invoices = [];
       this.payments = [];
       this.expenses = [];
-      this.expenseCategories = DEFAULT_EXPENSE_CATEGORIES;
-      this.tenants = DEFAULT_TENANTS;
-      this.locations = DEFAULT_LOCATIONS;
-      this.users = DEFAULT_USERS;
-      this.categories = DEFAULT_CATEGORIES;
-      this.currentTenant = DEFAULT_TENANTS[0];
-      this.activeLocation = DEFAULT_LOCATIONS[0];
-      this.currentUser = DEFAULT_USERS[0];
+      this.expenseCategories = [];
+      this.tenants = [];
+      this.locations = [];
+      this.users = [];
+      this.categories = [];
+      this.currentTenant = null;
+      this.activeLocation = null;
+      this.currentUser = null;
     }
   }
 
@@ -293,7 +139,11 @@ class StoreService {
     localStorage.setItem('qb_users', JSON.stringify(this.users));
     localStorage.setItem('qb_categories', JSON.stringify(this.categories));
     localStorage.setItem('qb_active_location_id', this.activeLocation?.id || '');
-    localStorage.setItem('qb_current_tenant_id', this.currentTenant.id);
+    if (this.currentTenant?.id) {
+      localStorage.setItem('qb_current_tenant_id', this.currentTenant.id);
+    } else {
+      localStorage.removeItem('qb_current_tenant_id');
+    }
     localStorage.setItem('qb_super_admin_mode', String(this.isSuperAdminMode));
     if (this.currentUser) {
       localStorage.setItem('qb_auth_user', JSON.stringify(this.currentUser));
@@ -344,7 +194,7 @@ class StoreService {
           name: res.data.name || cleanEmail.split('@')[0],
           role: userRole,
           businessId: res.data.default_business_id,
-          tenantName: this.currentTenant.name,
+          tenantName: this.currentTenant?.name || 'QuickBill Store',
           token: res.data.access_token,
           assignedLocationIds: res.data.assigned_location_ids || [],
           isActive: true,
@@ -365,7 +215,7 @@ class StoreService {
         try {
           await this.fetchActiveTenant();
           if (this.currentUser) {
-            this.currentUser.tenantName = this.currentTenant.name;
+            this.currentUser.tenantName = this.currentTenant?.name || 'QuickBill Store';
           }
         } catch (e) {
           console.warn('Initial tenant sync failed:', e);
@@ -631,7 +481,7 @@ class StoreService {
       if (res.data && Array.isArray(res.data)) {
         const liveLocs: StoreLocation[] = res.data.map((l: any) => ({
           id: l.id || l._id,
-          businessId: l.businessId || this.currentTenant.id,
+          businessId: l.businessId || this.currentTenant?.id || '',
           name: l.name,
           code: l.code,
           address: l.address || '',
@@ -640,10 +490,8 @@ class StoreService {
           isActive: l.isActive !== undefined ? !!l.isActive : true,
           createdAt: l.createdAt || new Date().toISOString(),
         }));
-        if (liveLocs.length > 0) {
-          this.locations = liveLocs;
-          this.saveToStorage();
-        }
+        this.locations = liveLocs;
+        this.saveToStorage();
       }
     } catch (e) {
       console.warn('Could not fetch locations from backend API, using local:', e);
@@ -657,7 +505,7 @@ class StoreService {
 
     // For Managers and Cashiers, ensure the active location is strictly active and in available list
     if (user && user.role !== 'SUPER_ADMIN' && user.role !== 'TENANT_ADMIN') {
-      if (!this.activeLocation || this.activeLocation.isActive === false || !available.some(l => l.id === this.activeLocation.id)) {
+      if (!this.activeLocation || this.activeLocation.isActive === false || !available.some(l => l.id === this.activeLocation?.id)) {
         if (available.length > 0) {
           this.activeLocation = available[0];
           this.saveToStorage();
@@ -665,7 +513,14 @@ class StoreService {
       }
     }
 
-    return this.activeLocation || available[0] || this.locations.find(l => l.isActive !== false) || this.locations[0] || DEFAULT_LOCATIONS[0];
+    return this.activeLocation || available[0] || this.locations.find(l => l.isActive !== false) || this.locations[0] || {
+      id: 'loc_default',
+      businessId: this.currentTenant?.id || '',
+      name: 'Main Branch',
+      code: 'MAIN',
+      isDefault: true,
+      isActive: true,
+    };
   }
 
   setActiveLocation(locationOrId: string | StoreLocation): StoreLocation {
@@ -691,10 +546,11 @@ class StoreService {
   }
 
   async addLocation(locData: Omit<StoreLocation, 'id' | 'businessId' | 'createdAt' | 'isActive'>): Promise<StoreLocation> {
+    const activeTenant = this.getActiveTenant();
     // Quota Limit Enforcement (unless Super Admin)
     if (!this.isSuperAdmin()) {
-      const activeLocations = this.locations.filter(l => (l.businessId === this.currentTenant.id || !l.businessId) && l.isActive !== false);
-      const maxLocationsAllowed = this.currentTenant.subscription?.maxLocations ?? 3;
+      const activeLocations = this.locations.filter(l => (l.businessId === activeTenant.id || !l.businessId) && l.isActive !== false);
+      const maxLocationsAllowed = activeTenant.subscription?.maxLocations ?? 3;
       if (activeLocations.length >= maxLocationsAllowed) {
         throw new Error(`Subscription location limit reached (${activeLocations.length}/${maxLocationsAllowed} branches). Please contact Super Admin to upgrade your subscription.`);
       }
@@ -703,7 +559,7 @@ class StoreService {
     const newLoc: StoreLocation = {
       ...locData,
       id: `loc_${Date.now()}`,
-      businessId: this.currentTenant.id,
+      businessId: activeTenant.id,
       isActive: true,
       createdAt: new Date().toISOString(),
     };
@@ -730,7 +586,7 @@ class StoreService {
 
     // Sync local items: ensure every item has a location entry for this new branch (isListed: false, stock: 0)
     this.items = this.items.map(item => {
-      if (item.businessId === this.currentTenant.id || !item.businessId) {
+      if (item.businessId === activeTenant.id || !item.businessId) {
         const itemLocs = item.locations ? [...item.locations] : [];
         if (!itemLocs.some(l => l.locationId === newLoc.id || l.locationId === newLoc.code)) {
           itemLocs.push({
@@ -765,7 +621,7 @@ class StoreService {
       if (res.data) {
         const live: StoreLocation = {
           id: res.data.id || res.data._id || locationId,
-          businessId: res.data.businessId || this.currentTenant.id,
+          businessId: res.data.businessId || this.currentTenant?.id || '',
           name: res.data.name || this.locations[idx].name,
           code: res.data.code || this.locations[idx].code,
           address: res.data.address !== undefined ? res.data.address : (this.locations[idx].address || ''),
@@ -835,8 +691,10 @@ class StoreService {
     });
 
     // If active location was deleted, fallback to first available active or default
-    if (locKeys.includes(this.activeLocation?.id) || locKeys.includes(this.activeLocation?.code)) {
-      this.activeLocation = this.locations.find(l => l.isDefault) || this.locations[0] || DEFAULT_LOCATIONS[0];
+    const activeLocId = this.activeLocation?.id;
+    const activeLocCode = this.activeLocation?.code;
+    if ((activeLocId && locKeys.includes(activeLocId)) || (activeLocCode && locKeys.includes(activeLocCode))) {
+      this.activeLocation = this.locations.find(l => l.isDefault) || this.locations[0] || null;
     }
 
     this.saveToStorage();
@@ -878,7 +736,7 @@ class StoreService {
     }
 
     // Local sync on in-memory items
-    const tenantId = this.currentTenant.id;
+    const tenantId = this.currentTenant?.id || '';
     let localSyncedCount = 0;
 
     this.items = this.items.map(item => {
@@ -941,14 +799,16 @@ class StoreService {
 
   // --- Team & Staff Users Management ---
   getUsers(): User[] {
-    return this.users.filter(u => u.businessId === this.currentTenant.id || !u.businessId);
+    const activeTenantId = this.currentTenant?.id || '';
+    return this.users.filter(u => u.businessId === activeTenantId || !u.businessId);
   }
 
   async addUser(userData: { name: string; email: string; password?: string; role: UserRole; assignedLocationIds: string[] }): Promise<User> {
+    const activeTenant = this.getActiveTenant();
     // Quota Limit Enforcement (unless Super Admin)
     if (!this.isSuperAdmin()) {
       const activeUsers = this.getUsers().filter(u => u.isActive !== false);
-      const maxUsersAllowed = this.currentTenant.subscription?.maxUsers ?? 5;
+      const maxUsersAllowed = activeTenant.subscription?.maxUsers ?? 5;
       if (activeUsers.length >= maxUsersAllowed) {
         throw new Error(`Subscription user limit reached (${activeUsers.length}/${maxUsersAllowed} staff users). Please contact Super Admin to upgrade your subscription.`);
       }
@@ -959,8 +819,8 @@ class StoreService {
       name: userData.name,
       email: userData.email.trim().toLowerCase(),
       role: userData.role,
-      businessId: this.currentTenant.id,
-      tenantName: this.currentTenant.name,
+      businessId: activeTenant.id,
+      tenantName: activeTenant.name,
       assignedLocationIds: userData.assignedLocationIds,
       isActive: true,
       createdAt: new Date().toISOString(),
@@ -1016,18 +876,18 @@ class StoreService {
     return this.users.length < prevLen;
   }
 
-  // --- Tenancy & Subscription Lifecycle ---
   getTenants(): Tenant[] {
     const now = new Date();
-    const visibleTenants = (this.isSuperAdmin() || !this.currentUser) 
+    const visibleTenants: Tenant[] = (this.isSuperAdmin() || !this.currentUser) 
       ? this.tenants 
-      : [this.currentTenant];
+      : (this.currentTenant ? [this.currentTenant] : []);
 
-    return visibleTenants.map(t => {
-      const tenantItems = this.items.filter(i => (i.businessId || DEFAULT_TENANTS[0].id) === t.id);
-      const tenantInvoices = this.invoices.filter(inv => (inv.businessId || DEFAULT_TENANTS[0].id) === t.id);
-      const tenantUsers = this.users.filter(u => (u.businessId || DEFAULT_TENANTS[0].id) === t.id);
-      const tenantLocations = this.locations.filter(l => (l.businessId || DEFAULT_TENANTS[0].id) === t.id);
+    return visibleTenants.filter((t): t is Tenant => Boolean(t && t.id)).map(t => {
+      const activeTenantId = this.currentTenant?.id || '';
+      const tenantItems = this.items.filter(i => (i.businessId || activeTenantId) === t.id);
+      const tenantInvoices = this.invoices.filter(inv => (inv.businessId || activeTenantId) === t.id);
+      const tenantUsers = this.users.filter(u => (u.businessId || activeTenantId) === t.id);
+      const tenantLocations = this.locations.filter(l => (l.businessId || activeTenantId) === t.id);
       const monthlyGmv = tenantInvoices.reduce((sum, inv) => sum + inv.grandTotal, 0);
 
       // Dynamically calculate days remaining and subscription status
@@ -1207,13 +1067,49 @@ class StoreService {
   }
 
   getActiveTenant(): Tenant {
-    // Return updated live tenant with accurate days remaining & status
-    const all = this.getTenants();
-    const found = all.find(t => t.id === this.currentTenant.id);
-    if (found) {
-      this.currentTenant = found;
+    if (this.currentTenant) {
+      const all = this.getTenants();
+      const found = all.find(t => t.id === this.currentTenant?.id);
+      if (found) {
+        this.currentTenant = found;
+      }
+      return this.currentTenant;
     }
-    return this.currentTenant;
+    if (this.tenants.length > 0) {
+      this.currentTenant = this.tenants[0];
+      return this.currentTenant;
+    }
+    return {
+      id: '',
+      name: '',
+      slug: '',
+      adminEmail: '',
+      plan: 'STARTER',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      databaseConfig: {
+        isolationMode: 'SHARED',
+        databaseName: '',
+      },
+      subscription: {
+        planId: 'STARTER',
+        planName: 'Starter Plan',
+        status: 'ACTIVE',
+        maxUsers: 1,
+        maxLocations: 1,
+        billingCycle: 'MONTHLY',
+        startDate: new Date().toISOString(),
+        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        features: ['pos', 'inventory'],
+      },
+      stats: {
+        productsCount: 0,
+        invoicesCount: 0,
+        monthlyGmv: 0,
+        usersCount: 0,
+        locationsCount: 0,
+      }
+    };
   }
 
   async updateTenantProfile(updates: {
@@ -1226,19 +1122,20 @@ class StoreService {
     status?: 'ACTIVE' | 'SUSPENDED';
     plan?: any;
   }): Promise<Tenant> {
+    const current = this.getActiveTenant();
     const updatedTenant: Tenant = {
-      ...this.currentTenant,
-      name: updates.name ? updates.name.trim() : this.currentTenant.name,
-      gstin: updates.gstin !== undefined ? updates.gstin.trim() : this.currentTenant.gstin,
-      phone: updates.phone !== undefined ? updates.phone.trim() : this.currentTenant.phone,
-      adminEmail: updates.email !== undefined ? updates.email.trim().toLowerCase() : this.currentTenant.adminEmail,
-      address: updates.address !== undefined ? updates.address.trim() : this.currentTenant.address,
-      status: updates.status || this.currentTenant.status,
-      plan: updates.plan || this.currentTenant.plan,
+      ...current,
+      name: updates.name ? updates.name.trim() : current.name,
+      gstin: updates.gstin !== undefined ? updates.gstin.trim() : current.gstin,
+      phone: updates.phone !== undefined ? updates.phone.trim() : current.phone,
+      adminEmail: updates.email !== undefined ? updates.email.trim().toLowerCase() : current.adminEmail,
+      address: updates.address !== undefined ? updates.address.trim() : current.address,
+      status: updates.status || current.status,
+      plan: updates.plan || current.plan,
     };
 
     // Update in local array
-    const idx = this.tenants.findIndex(t => t.id === this.currentTenant.id);
+    const idx = this.tenants.findIndex(t => t.id === current.id);
     if (idx !== -1) {
       this.tenants[idx] = updatedTenant;
     }
@@ -1246,18 +1143,20 @@ class StoreService {
     this.saveToStorage();
 
     // Sync to backend if online
-    try {
-      await apiClient.put(`/tenants/${this.currentTenant.id}`, {
-        name: updates.name,
-        gstin: updates.gstin,
-        phone: updates.phone,
-        admin_email: updates.email,
-        address: updates.address,
-        status: updates.status,
-        plan: updates.plan,
-      });
-    } catch (e) {
-      console.warn('Backend tenant profile update error:', e);
+    if (this.currentTenant.id) {
+      try {
+        await apiClient.put(`/tenants/${this.currentTenant.id}`, {
+          name: updates.name,
+          gstin: updates.gstin,
+          phone: updates.phone,
+          admin_email: updates.email,
+          address: updates.address,
+          status: updates.status,
+          plan: updates.plan,
+        });
+      } catch (e) {
+        console.warn('Backend tenant profile update error:', e);
+      }
     }
 
     return this.currentTenant;
@@ -1313,7 +1212,7 @@ class StoreService {
       subscription: updatedSub,
     };
 
-    if (this.currentTenant.id === tenantId) {
+    if (this.currentTenant?.id === tenantId) {
       this.currentTenant = this.tenants[idx];
     }
     this.saveToStorage();
@@ -1399,7 +1298,7 @@ class StoreService {
       subscription: updatedSub,
     };
 
-    if (this.currentTenant.id === tenantId) {
+    if (this.currentTenant?.id === tenantId) {
       this.currentTenant = this.tenants[idx];
     }
     this.saveToStorage();
@@ -1453,7 +1352,7 @@ class StoreService {
       }
     };
 
-    if (this.currentTenant.id === tenantId) {
+    if (this.currentTenant?.id === tenantId) {
       this.currentTenant = this.tenants[idx];
     }
     this.saveToStorage();
@@ -1650,9 +1549,9 @@ class StoreService {
 
   // --- Strict Tenant & Location-Isolated Items ---
   getItems(locationId?: string, includeUnlisted: boolean = false): Item[] {
-    const activeTenantId = this.currentTenant.id;
+    const activeTenantId = this.currentTenant?.id || '';
     const isConsolidated = !locationId || locationId === 'ALL';
-    const tenantItems = this.items.filter(i => (i.businessId || DEFAULT_TENANTS[0].id) === activeTenantId);
+    const tenantItems = this.items.filter(i => (i.businessId || activeTenantId) === activeTenantId);
 
     const result: Item[] = [];
 
@@ -1753,7 +1652,7 @@ class StoreService {
       if (res.data?.data && Array.isArray(res.data.data)) {
         const liveItems: Item[] = res.data.data.map((d: any) => ({
           id: d._id || d.id || d.publicItemId,
-          businessId: d.businessId || this.currentTenant.id,
+          businessId: d.businessId || this.currentTenant?.id || '',
           publicItemId: d.publicItemId || d.sku || 'ITM-TEMP',
           name: d.name,
           sku: d.sku,
@@ -1777,10 +1676,8 @@ class StoreService {
           imageUrl: d.imageUrl,
           allowParts: !!d.allowParts,
         }));
-        if (liveItems.length > 0) {
-          this.items = liveItems;
-          this.saveToStorage();
-        }
+        this.items = liveItems;
+        this.saveToStorage();
       }
     } catch (e) {
       console.warn('Could not fetch live items from /items API:', e);
@@ -1818,7 +1715,7 @@ class StoreService {
       if (res.data && Array.isArray(res.data.data)) {
         const liveItems: Item[] = res.data.data.map((d: any) => ({
           id: d._id || d.id || d.publicItemId,
-          businessId: d.businessId || this.currentTenant.id,
+          businessId: d.businessId || this.currentTenant?.id || '',
           publicItemId: d.publicItemId || d.sku || 'ITM-TEMP',
           name: d.name,
           sku: d.sku,
@@ -1879,8 +1776,8 @@ class StoreService {
   }
 
   getRawItems(): Item[] {
-    const activeTenantId = this.currentTenant.id;
-    return this.items.filter(i => (i.businessId || DEFAULT_TENANTS[0].id) === activeTenantId);
+    const activeTenantId = this.currentTenant?.id || '';
+    return this.items.filter(i => (i.businessId || activeTenantId) === activeTenantId);
   }
 
   getItemById(id: string, locationId?: string): Item | undefined {
@@ -1889,7 +1786,7 @@ class StoreService {
   }
 
   async addItem(item: Omit<Item, 'id' | 'publicItemId' | 'businessId'>): Promise<Item> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const storeItems = this.getRawItems();
     
     // Ensure every registered location has an entry in item.locations if not provided
@@ -1983,9 +1880,9 @@ class StoreService {
   }
 
   async updateItem(id: string, updates: Partial<Item>): Promise<Item | null> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const idx = this.items.findIndex(
-      i => (i.businessId || DEFAULT_TENANTS[0].id) === activeId && i.id === id
+      i => (i.businessId || activeId) === activeId && i.id === id
     );
 
     try {
@@ -2042,7 +1939,7 @@ class StoreService {
   }
 
   async adjustStock(id: string, delta: number, locationId?: string): Promise<Item | null> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const targetLocId = locationId || this.getActiveLocation().id;
 
     try {
@@ -2085,7 +1982,7 @@ class StoreService {
     }
 
     const item = this.items.find(
-      i => (i.businessId || DEFAULT_TENANTS[0].id) === activeId && i.id === id
+      i => (i.businessId || activeId) === activeId && i.id === id
     );
     if (!item) return null;
 
@@ -2106,7 +2003,7 @@ class StoreService {
   }
 
   async deleteItem(id: string): Promise<boolean> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     try {
       await apiClient.delete(`/items/${id}`);
     } catch (e) {
@@ -2114,7 +2011,7 @@ class StoreService {
     }
     const prevLen = this.items.length;
     this.items = this.items.filter(
-      i => !((i.businessId || DEFAULT_TENANTS[0].id) === activeId && i.id === id)
+      i => !((i.businessId || activeId) === activeId && i.id === id)
     );
     this.saveToStorage();
     return this.items.length < prevLen;
@@ -2122,58 +2019,25 @@ class StoreService {
 
   // --- Strict Tenant-Isolated Product Categories ---
   getCategories(): ItemCategory[] {
-    const activeId = this.currentTenant.id;
-    return this.categories.filter(c => (c.businessId || DEFAULT_TENANTS[0].id) === activeId);
+    const activeId = this.currentTenant?.id || '';
+    return this.categories.filter(c => (c.businessId || activeId) === activeId);
   }
 
   async fetchCategories(): Promise<ItemCategory[]> {
     try {
       const res = await apiClient.get('/categories', { params: { type: 'PRODUCT' } });
       if (res.data && Array.isArray(res.data)) {
-        if (res.data.length > 0) {
-          const liveCats: ItemCategory[] = res.data.map((c: any) => ({
-            id: c.id || c._id,
-            businessId: c.businessId || this.currentTenant.id,
-            name: c.name,
-            type: 'PRODUCT',
-            description: c.description || undefined,
-            createdAt: c.createdAt || new Date().toISOString(),
-          }));
-          this.categories = liveCats;
-          this.saveToStorage();
-          return this.getCategories();
-        } else {
-          // If database is empty for this tenant, seed standard initial product categories into MongoDB
-          const seeded: ItemCategory[] = [];
-          for (const def of DEFAULT_CATEGORIES) {
-            try {
-              const createRes = await apiClient.post('/categories', {
-                name: def.name,
-                type: 'PRODUCT',
-                description: def.description,
-              });
-              seeded.push({
-                id: createRes.data?.id || createRes.data?._id || def.id,
-                businessId: this.currentTenant.id,
-                name: def.name,
-                type: 'PRODUCT',
-                description: def.description,
-                createdAt: new Date().toISOString(),
-              });
-            } catch {
-              seeded.push({
-                ...def,
-                businessId: this.currentTenant.id,
-                type: 'PRODUCT',
-              });
-            }
-          }
-          if (seeded.length > 0) {
-            this.categories = seeded;
-            this.saveToStorage();
-          }
-          return this.getCategories();
-        }
+        const liveCats: ItemCategory[] = res.data.map((c: any) => ({
+          id: c.id || c._id,
+          businessId: c.businessId || this.currentTenant?.id || '',
+          name: c.name,
+          type: 'PRODUCT',
+          description: c.description || undefined,
+          createdAt: c.createdAt || new Date().toISOString(),
+        }));
+        this.categories = liveCats;
+        this.saveToStorage();
+        return this.getCategories();
       }
     } catch (e) {
       console.warn('Could not fetch product categories from API:', e);
@@ -2182,12 +2046,12 @@ class StoreService {
   }
 
   async addCategory(data: { name: string; description?: string }): Promise<ItemCategory> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const cleanName = data.name.trim();
     
     // Check if category name already exists
     const existing = this.categories.find(
-      c => (c.businessId || DEFAULT_TENANTS[0].id) === activeId && c.name.toLowerCase() === cleanName.toLowerCase()
+      c => (c.businessId || activeId) === activeId && c.name.toLowerCase() === cleanName.toLowerCase()
     );
     if (existing) {
       return existing;
@@ -2222,9 +2086,9 @@ class StoreService {
   }
 
   async updateCategory(id: string, updates: Partial<ItemCategory>): Promise<ItemCategory | null> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const idx = this.categories.findIndex(
-      c => (c.businessId || DEFAULT_TENANTS[0].id) === activeId && c.id === id
+      c => (c.businessId || activeId) === activeId && c.id === id
     );
     if (idx === -1) return null;
 
@@ -2265,14 +2129,14 @@ class StoreService {
   }
 
   async deleteCategory(id: string): Promise<boolean> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const target = this.categories.find(
-      c => (c.businessId || DEFAULT_TENANTS[0].id) === activeId && c.id === id
+      c => (c.businessId || activeId) === activeId && c.id === id
     );
     if (!target) return false;
 
     this.categories = this.categories.filter(
-      c => !((c.businessId || DEFAULT_TENANTS[0].id) === activeId && c.id === id)
+      c => !((c.businessId || activeId) === activeId && c.id === id)
     );
     this.saveToStorage();
 
@@ -2289,8 +2153,8 @@ class StoreService {
 
   // --- Strict Tenant-Isolated Parties & Dedicated Customers (CRM & DB Integration) ---
   getParties(locationId?: string): Party[] {
-    const activeId = this.currentTenant.id;
-    const tenantParties = this.parties.filter(p => (p.businessId || DEFAULT_TENANTS[0].id) === activeId);
+    const activeId = this.currentTenant?.id || '';
+    const tenantParties = this.parties.filter(p => (p.businessId || activeId) === activeId);
     if (!locationId || locationId === 'ALL') return tenantParties;
 
     return tenantParties.filter(p => 
@@ -2311,7 +2175,7 @@ class StoreService {
         custRes.value.data.data.forEach((c: any) => {
           fetchedList.push({
             id: c.id || c._id,
-            businessId: c.businessId || this.currentTenant.id,
+            businessId: c.businessId || this.currentTenant?.id || '',
             name: c.name,
             type: 'CUSTOMER',
             phone: c.phone || undefined,
@@ -2330,7 +2194,7 @@ class StoreService {
           if (!fetchedList.some(x => x.id === pId)) {
             fetchedList.push({
               id: pId,
-              businessId: p.businessId || this.currentTenant.id,
+              businessId: p.businessId || this.currentTenant?.id || '',
               name: p.name,
               type: Array.isArray(p.type) ? (p.type.includes('supplier') ? 'SUPPLIER' : 'CUSTOMER') : (p.type || 'CUSTOMER'),
               phone: p.phone || undefined,
@@ -2344,7 +2208,7 @@ class StoreService {
         });
       }
 
-      if (fetchedList.length > 0) {
+      if (custRes.status === 'fulfilled' || partyRes.status === 'fulfilled') {
         this.parties = fetchedList;
         this.saveToStorage();
       }
@@ -2384,7 +2248,7 @@ class StoreService {
       if (res.data && Array.isArray(res.data.data)) {
         const liveParties: Party[] = res.data.data.map((p: any) => ({
           id: p._id || p.id,
-          businessId: p.businessId || this.currentTenant.id,
+          businessId: p.businessId || this.currentTenant?.id || '',
           name: p.name,
           type: Array.isArray(p.type) 
             ? (p.type.some((t: string) => String(t).toLowerCase().includes('supplier')) ? 'SUPPLIER' : 'CUSTOMER') 
@@ -2433,7 +2297,7 @@ class StoreService {
   }
 
   addParty(party: Omit<Party, 'id' | 'currentBalance' | 'businessId'>): Party {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const newParty: Party = {
       ...party,
       id: `party_${Date.now()}`,
@@ -2481,7 +2345,7 @@ class StoreService {
   }
 
   async createCustomer(customerData: Omit<Party, 'id' | 'currentBalance' | 'businessId'>): Promise<Party> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     try {
       const res = await apiClient.post('/customers', {
         name: customerData.name,
@@ -2524,9 +2388,9 @@ class StoreService {
   }
 
   async updateParty(partyId: string, updates: Partial<Party>): Promise<Party | undefined> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const p = this.parties.find(
-      x => (x.businessId || DEFAULT_TENANTS[0].id) === activeId && x.id === partyId
+      x => (x.businessId || activeId) === activeId && x.id === partyId
     );
     if (p) {
       Object.assign(p, updates);
@@ -2563,9 +2427,9 @@ class StoreService {
   }
 
   async deleteParty(partyId: string, partyType: 'CUSTOMER' | 'SUPPLIER' = 'CUSTOMER'): Promise<boolean> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     this.parties = this.parties.filter(
-      p => !((p.businessId || DEFAULT_TENANTS[0].id) === activeId && p.id === partyId)
+      p => !((p.businessId || activeId) === activeId && p.id === partyId)
     );
     this.saveToStorage();
 
@@ -2615,7 +2479,7 @@ class StoreService {
       if (res.data) {
         const remoteParty: Party = {
           id: res.data.id || res.data._id,
-          businessId: res.data.businessId || this.currentTenant.id,
+          businessId: res.data.businessId || this.currentTenant?.id || '',
           name: res.data.name,
           type: 'CUSTOMER',
           phone: res.data.phone,
@@ -2640,9 +2504,9 @@ class StoreService {
   }
 
   updatePartyBalance(partyId: string, delta: number) {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const p = this.parties.find(
-      x => (x.businessId || DEFAULT_TENANTS[0].id) === activeId && x.id === partyId
+      x => (x.businessId || activeId) === activeId && x.id === partyId
     );
     if (p) {
       p.currentBalance += delta;
@@ -2659,49 +2523,17 @@ class StoreService {
     try {
       const res = await apiClient.get('/categories', { params: { type: 'EXPENSE' } });
       if (res.data && Array.isArray(res.data)) {
-        if (res.data.length > 0) {
-          const liveCats: ExpenseCategory[] = res.data.map((c: any) => ({
-            id: c.id || c._id,
-            businessId: c.businessId || this.currentTenant.id,
-            name: c.name,
-            type: 'EXPENSE',
-            description: c.description || undefined,
-            isCustom: true,
-          }));
-          this.expenseCategories = liveCats;
-          this.saveToStorage();
-          return this.getExpenseCategories();
-        } else {
-          // If database is empty for this tenant, seed standard initial expense categories into MongoDB
-          const seeded: ExpenseCategory[] = [];
-          for (const def of DEFAULT_EXPENSE_CATEGORIES) {
-            try {
-              const createRes = await apiClient.post('/categories', {
-                name: def.name,
-                type: 'EXPENSE',
-              });
-              seeded.push({
-                id: createRes.data?.id || createRes.data?._id || def.id,
-                businessId: this.currentTenant.id,
-                name: def.name,
-                type: 'EXPENSE',
-                isCustom: true,
-              });
-            } catch {
-              seeded.push({
-                ...def,
-                businessId: this.currentTenant.id,
-                type: 'EXPENSE',
-                isCustom: true,
-              });
-            }
-          }
-          if (seeded.length > 0) {
-            this.expenseCategories = seeded;
-            this.saveToStorage();
-          }
-          return this.getExpenseCategories();
-        }
+        const liveCats: ExpenseCategory[] = res.data.map((c: any) => ({
+          id: c.id || c._id,
+          businessId: c.businessId || this.currentTenant?.id || '',
+          name: c.name,
+          type: 'EXPENSE',
+          description: c.description || undefined,
+          isCustom: true,
+        }));
+        this.expenseCategories = liveCats;
+        this.saveToStorage();
+        return this.getExpenseCategories();
       }
     } catch (e) {
       console.warn('Could not fetch expense categories from API:', e);
@@ -2717,7 +2549,7 @@ class StoreService {
 
     const newCat: ExpenseCategory = {
       id: `exp_cat_${Date.now()}`,
-      businessId: this.currentTenant.id,
+      businessId: this.currentTenant?.id || '',
       name: cleanName,
       type: 'EXPENSE',
       description: cleanDesc,
@@ -2796,8 +2628,8 @@ class StoreService {
   }
 
   getExpenses(locationId?: string): Expense[] {
-    const activeId = this.currentTenant.id;
-    const list = this.expenses.filter(e => (e.businessId || DEFAULT_TENANTS[0].id) === activeId);
+    const activeId = this.currentTenant?.id || '';
+    const list = this.expenses.filter(e => (e.businessId || activeId) === activeId);
     if (!locationId || locationId === 'ALL') return list;
     return list.filter(e => !e.locationId || e.locationId === locationId);
   }
@@ -2812,7 +2644,7 @@ class StoreService {
       if (res.data?.data && Array.isArray(res.data.data)) {
         const liveExpenses: Expense[] = res.data.data.map((d: any) => ({
           id: d._id || d.id,
-          businessId: d.businessId || this.currentTenant.id,
+          businessId: d.businessId || this.currentTenant?.id || '',
           category: d.category,
           amount: Number(d.amount || 0),
           payee: d.payee || undefined,
@@ -2872,7 +2704,7 @@ class StoreService {
       if (res.data && Array.isArray(res.data.data)) {
         const liveExpenses: Expense[] = res.data.data.map((d: any) => ({
           id: d._id || d.id,
-          businessId: d.businessId || this.currentTenant.id,
+          businessId: d.businessId || this.currentTenant?.id || '',
           category: d.category,
           amount: Number(d.amount || 0),
           payee: d.payee || undefined,
@@ -2921,7 +2753,7 @@ class StoreService {
   }
 
   async addExpense(expenseData: Omit<Expense, 'id' | 'businessId'>): Promise<Expense> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const activeLoc = this.getActiveLocation();
     
     const newExp: Expense = {
@@ -2960,9 +2792,9 @@ class StoreService {
   }
 
   async updateExpense(id: string, updates: Partial<Expense>): Promise<Expense | null> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const idx = this.expenses.findIndex(
-      e => (e.businessId || DEFAULT_TENANTS[0].id) === activeId && e.id === id
+      e => (e.businessId || activeId) === activeId && e.id === id
     );
     if (idx === -1) return null;
 
@@ -2990,10 +2822,10 @@ class StoreService {
   }
 
   async deleteExpense(id: string): Promise<boolean> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const prevLen = this.expenses.length;
     this.expenses = this.expenses.filter(
-      e => !((e.businessId || DEFAULT_TENANTS[0].id) === activeId && e.id === id)
+      e => !((e.businessId || activeId) === activeId && e.id === id)
     );
     this.saveToStorage();
 
@@ -3063,7 +2895,7 @@ class StoreService {
 
     return {
       id: doc.id || doc._id || `inv_${Date.now()}`,
-      businessId: doc.businessId || doc.business_id || this.currentTenant.id,
+      businessId: doc.businessId || doc.business_id || this.currentTenant?.id || '',
       locationId: doc.locationId || doc.location_id || undefined,
       locationName: doc.locationName || doc.location_name || 'Main Store',
       locationCode: doc.locationCode || doc.location_code || undefined,
@@ -3222,8 +3054,8 @@ class StoreService {
   }
 
   getInvoices(locationId?: string): Invoice[] {
-    const activeId = this.currentTenant.id;
-    const list = this.invoices.filter(inv => (inv.businessId || DEFAULT_TENANTS[0].id) === activeId);
+    const activeId = this.currentTenant?.id || '';
+    const list = this.invoices.filter(inv => (inv.businessId || activeId) === activeId);
     if (!locationId || locationId === 'ALL') return list;
 
     return list.filter(inv => inv.locationId === locationId);
@@ -3327,7 +3159,7 @@ class StoreService {
   }
 
   async createInvoice(invoiceData: Omit<Invoice, 'id' | 'invoiceNumber' | 'businessId'>): Promise<Invoice> {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const activeLoc = this.getActiveLocation();
     const currentUser = this.getCurrentUser();
     
@@ -3409,12 +3241,12 @@ class StoreService {
 
   // --- Strict Tenant-Isolated Payments ---
   getPayments(): Payment[] {
-    const activeId = this.currentTenant.id;
-    return this.payments.filter(p => (p.businessId || DEFAULT_TENANTS[0].id) === activeId);
+    const activeId = this.currentTenant?.id || '';
+    return this.payments.filter(p => (p.businessId || activeId) === activeId);
   }
 
   recordPayment(paymentData: Omit<Payment, 'id' | 'businessId'>): Payment {
-    const activeId = this.currentTenant.id;
+    const activeId = this.currentTenant?.id || '';
     const payment: Payment = {
       ...paymentData,
       id: `pay_${Date.now()}`,
@@ -3469,7 +3301,7 @@ class StoreService {
     return {
       id: String(doc.id || doc._id || ''),
       poNumber: doc.poNumber || doc.po_number || '',
-      businessId: String(doc.businessId || doc.business_id || this.currentTenant.id),
+      businessId: String(doc.businessId || doc.business_id || this.currentTenant?.id || ''),
       supplierId: String(doc.supplierId || doc.supplier_id || ''),
       supplierName: doc.supplierName || doc.supplier_name || '',
       supplierPhone: doc.supplierPhone || doc.supplier_phone,
@@ -3540,8 +3372,8 @@ class StoreService {
   }
 
   getPurchaseOrders(locationId?: string): PurchaseOrder[] {
-    const activeId = this.currentTenant.id;
-    const list = this.purchaseOrders.filter(po => (po.businessId || DEFAULT_TENANTS[0].id) === activeId);
+    const activeId = this.currentTenant?.id || '';
+    const list = this.purchaseOrders.filter(po => (po.businessId || activeId) === activeId);
     if (!locationId || locationId === 'ALL') return list;
     return list.filter(po => po.locationId === locationId);
   }
@@ -3719,14 +3551,14 @@ class StoreService {
     const localPO: PurchaseOrder = {
       id: `po_${Date.now()}`,
       poNumber: `PO-${new Date().getFullYear()}-${String(this.purchaseOrders.length + 1).padStart(4, '0')}`,
-      businessId: this.currentTenant.id,
+      businessId: this.currentTenant?.id || '',
       supplierId: poData.supplierId,
       supplierName: supplier?.name || 'Unknown Supplier',
       supplierPhone: supplier?.phone,
       supplierGstin: supplier?.gstin,
       supplierAddress: supplier?.address,
-      locationId: activeLoc.id,
-      locationName: activeLoc.name,
+      locationId: activeLoc?.id || 'loc_default',
+      locationName: activeLoc?.name || 'Main Branch',
       orderDate: new Date().toISOString().split('T')[0],
       expectedDeliveryDate: poData.expectedDeliveryDate,
       status: 'ORDERED',

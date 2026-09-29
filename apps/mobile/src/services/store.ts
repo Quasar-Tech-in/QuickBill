@@ -18,298 +18,24 @@ const API_BASE_URL = 'http://localhost:8000/api/v1';
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 5000,
+  timeout: 8000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-const DEFAULT_CATEGORIES: ItemCategory[] = [
-  { id: 'cat-01', name: 'Grocery', description: 'Packaged foods, staples, pulses & grains' },
-  { id: 'cat-02', name: 'Dairy & Eggs', description: 'Milk, cheese, butter, curd and farm eggs' },
-  { id: 'cat-03', name: 'Beverages', description: 'Juices, cold drinks, tea, coffee & energy drinks' },
-  { id: 'cat-04', name: 'Snacks & Sweets', description: 'Biscuits, chips, namkeen, chocolates & bakery' },
-  { id: 'cat-05', name: 'Personal Care', description: 'Soaps, haircare, skincare, oral care & grooming' },
-  { id: 'cat-06', name: 'Electronics & Gadgets', description: 'Cables, chargers, peripherals, accessories & batteries' },
-  { id: 'cat-07', name: 'General Store', description: 'General merchandise & assorted counter items' },
-];
-
-const DEFAULT_ITEMS: Item[] = [
-  {
-    id: 'itm-001',
-    publicItemId: 'ITM-1001',
-    name: 'Basmati Rice Premium Royal (Loose/Pack)',
-    sku: 'RICE-BAS-01',
-    barcode: '8901030381001',
-    category: 'Grocery',
-    taxRate: 5.0,
-    unit: 'kg',
-    mrp: 140.0,
-    salePrice: 120.0,
-    purchasePrice: 95.0,
-    currentStock: 85.5,
-    minStockAlert: 20.0,
-    allowParts: true,
-  },
-  {
-    id: 'itm-002',
-    publicItemId: 'ITM-1002',
-    name: 'Refined Sunflower Oil (1L Pouch)',
-    sku: 'OIL-SUN-01',
-    barcode: '8901030381002',
-    category: 'Grocery',
-    taxRate: 5.0,
-    unit: 'ltr',
-    mrp: 160.0,
-    salePrice: 145.0,
-    purchasePrice: 125.0,
-    currentStock: 42.0,
-    minStockAlert: 15.0,
-    allowParts: true,
-  },
-  {
-    id: 'itm-003',
-    publicItemId: 'ITM-1003',
-    name: 'Wireless Ergonomic Optical Mouse',
-    sku: 'ELEC-MOU-01',
-    barcode: '8901030381003',
-    category: 'Electronics & Gadgets',
-    taxRate: 18.0,
-    unit: 'pcs',
-    mrp: 699.0,
-    salePrice: 499.0,
-    purchasePrice: 320.0,
-    currentStock: 18,
-    minStockAlert: 5,
-    allowParts: false,
-  },
-  {
-    id: 'itm-004',
-    publicItemId: 'ITM-1004',
-    name: 'USB-C Fast Charging Braided Cable (1.5m)',
-    sku: 'ELEC-CAB-01',
-    barcode: '8901030381004',
-    category: 'Electronics & Gadgets',
-    taxRate: 18.0,
-    unit: 'pcs',
-    mrp: 399.0,
-    salePrice: 249.0,
-    purchasePrice: 130.0,
-    currentStock: 35,
-    minStockAlert: 10,
-    allowParts: false,
-  },
-  {
-    id: 'itm-005',
-    publicItemId: 'ITM-1005',
-    name: 'Dairy Milk Silk Chocolate (150g)',
-    sku: 'SNK-CHOC-01',
-    barcode: '8901030381005',
-    category: 'Snacks & Sweets',
-    taxRate: 12.0,
-    unit: 'pcs',
-    mrp: 100.0,
-    salePrice: 90.0,
-    purchasePrice: 72.0,
-    currentStock: 4,
-    minStockAlert: 10,
-    allowParts: false,
-  },
-  {
-    id: 'itm-006',
-    publicItemId: 'ITM-1006',
-    name: 'Organic Himalayan Green Tea (25 Bags)',
-    sku: 'BEV-TEA-01',
-    barcode: '8901030381006',
-    category: 'Beverages',
-    taxRate: 5.0,
-    unit: 'box',
-    mrp: 210.0,
-    salePrice: 185.0,
-    purchasePrice: 140.0,
-    currentStock: 22,
-    minStockAlert: 8,
-    allowParts: false,
-  },
-];
-
-const DEFAULT_PARTIES: Party[] = [
-  {
-    id: 'pty-001',
-    name: 'Aarav Sharma',
-    type: 'CUSTOMER',
-    phone: '+91 98765 43210',
-    email: 'aarav.sharma@example.com',
-    address: '45 Indiranagar 1st Stage, Bengaluru - 560038',
-    currentBalance: 450.0,
-    totalSpent: 14850.0,
-    totalVisits: 8,
-  },
-  {
-    id: 'pty-002',
-    name: 'Pooja Verma',
-    type: 'CUSTOMER',
-    phone: '+91 98111 22334',
-    email: 'pooja.verma@example.com',
-    address: 'Flat 402, Sunshine Heights, Mumbai - 400053',
-    currentBalance: 0.0,
-    totalSpent: 8240.0,
-    totalVisits: 5,
-  },
-  {
-    id: 'pty-003',
-    name: 'Rajesh Traders & Wholesale',
-    type: 'SUPPLIER',
-    phone: '+91 98220 33445',
-    email: 'contact@rajeshtraders.com',
-    gstin: '29ABCDE1234F1Z5',
-    address: '12 APMC Yard, Yeshwanthpur, Bengaluru - 560022',
-    currentBalance: -18500.0,
-  },
-];
-
-const DEFAULT_INVOICES: Invoice[] = [
-  {
-    id: 'inv-001',
-    invoiceNumber: 'INV-2026-000101',
-    date: new Date().toISOString(),
-    partyId: 'pty-001',
-    partyName: 'Aarav Sharma',
-    partyPhone: '+91 98765 43210',
-    consumerName: 'Aarav Sharma',
-    consumerPhone: '+91 98765 43210',
-    billedByName: 'Cashier Desk',
-    type: 'SALE',
-    items: [
-      {
-        itemId: 'itm-001',
-        name: 'Basmati Rice Premium Royal (Loose/Pack)',
-        unit: 'kg',
-        quantity: 1.506,
-        unitPrice: 120.0,
-        discountPercent: 0,
-        taxRate: 5.0,
-        taxAmount: 9.04,
-        total: 189.76,
-      },
-      {
-        itemId: 'itm-005',
-        name: 'Dairy Milk Silk Chocolate (150g)',
-        unit: 'pcs',
-        quantity: 3,
-        unitPrice: 90.0,
-        discountPercent: 0,
-        taxRate: 12.0,
-        taxAmount: 32.40,
-        total: 302.40,
-      }
-    ],
-    subtotal: 450.72,
-    taxTotal: 41.44,
-    discountTotal: 0,
-    roundOff: -0.16,
-    grandTotal: 492.0,
-    paidAmount: 492.0,
-    balanceAmount: 0.0,
-    paymentMode: 'UPI',
-    status: 'PAID',
-  }
-];
-
-const DEFAULT_PURCHASE_ORDERS: PurchaseOrder[] = [
-  {
-    id: 'po-001',
-    poNumber: 'PO-2026-0042',
-    supplierId: 'pty-003',
-    supplierName: 'Rajesh Traders & Wholesale',
-    supplierPhone: '+91 98220 33445',
-    supplierGstin: '29ABCDE1234F1Z5',
-    orderDate: new Date(Date.now() - 2 * 86400000).toISOString(),
-    expectedDeliveryDate: new Date(Date.now() + 2 * 86400000).toISOString(),
-    status: 'ORDERED',
-    items: [
-      {
-        itemId: 'itm-001',
-        name: 'Basmati Rice Premium Royal (Loose/Pack)',
-        unit: 'kg',
-        orderedQty: 100,
-        receivedQty: 0,
-        unitPrice: 95.0,
-        taxRate: 5.0,
-        taxAmount: 475.0,
-        totalAmount: 9975.0,
-      },
-      {
-        itemId: 'itm-002',
-        name: 'Refined Sunflower Oil (1L Pouch)',
-        unit: 'ltr',
-        orderedQty: 50,
-        receivedQty: 0,
-        unitPrice: 125.0,
-        taxRate: 5.0,
-        taxAmount: 312.5,
-        totalAmount: 6562.5,
-      }
-    ],
-    subtotal: 15750.0,
-    taxTotal: 787.5,
-    grandTotal: 16537.5,
-    notes: 'Urgent weekend restocking order',
-    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-  }
-];
-
-const DEFAULT_LEDGER: LedgerEntry[] = [
-  {
-    id: 'led-001',
-    date: new Date().toISOString(),
-    type: 'PAYMENT_IN',
-    title: 'Sale Receipt #INV-2026-000101',
-    partyOrPayee: 'Aarav Sharma',
-    paymentMode: 'UPI',
-    referenceNumber: 'UPI/98765432/01',
-    amount: 492.0,
-  },
-  {
-    id: 'led-002',
-    date: new Date(Date.now() - 86400000).toISOString(),
-    type: 'EXPENSE',
-    title: 'Store Electricity Bill',
-    partyOrPayee: 'BESCOM Power Dept',
-    category: 'Electricity Bill',
-    paymentMode: 'BANK_TRANSFER',
-    referenceNumber: 'TXN-998822',
-    amount: 2450.0,
-  },
-];
-
 class MobileStore {
-  private items: Item[] = [...DEFAULT_ITEMS];
-  private categories: ItemCategory[] = [...DEFAULT_CATEGORIES];
-  private parties: Party[] = [...DEFAULT_PARTIES];
-  private invoices: Invoice[] = [...DEFAULT_INVOICES];
-  private purchaseOrders: PurchaseOrder[] = [...DEFAULT_PURCHASE_ORDERS];
-  private ledgerEntries: LedgerEntry[] = [...DEFAULT_LEDGER];
+  private items: Item[] = [];
+  private categories: ItemCategory[] = [];
+  private parties: Party[] = [];
+  private invoices: Invoice[] = [];
+  private purchaseOrders: PurchaseOrder[] = [];
+  private ledgerEntries: LedgerEntry[] = [];
   private cart: CartItem[] = [];
   
-  private activeUser: User = {
-    id: 'usr-001',
-    name: 'Prajjawal Pandit',
-    email: 'admin@quickbill.local',
-    role: 'TENANT_ADMIN',
-    businessId: 'biz-001',
-    tenantName: 'QuickBill Super Store',
-  };
-
-  private businessProfile: Business = {
-    id: 'biz-001',
-    name: 'QuickBill Super Store',
-    gstin: '29AAAAA0000A1Z5',
-    phone: '+91 98765 43210',
-    email: 'contact@quickbillstore.com',
-    address: '123 MG Road, Bengaluru, Karnataka - 560001',
-    currency: '₹',
-  };
+  private activeUser: User | null = null;
+  private businessProfile: Business | null = null;
+  private activeLocation: StoreLocation | null = null;
 
   private listeners: Set<() => void> = new Set();
 
@@ -322,23 +48,152 @@ class MobileStore {
     this.listeners.forEach((listener) => listener());
   }
 
-  // --- Auth & User ---
-  getActiveUser(): User {
+  // --- Auth & User Lifecycle ---
+  async login(email: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !password) {
+      return { success: false, error: 'Please provide both work email and password.' };
+    }
+
+    try {
+      const res = await axios.post(`${API_BASE_URL}/auth/login`, {
+        email: cleanEmail,
+        password: password,
+      }, { timeout: 8000 });
+
+      if (res.data?.access_token) {
+        const rawRole = (res.data.roles && res.data.roles[0]) || 'CASHIER';
+        const userRole = (rawRole === 'SUPER_ADMIN' || rawRole === 'TENANT_ADMIN' || rawRole === 'MANAGER' || rawRole === 'CASHIER')
+          ? rawRole : 'CASHIER';
+
+        const authenticatedUser: User = {
+          id: res.data.user_id,
+          email: res.data.email,
+          name: res.data.name || cleanEmail.split('@')[0],
+          role: userRole,
+          businessId: res.data.default_business_id || '',
+          token: res.data.access_token,
+          assignedLocationIds: res.data.assigned_location_ids || [],
+          isActive: true,
+        };
+
+        this.activeUser = authenticatedUser;
+
+        // Configure axios defaults
+        apiClient.defaults.headers.common['Authorization'] = `Bearer ${authenticatedUser.token}`;
+        if (authenticatedUser.businessId) {
+          apiClient.defaults.headers.common['X-Business-ID'] = authenticatedUser.businessId;
+        }
+
+        // Fetch live store context
+        await this.syncAllData();
+
+        this.notify();
+        return { success: true, user: authenticatedUser };
+      }
+
+      return { success: false, error: 'Invalid authentication response from server.' };
+    } catch (err: any) {
+      const errMsg = err.response?.data?.detail || err.response?.data?.message || err.message || 'Login failed. Please verify credentials and server connection.';
+      return { success: false, error: errMsg };
+    }
+  }
+
+  logout() {
+    this.activeUser = null;
+    this.businessProfile = null;
+    this.activeLocation = null;
+    this.items = [];
+    this.categories = [];
+    this.parties = [];
+    this.invoices = [];
+    this.purchaseOrders = [];
+    this.ledgerEntries = [];
+    this.cart = [];
+
+    delete apiClient.defaults.headers.common['Authorization'];
+    delete apiClient.defaults.headers.common['X-Business-ID'];
+
+    this.notify();
+  }
+
+  isAuthenticated(): boolean {
+    return !!this.activeUser && !!this.activeUser.token;
+  }
+
+  getActiveUser(): User | null {
     return this.activeUser;
   }
 
-  setActiveUser(user: User) {
+  setActiveUser(user: User | null) {
     this.activeUser = user;
+    if (user?.token) {
+      apiClient.defaults.headers.common['Authorization'] = `Bearer ${user.token}`;
+      if (user.businessId) {
+        apiClient.defaults.headers.common['X-Business-ID'] = user.businessId;
+      }
+    }
     this.notify();
   }
 
   getBusinessProfile(): Business {
-    return this.businessProfile;
+    return this.businessProfile || {
+      id: this.activeUser?.businessId || '',
+      name: this.activeUser?.tenantName || 'Store Profile',
+      currency: '₹',
+    };
   }
 
   updateBusinessProfile(updates: Partial<Business>) {
-    this.businessProfile = { ...this.businessProfile, ...updates };
+    if (this.businessProfile) {
+      this.businessProfile = { ...this.businessProfile, ...updates };
+    } else {
+      this.businessProfile = {
+        id: this.activeUser?.businessId || '',
+        name: 'Store Profile',
+        currency: '₹',
+        ...updates
+      };
+    }
     this.notify();
+  }
+
+  // --- Full Data Synchronization ---
+  async syncAllData() {
+    try {
+      await Promise.allSettled([
+        this.fetchItems(),
+        this.fetchCategories(),
+        this.fetchParties(),
+        this.fetchInvoices(),
+        this.fetchPurchaseOrders(),
+        this.fetchBusinessProfile(),
+      ]);
+    } catch (e) {
+      console.warn('Error during full data sync:', e);
+    }
+  }
+
+  async fetchBusinessProfile(): Promise<Business | null> {
+    try {
+      const res = await apiClient.get('/businesses/me');
+      if (res.data) {
+        this.businessProfile = {
+          id: res.data.id || res.data._id,
+          name: res.data.name,
+          gstin: res.data.taxId || res.data.gstin,
+          phone: res.data.phone,
+          email: res.data.email,
+          address: res.data.address?.street || res.data.address,
+          currency: res.data.currency || '₹',
+        };
+        this.notify();
+        return this.businessProfile;
+      }
+    } catch {
+      // Graceful fallback
+    }
+    return null;
   }
 
   // --- Items & Inventory ---
@@ -359,17 +214,79 @@ class MobileStore {
     );
   }
 
-  saveItem(item: Item) {
+  async fetchItems(): Promise<Item[]> {
+    try {
+      const res = await apiClient.get('/items', { params: { page: 1, page_size: 200 } });
+      if (res.data?.data && Array.isArray(res.data.data)) {
+        const liveItems: Item[] = res.data.data.map((d: any) => ({
+          id: d._id || d.id || d.publicItemId,
+          businessId: d.businessId || this.activeUser?.businessId,
+          publicItemId: d.publicItemId || d.sku || 'ITM-TEMP',
+          name: d.name,
+          sku: d.sku,
+          barcode: d.barcode,
+          category: d.category || 'General',
+          taxRate: Number(d.taxRate || 0),
+          unit: d.unit || 'pcs',
+          description: d.description,
+          mrp: d.mrp ? Number(d.mrp) : Number(d.salePrice || 0),
+          salePrice: Number(d.salePrice || 0),
+          purchasePrice: Number(d.purchasePrice || 0),
+          currentStock: Number(d.currentStock || 0),
+          minStockAlert: Number(d.minStockAlert || 5),
+          hasDiscount: !!d.hasDiscount,
+          discountType: d.discountType,
+          discountValue: d.discountValue ? Number(d.discountValue) : undefined,
+          allowParts: !!d.allowParts,
+          imageUrl: d.imageUrl,
+          locations: d.locations,
+          batches: d.batches,
+        }));
+        this.items = liveItems;
+        this.notify();
+        return this.items;
+      }
+    } catch (err) {
+      console.warn('Could not fetch items from backend:', err);
+    }
+    return this.items;
+  }
+
+  async saveItem(item: Item): Promise<Item> {
     const idx = this.items.findIndex(i => i.id === item.id || i.publicItemId === item.publicItemId);
+    
+    try {
+      if (idx >= 0) {
+        const res = await apiClient.put(`/items/${item.id}`, item);
+        if (res.data) {
+          item.id = res.data.id || res.data._id || item.id;
+        }
+      } else {
+        const res = await apiClient.post('/items', item);
+        if (res.data) {
+          item.id = res.data.id || res.data._id || item.id;
+        }
+      }
+    } catch (err) {
+      console.warn('Item save backend sync failed, saving locally:', err);
+    }
+
     if (idx >= 0) {
       this.items[idx] = { ...item };
     } else {
       this.items.unshift({ ...item });
     }
     this.notify();
+    return item;
   }
 
-  adjustStock(itemId: string, adjustmentQty: number, reason: string) {
+  async adjustStock(itemId: string, adjustmentQty: number, reason?: string) {
+    try {
+      await apiClient.post(`/items/${itemId}/adjust-stock`, { delta: adjustmentQty });
+    } catch (err) {
+      console.warn('Stock adjustment API failed, applying locally:', err);
+    }
+
     const item = this.items.find(i => i.id === itemId || i.publicItemId === itemId);
     if (item) {
       item.currentStock = Number((item.currentStock + adjustmentQty).toFixed(3));
@@ -377,13 +294,48 @@ class MobileStore {
     }
   }
 
+  // --- Categories ---
   getCategories(): ItemCategory[] {
     return [...this.categories];
   }
 
-  addCategory(category: ItemCategory) {
+  async fetchCategories(): Promise<ItemCategory[]> {
+    try {
+      const res = await apiClient.get('/categories', { params: { type: 'PRODUCT' } });
+      if (res.data && Array.isArray(res.data)) {
+        this.categories = res.data.map((c: any) => ({
+          id: c.id || c._id,
+          businessId: c.businessId || this.activeUser?.businessId,
+          name: c.name,
+          type: 'PRODUCT',
+          description: c.description,
+        }));
+        this.notify();
+        return this.categories;
+      }
+    } catch (err) {
+      console.warn('Could not fetch categories from backend:', err);
+    }
+    return this.categories;
+  }
+
+  async addCategory(category: ItemCategory): Promise<ItemCategory> {
+    try {
+      const res = await apiClient.post('/categories', {
+        name: category.name,
+        type: 'PRODUCT',
+        description: category.description,
+      });
+      if (res.data) {
+        category.id = res.data.id || res.data._id || category.id;
+      }
+    } catch (err) {
+      console.warn('Add category backend failed:', err);
+    }
+
     this.categories.push(category);
     this.notify();
+    return category;
   }
 
   // --- Cart Management ---
@@ -459,18 +411,102 @@ class MobileStore {
     return this.invoices.find(inv => inv.id === id || inv.invoiceNumber === id);
   }
 
-  createInvoice(invoiceData: Omit<Invoice, 'id' | 'invoiceNumber' | 'date'>): Invoice {
-    const invCount = this.invoices.length + 101;
-    const invoiceNumber = `INV-2026-${String(invCount).padStart(6, '0')}`;
-    const newInvoice: Invoice = {
-      ...invoiceData,
-      id: `inv-${Date.now()}`,
-      invoiceNumber,
-      date: new Date().toISOString(),
+  async fetchInvoices(): Promise<Invoice[]> {
+    try {
+      const res = await apiClient.get('/sales', { params: { page: 1, page_size: 50 } });
+      if (res.data?.data && Array.isArray(res.data.data)) {
+        this.invoices = res.data.data.map((d: any) => ({
+          id: d.id || d._id,
+          invoiceNumber: d.invoiceNumber || d.invoice_number || `INV-${d.id}`,
+          date: d.date || d.createdAt || new Date().toISOString(),
+          partyId: d.partyId,
+          partyName: d.partyName || d.consumerName,
+          partyPhone: d.partyPhone || d.consumerPhone,
+          consumerName: d.consumerName,
+          consumerPhone: d.consumerPhone,
+          billedByName: d.billedByName,
+          type: 'SALE',
+          items: Array.isArray(d.items) ? d.items.map((it: any) => ({
+            itemId: it.itemId || it.item_id,
+            name: it.name || it.itemName || 'Item',
+            unit: it.unit || 'pcs',
+            quantity: Number(it.quantity || 0),
+            unitPrice: Number(it.unitPrice || it.unit_price || 0),
+            discountPercent: Number(it.discountPercent || 0),
+            taxRate: Number(it.taxRate || it.tax_rate || 0),
+            taxAmount: Number(it.taxAmount || it.tax_amount || 0),
+            total: Number(it.total || 0),
+          })) : [],
+          subtotal: Number(d.subtotal || 0),
+          taxTotal: Number(d.taxTotal || d.tax_total || 0),
+          discountTotal: Number(d.discountTotal || d.discount_total || 0),
+          roundOff: Number(d.roundOff || d.round_off || 0),
+          grandTotal: Number(d.grandTotal || d.grand_total || 0),
+          paidAmount: Number(d.paidAmount || d.paid_amount || 0),
+          balanceAmount: Number(d.balanceAmount || d.balanceDue || d.balance_due || 0),
+          paymentMode: d.paymentMode || 'CASH',
+          status: d.status || 'PAID',
+        }));
+        this.notify();
+        return this.invoices;
+      }
+    } catch (err) {
+      console.warn('Could not fetch invoices from backend:', err);
+    }
+    return this.invoices;
+  }
+
+  async createInvoice(invoiceData: Omit<Invoice, 'id' | 'invoiceNumber' | 'date'>): Promise<Invoice> {
+    const payload = {
+      partyId: invoiceData.partyId || undefined,
+      partyNameInput: invoiceData.partyName,
+      partyPhoneInput: invoiceData.partyPhone,
+      consumerName: invoiceData.consumerName || invoiceData.partyName,
+      consumerPhone: invoiceData.consumerPhone || invoiceData.partyPhone,
+      billedById: this.activeUser?.id,
+      billedByName: this.activeUser?.name || 'Mobile Cashier',
+      billedByRole: this.activeUser?.role || 'CASHIER',
+      items: invoiceData.items.map(it => ({
+        item_id: it.itemId,
+        quantity: it.quantity,
+        unit_price: it.unitPrice,
+        discount: it.discountPercent ? ((it.unitPrice * it.quantity) * (it.discountPercent / 100)) : 0,
+        tax_rate: it.taxRate,
+      })),
+      invoiceDiscount: Number(invoiceData.discountTotal || 0),
+      paidAmount: Number(invoiceData.paidAmount),
+      paymentMode: invoiceData.paymentMode || 'CASH',
+      enableRoundOff: invoiceData.roundOff !== 0,
     };
 
-    // Deduct stock
-    newInvoice.items.forEach(invItem => {
+    let createdInvoice: Invoice;
+
+    try {
+      const res = await apiClient.post('/sales', payload);
+      if (res.data) {
+        const d = res.data;
+        createdInvoice = {
+          ...invoiceData,
+          id: d.id || d._id || `inv-${Date.now()}`,
+          invoiceNumber: d.invoiceNumber || d.invoice_number || `INV-${Date.now()}`,
+          date: d.date || d.createdAt || new Date().toISOString(),
+        };
+      } else {
+        throw new Error('No data from server');
+      }
+    } catch (err) {
+      console.warn('Backend sale creation failed, saving locally:', err);
+      const invCount = this.invoices.length + 1;
+      createdInvoice = {
+        ...invoiceData,
+        id: `inv-${Date.now()}`,
+        invoiceNumber: `INV-${new Date().getFullYear()}-${String(invCount).padStart(5, '0')}`,
+        date: new Date().toISOString(),
+      };
+    }
+
+    // Deduct local stock
+    createdInvoice.items.forEach(invItem => {
       const match = this.items.find(i => i.id === invItem.itemId || i.name === invItem.name);
       if (match) {
         match.currentStock = Number(Math.max(0, match.currentStock - invItem.quantity).toFixed(3));
@@ -480,28 +516,28 @@ class MobileStore {
     // Record ledger entry
     this.ledgerEntries.unshift({
       id: `led-${Date.now()}`,
-      date: newInvoice.date,
+      date: createdInvoice.date,
       type: 'PAYMENT_IN',
-      title: `Sale Receipt #${newInvoice.invoiceNumber}`,
-      partyOrPayee: newInvoice.partyName || 'Counter Customer',
-      paymentMode: newInvoice.paymentMode,
-      amount: newInvoice.paidAmount,
+      title: `Sale Receipt #${createdInvoice.invoiceNumber}`,
+      partyOrPayee: createdInvoice.partyName || 'Counter Customer',
+      paymentMode: createdInvoice.paymentMode,
+      amount: createdInvoice.paidAmount,
     });
 
     // Update customer stats
-    if (newInvoice.partyId) {
-      const party = this.parties.find(p => p.id === newInvoice.partyId);
+    if (createdInvoice.partyId) {
+      const party = this.parties.find(p => p.id === createdInvoice.partyId);
       if (party) {
-        party.totalSpent = (party.totalSpent || 0) + newInvoice.grandTotal;
+        party.totalSpent = (party.totalSpent || 0) + createdInvoice.grandTotal;
         party.totalVisits = (party.totalVisits || 0) + 1;
-        party.currentBalance += newInvoice.balanceAmount;
+        party.currentBalance += createdInvoice.balanceAmount;
       }
     }
 
-    this.invoices.unshift(newInvoice);
+    this.invoices.unshift(createdInvoice);
     this.clearCart();
     this.notify();
-    return newInvoice;
+    return createdInvoice;
   }
 
   // --- Parties ---
@@ -517,14 +553,94 @@ class MobileStore {
     return this.parties.filter(p => p.type === 'SUPPLIER');
   }
 
-  saveParty(party: Party) {
+  async fetchParties(): Promise<Party[]> {
+    try {
+      const [custRes, partyRes] = await Promise.allSettled([
+        apiClient.get('/customers', { params: { page_size: 100 } }),
+        apiClient.get('/parties', { params: { page_size: 100 } })
+      ]);
+
+      const fetchedList: Party[] = [];
+
+      if (custRes.status === 'fulfilled' && custRes.value.data?.data) {
+        custRes.value.data.data.forEach((c: any) => {
+          fetchedList.push({
+            id: c.id || c._id,
+            businessId: c.businessId || this.activeUser?.businessId,
+            name: c.name,
+            type: 'CUSTOMER',
+            phone: c.phone || undefined,
+            email: c.email || undefined,
+            address: c.address || undefined,
+            gstin: c.gstin || undefined,
+            currentBalance: Number(c.currentBalance || 0),
+          });
+        });
+      }
+
+      if (partyRes.status === 'fulfilled' && partyRes.value.data?.data) {
+        partyRes.value.data.data.forEach((p: any) => {
+          const pId = p.id || p._id;
+          if (!fetchedList.some(x => x.id === pId)) {
+            fetchedList.push({
+              id: pId,
+              businessId: p.businessId || this.activeUser?.businessId,
+              name: p.name,
+              type: Array.isArray(p.type) ? (p.type.includes('supplier') ? 'SUPPLIER' : 'CUSTOMER') : (p.type || 'CUSTOMER'),
+              phone: p.phone || undefined,
+              email: p.email || undefined,
+              address: p.billingAddress?.street || p.address || undefined,
+              gstin: p.taxId || p.gstin || undefined,
+              currentBalance: Number(p.currentReceivable || p.currentBalance || 0),
+            });
+          }
+        });
+      }
+
+      if (custRes.status === 'fulfilled' || partyRes.status === 'fulfilled') {
+        this.parties = fetchedList;
+        this.notify();
+      }
+    } catch (err) {
+      console.warn('Could not fetch parties from backend:', err);
+    }
+    return this.parties;
+  }
+
+  async saveParty(party: Party): Promise<Party> {
     const idx = this.parties.findIndex(p => p.id === party.id);
+    
+    try {
+      if (party.type === 'CUSTOMER') {
+        if (idx >= 0 && !party.id.startsWith('pty_')) {
+          await apiClient.put(`/customers/${party.id}`, party);
+        } else {
+          const res = await apiClient.post('/customers', party);
+          if (res.data) {
+            party.id = res.data.id || res.data._id || party.id;
+          }
+        }
+      } else {
+        if (idx >= 0 && !party.id.startsWith('pty_')) {
+          await apiClient.put(`/parties/${party.id}`, party);
+        } else {
+          const res = await apiClient.post('/parties', party);
+          if (res.data) {
+            party.id = res.data.id || res.data._id || party.id;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Party backend sync failed, saving locally:', err);
+    }
+
     if (idx >= 0) {
       this.parties[idx] = { ...party };
     } else {
       this.parties.unshift({ ...party });
     }
     this.notify();
+    return party;
   }
 
   // --- Purchase Orders ---
@@ -532,20 +648,89 @@ class MobileStore {
     return [...this.purchaseOrders];
   }
 
-  createPurchaseOrder(po: Omit<PurchaseOrder, 'id' | 'poNumber' | 'createdAt'>): PurchaseOrder {
-    const poNumber = `PO-2026-${String(this.purchaseOrders.length + 43).padStart(4, '0')}`;
-    const newPO: PurchaseOrder = {
-      ...po,
-      id: `po-${Date.now()}`,
-      poNumber,
-      createdAt: new Date().toISOString(),
-    };
+  async fetchPurchaseOrders(): Promise<PurchaseOrder[]> {
+    try {
+      const res = await apiClient.get('/purchase-orders', { params: { page: 1, page_size: 50 } });
+      if (res.data?.data && Array.isArray(res.data.data)) {
+        this.purchaseOrders = res.data.data.map((d: any) => ({
+          id: String(d.id || d._id),
+          poNumber: d.poNumber || d.po_number || '',
+          businessId: String(d.businessId || d.business_id || ''),
+          supplierId: String(d.supplierId || d.supplier_id || ''),
+          supplierName: d.supplierName || d.supplier_name || '',
+          supplierPhone: d.supplierPhone || d.supplier_phone,
+          supplierGstin: d.supplierGstin || d.supplier_gstin,
+          orderDate: d.orderDate || d.order_date || d.createdAt,
+          expectedDeliveryDate: d.expectedDeliveryDate || d.expected_delivery_date,
+          status: d.status || 'ORDERED',
+          items: Array.isArray(d.items || d.orderItems) ? (d.items || d.orderItems).map((it: any) => ({
+            itemId: String(it.itemId || it.item_id || ''),
+            name: it.name || it.itemName || 'Item',
+            unit: it.unit || 'pcs',
+            orderedQty: Number(it.orderedQty ?? it.ordered_qty ?? it.quantity ?? 0),
+            receivedQty: Number(it.receivedQty ?? it.received_qty ?? 0),
+            unitPrice: Number(it.unitPrice ?? it.unit_price ?? 0),
+            taxRate: Number(it.taxRate ?? it.tax_rate ?? 0),
+            taxAmount: Number(it.taxAmount ?? it.tax_amount ?? 0),
+            totalAmount: Number(it.totalAmount ?? it.total_amount ?? 0),
+          })) : [],
+          subtotal: Number(d.subtotal || 0),
+          taxTotal: Number(d.taxTotal ?? d.tax_total ?? 0),
+          grandTotal: Number(d.grandTotal ?? d.grand_total ?? 0),
+          notes: d.notes,
+          createdAt: d.createdAt || new Date().toISOString(),
+        }));
+        this.notify();
+        return this.purchaseOrders;
+      }
+    } catch (err) {
+      console.warn('Could not fetch purchase orders from backend:', err);
+    }
+    return this.purchaseOrders;
+  }
+
+  async createPurchaseOrder(po: Omit<PurchaseOrder, 'id' | 'poNumber' | 'createdAt'>): Promise<PurchaseOrder> {
+    let newPO: PurchaseOrder;
+    try {
+      const res = await apiClient.post('/purchase-orders', po);
+      if (res.data) {
+        newPO = {
+          ...po,
+          id: res.data.id || res.data._id,
+          poNumber: res.data.poNumber || res.data.po_number,
+          createdAt: res.data.createdAt || new Date().toISOString(),
+        };
+      } else {
+        throw new Error('No data');
+      }
+    } catch (err) {
+      console.warn('Purchase order API failed, saving locally:', err);
+      const poNumber = `PO-${new Date().getFullYear()}-${String(this.purchaseOrders.length + 1).padStart(4, '0')}`;
+      newPO = {
+        ...po,
+        id: `po-${Date.now()}`,
+        poNumber,
+        createdAt: new Date().toISOString(),
+      };
+    }
+
     this.purchaseOrders.unshift(newPO);
     this.notify();
     return newPO;
   }
 
-  receivePurchaseOrder(poId: string) {
+  async receivePurchaseOrder(poId: string) {
+    try {
+      await apiClient.post(`/purchase-orders/${poId}/receive-goods`, {
+        receipts: this.purchaseOrders.find(p => p.id === poId)?.items.map(i => ({
+          itemId: i.itemId,
+          qty: i.orderedQty - (i.receivedQty || 0)
+        })) || []
+      });
+    } catch (err) {
+      console.warn('Receive PO API failed, applying locally:', err);
+    }
+
     const po = this.purchaseOrders.find(p => p.id === poId);
     if (po && po.status !== 'RECEIVED' && po.status !== 'FULLY_RECEIVED') {
       po.status = 'RECEIVED';
