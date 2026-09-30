@@ -28,6 +28,20 @@ class StoreService {
   private isSuperAdminMode: boolean = false;
   private isOnline: boolean = false;
   private currentUser: User | null = null;
+  private listeners: Array<() => void> = [];
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.push(listener);
+    return () => {
+      this.listeners = this.listeners.filter(l => l !== listener);
+    };
+  }
+
+  notifyListeners(): void {
+    this.listeners.forEach(l => {
+      try { l(); } catch {}
+    });
+  }
 
   constructor() {
     this.loadFromStorage();
