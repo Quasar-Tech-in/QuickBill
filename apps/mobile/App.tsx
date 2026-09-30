@@ -7,18 +7,21 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { POSScreen } from './src/screens/POSScreen';
 import { ItemsScreen } from './src/screens/ItemsScreen';
 import { TransactionsScreen } from './src/screens/TransactionsScreen';
+import { PartiesScreen } from './src/screens/PartiesScreen';
 import { HubScreen } from './src/screens/HubScreen';
 import { store } from './src/services/store';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => store.isAuthenticated());
-  const [activeTab, setActiveTab] = useState<'Home' | 'POS' | 'Items' | 'Transactions' | 'Hub'>('Home');
   const [currentUser, setCurrentUser] = useState(() => store.getActiveUser());
+  const isCashier = currentUser?.role === 'CASHIER';
+  const [activeTab, setActiveTab] = useState<string>(isCashier ? 'POS' : 'Home');
 
   useEffect(() => {
     const unsubscribe = store.subscribe(() => {
       setIsAuthenticated(store.isAuthenticated());
-      setCurrentUser(store.getActiveUser());
+      const user = store.getActiveUser();
+      setCurrentUser(user);
     });
     return () => {
       unsubscribe();
@@ -31,10 +34,16 @@ export default function App() {
   };
 
   if (!isAuthenticated || !currentUser) {
-    return <LoginScreen onLoginSuccess={() => setIsAuthenticated(true)} />;
+    return <LoginScreen onLoginSuccess={() => {
+      setIsAuthenticated(true);
+      const user = store.getActiveUser();
+      setCurrentUser(user);
+      setActiveTab(user?.role === 'CASHIER' ? 'POS' : 'Home');
+    }} />;
   }
 
   const tenantDisplayName = currentUser.tenantName || 'QuickBill Store';
+  const activeLocation = store.getActiveLocation();
 
   return (
     <SafeAreaProvider>
@@ -47,9 +56,11 @@ export default function App() {
             <View style={styles.logoBadge}>
               <Text style={styles.logoBadgeText}>QB</Text>
             </View>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.appTitle} numberOfLines={1}>{tenantDisplayName}</Text>
-              <Text style={styles.branchSub}>{currentUser.name} ({currentUser.role}) • Online 🟢</Text>
+              <Text style={styles.branchSub} numberOfLines={1}>
+                📍 {activeLocation.name} • <Text style={{ fontWeight: '700', color: isCashier ? colors.primary[600] : colors.neutral[800] }}>{currentUser.role}</Text> • Online 🟢
+              </Text>
             </View>
           </View>
           
@@ -57,60 +68,99 @@ export default function App() {
             style={styles.switchUserBtn}
             onPress={handleLogout}
           >
-            <Text style={styles.switchUserText}>👤 Sign Out</Text>
+            <Text style={styles.switchUserText}>🚪 Sign Out</Text>
           </TouchableOpacity>
         </View>
 
         {/* Dynamic Screen View Content */}
         <View style={styles.content}>
-          {activeTab === 'Home' && <HomeScreen onNavigate={(screen) => setActiveTab(screen as any)} />}
+          {activeTab === 'Home' && !isCashier && <HomeScreen onNavigate={(screen) => setActiveTab(screen)} />}
           {activeTab === 'POS' && <POSScreen />}
-          {activeTab === 'Items' && <ItemsScreen />}
+          {activeTab === 'Items' && !isCashier && <ItemsScreen />}
           {activeTab === 'Transactions' && <TransactionsScreen />}
+          {activeTab === 'Parties' && isCashier && <PartiesScreen />}
           {activeTab === 'Hub' && <HubScreen onLogout={handleLogout} />}
         </View>
 
-        {/* 5-Tab Bottom Navigation Bar */}
+        {/* Dynamic Role-Based Bottom Navigation Bar */}
         <View style={styles.bottomNav}>
-          <TouchableOpacity 
-            style={[styles.navItem, activeTab === 'Home' && styles.navItemActive]} 
-            onPress={() => setActiveTab('Home')}
-          >
-            <Text style={styles.navIcon}>🏠</Text>
-            <Text style={activeTab === 'Home' ? styles.navActiveText : styles.navInactiveText}>Home</Text>
-          </TouchableOpacity>
+          {!isCashier ? (
+            <>
+              <TouchableOpacity 
+                style={[styles.navItem, activeTab === 'Home' && styles.navItemActive]} 
+                onPress={() => setActiveTab('Home')}
+              >
+                <Text style={styles.navIcon}>🏠</Text>
+                <Text style={activeTab === 'Home' ? styles.navActiveText : styles.navInactiveText}>Home</Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={[styles.navItem, activeTab === 'POS' && styles.navItemActive]} 
-            onPress={() => setActiveTab('POS')}
-          >
-            <Text style={styles.navIcon}>📷</Text>
-            <Text style={activeTab === 'POS' ? styles.navActiveText : styles.navInactiveText}>POS Billing</Text>
-          </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.navItem, activeTab === 'POS' && styles.navItemActive]} 
+                onPress={() => setActiveTab('POS')}
+              >
+                <Text style={styles.navIcon}>📷</Text>
+                <Text style={activeTab === 'POS' ? styles.navActiveText : styles.navInactiveText}>POS Billing</Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={[styles.navItem, activeTab === 'Items' && styles.navItemActive]} 
-            onPress={() => setActiveTab('Items')}
-          >
-            <Text style={styles.navIcon}>📦</Text>
-            <Text style={activeTab === 'Items' ? styles.navActiveText : styles.navInactiveText}>Inventory</Text>
-          </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.navItem, activeTab === 'Items' && styles.navItemActive]} 
+                onPress={() => setActiveTab('Items')}
+              >
+                <Text style={styles.navIcon}>📦</Text>
+                <Text style={activeTab === 'Items' ? styles.navActiveText : styles.navInactiveText}>Inventory</Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={[styles.navItem, activeTab === 'Transactions' && styles.navItemActive]} 
-            onPress={() => setActiveTab('Transactions')}
-          >
-            <Text style={styles.navIcon}>🧾</Text>
-            <Text style={activeTab === 'Transactions' ? styles.navActiveText : styles.navInactiveText}>Invoices</Text>
-          </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.navItem, activeTab === 'Transactions' && styles.navItemActive]} 
+                onPress={() => setActiveTab('Transactions')}
+              >
+                <Text style={styles.navIcon}>🧾</Text>
+                <Text style={activeTab === 'Transactions' ? styles.navActiveText : styles.navInactiveText}>Invoices</Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={[styles.navItem, activeTab === 'Hub' && styles.navItemActive]} 
-            onPress={() => setActiveTab('Hub')}
-          >
-            <Text style={styles.navIcon}>🏢</Text>
-            <Text style={activeTab === 'Hub' ? styles.navActiveText : styles.navInactiveText}>More Hub</Text>
-          </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.navItem, activeTab === 'Hub' && styles.navItemActive]} 
+                onPress={() => setActiveTab('Hub')}
+              >
+                <Text style={styles.navIcon}>🏢</Text>
+                <Text style={activeTab === 'Hub' ? styles.navActiveText : styles.navInactiveText}>More Hub</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity 
+                style={[styles.navItem, activeTab === 'POS' && styles.navItemActive]} 
+                onPress={() => setActiveTab('POS')}
+              >
+                <Text style={styles.navIcon}>⚡</Text>
+                <Text style={activeTab === 'POS' ? styles.navActiveText : styles.navInactiveText}>Fast POS</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.navItem, activeTab === 'Transactions' && styles.navItemActive]} 
+                onPress={() => setActiveTab('Transactions')}
+              >
+                <Text style={styles.navIcon}>🧾</Text>
+                <Text style={activeTab === 'Transactions' ? styles.navActiveText : styles.navInactiveText}>Receipts</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.navItem, activeTab === 'Parties' && styles.navItemActive]} 
+                onPress={() => setActiveTab('Parties')}
+              >
+                <Text style={styles.navIcon}>👥</Text>
+                <Text style={activeTab === 'Parties' ? styles.navActiveText : styles.navInactiveText}>Customers</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.navItem, activeTab === 'Hub' && styles.navItemActive]} 
+                onPress={() => setActiveTab('Hub')}
+              >
+                <Text style={styles.navIcon}>🏢</Text>
+                <Text style={activeTab === 'Hub' ? styles.navActiveText : styles.navInactiveText}>Shift Hub</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </SafeAreaView>
     </SafeAreaProvider>

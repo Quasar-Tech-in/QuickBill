@@ -64,19 +64,35 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
     }
   };
 
-  // Cart Calculations
-  const subtotal = cart.reduce((acc, c) => acc + (c.unitPrice * (1 - c.discountPercent / 100) * c.quantity), 0);
-  const taxTotal = cart.reduce((acc, c) => {
-    const eff = c.unitPrice * (1 - c.discountPercent / 100);
-    return acc + (eff * c.quantity * (c.taxRate / 100));
-  }, 0);
-  const discountTotal = cart.reduce((acc, c) => {
-    return acc + (c.unitPrice * (c.discountPercent / 100) * c.quantity);
+  // Cart Calculations (Tax-Inclusive MRP Standard)
+  const grossSubtotal = cart.reduce((sum, c) => sum + (Number(c.unitPrice || 0) * Number(c.quantity || 0)), 0);
+  const discountTotal = cart.reduce((acc, c) => acc + (Number(c.unitPrice || 0) * (c.discountPercent / 100) * c.quantity), 0);
+  const netSubtotal = Math.max(0, grossSubtotal - discountTotal);
+  const discountFactor = grossSubtotal > 0 ? (netSubtotal / grossSubtotal) : 1;
+
+  // Base taxable amount & GST Taxes
+  const taxBaseTotal = cart.reduce((sum, c) => {
+    const rate = Number(c.taxRate || 0);
+    const unitPrice = Number(c.unitPrice || 0);
+    const qty = Number(c.quantity || 0);
+    const discountedLinePrice = unitPrice * qty * discountFactor;
+    const base = rate > 0 ? discountedLinePrice * (100 / (100 + rate)) : discountedLinePrice;
+    return sum + base;
   }, 0);
 
-  const rawGrandTotal = subtotal + taxTotal;
-  const grandTotal = Math.round(rawGrandTotal);
-  const roundOff = Number((grandTotal - rawGrandTotal).toFixed(2));
+  const taxTotal = cart.reduce((sum, c) => {
+    const rate = Number(c.taxRate || 0);
+    const unitPrice = Number(c.unitPrice || 0);
+    const qty = Number(c.quantity || 0);
+    const discountedLinePrice = unitPrice * qty * discountFactor;
+    const base = rate > 0 ? discountedLinePrice * (100 / (100 + rate)) : discountedLinePrice;
+    return sum + (base * (rate / 100));
+  }, 0);
+
+  const subtotal = Number(taxBaseTotal.toFixed(2));
+  const unroundedTotal = netSubtotal;
+  const grandTotal = Math.round(unroundedTotal);
+  const roundOff = Number((grandTotal - unroundedTotal).toFixed(2));
 
   // Search and Filter Items
   const filteredCatalog = items.filter(item => {
@@ -104,8 +120,11 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
     setIsPaymentModalOpen(false);
 
     const invoiceItems = cart.map(c => {
-      const eff = c.unitPrice * (1 - c.discountPercent / 100);
-      const taxAmt = eff * c.quantity * (c.taxRate / 100);
+      const lineGross = c.unitPrice * c.quantity;
+      const lineDisc = lineGross * (c.discountPercent / 100);
+      const lineNet = Math.max(0, lineGross - lineDisc);
+      const lineTaxBase = c.taxRate > 0 ? (lineNet * (100 / (100 + c.taxRate))) : lineNet;
+      const taxAmt = lineNet - lineTaxBase;
       return {
         itemId: c.item.id,
         name: c.item.name,
@@ -115,9 +134,12 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
         discountPercent: c.discountPercent,
         taxRate: c.taxRate,
         taxAmount: Number(taxAmt.toFixed(2)),
-        total: Number((eff * c.quantity + taxAmt).toFixed(2)),
+        total: Number(lineNet.toFixed(2)),
       };
     });
+
+    const activeUser = store.getActiveUser();
+    const activeLoc = store.getActiveLocation();
 
     const newInvoice = await store.createInvoice({
       partyId: saleDetails.partyId,
@@ -125,10 +147,13 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
       partyPhone: saleDetails.customerPhone,
       consumerName: saleDetails.customerName,
       consumerPhone: saleDetails.customerPhone,
-      billedByName: 'Cashier Mobile',
+      billedById: activeUser?.id,
+      billedByName: activeUser?.name || 'Cashier Mobile',
+      locationId: activeLoc.id,
+      locationName: activeLoc.name,
       type: 'SALE',
       items: invoiceItems,
-      subtotal: Number(subtotal.toFixed(2)),
+      subtotal,
       taxTotal: Number(taxTotal.toFixed(2)),
       discountTotal: Number(discountTotal.toFixed(2)),
       roundOff,

@@ -19,12 +19,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
   const [stats, setStats] = useState<DashboardStats>(() => store.getDashboardStats());
   const [business, setBusiness] = useState<Business>(() => store.getBusinessProfile());
   const [items, setItems] = useState<Item[]>(() => store.getItems());
+  const [user, setUser] = useState(() => store.getActiveUser());
   const [refreshing, setRefreshing] = useState(false);
+
+  const activeLoc = store.getActiveLocation();
+  const isCashier = user?.role === 'CASHIER';
 
   const loadData = () => {
     setStats(store.getDashboardStats());
     setBusiness(store.getBusinessProfile());
     setItems(store.getItems());
+    setUser(store.getActiveUser());
   };
 
   useEffect(() => {
@@ -50,7 +55,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.storeName}>{business.name}</Text>
-          <Text style={styles.storeBranch}>Flagship Store • Active POS Session</Text>
+          <Text style={styles.storeBranch}>📍 {activeLoc.name} • {user?.role} Session</Text>
         </View>
         <TouchableOpacity style={styles.quickSaleBtn} onPress={() => onNavigate('POS')}>
           <Text style={styles.quickSaleBtnText}>⚡ Start POS</Text>
@@ -58,31 +63,41 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
       </View>
 
       {/* KPI Metric Grid */}
-      <View style={styles.metricGrid}>
-        <View style={[styles.metricCard, { borderLeftColor: colors.primary[500] }]}>
-          <Text style={styles.metricLabel}>Today's Sales</Text>
-          <Text style={styles.metricValue}>₹ {stats.todaySales.toFixed(2)}</Text>
-          <Text style={styles.metricSub}>{stats.todayTransactionsCount} Invoices Created</Text>
-        </View>
+      {!isCashier ? (
+        <View style={styles.metricGrid}>
+          <View style={[styles.metricCard, { borderLeftColor: colors.primary[500] }]}>
+            <Text style={styles.metricLabel}>Today's Sales</Text>
+            <Text style={styles.metricValue}>₹ {stats.todaySales.toFixed(2)}</Text>
+            <Text style={styles.metricSub}>{stats.todayTransactionsCount} Invoices Created</Text>
+          </View>
 
-        <View style={[styles.metricCard, { borderLeftColor: colors.success[500] }]}>
-          <Text style={styles.metricLabel}>Net Profit (Est.)</Text>
-          <Text style={styles.metricValue}>₹ {stats.netProfit.toFixed(2)}</Text>
-          <Text style={styles.metricSub}>28% Avg Gross Margin</Text>
-        </View>
+          <View style={[styles.metricCard, { borderLeftColor: colors.success[500] }]}>
+            <Text style={styles.metricLabel}>Net Profit (Est.)</Text>
+            <Text style={styles.metricValue}>₹ {stats.netProfit.toFixed(2)}</Text>
+            <Text style={styles.metricSub}>28% Avg Gross Margin</Text>
+          </View>
 
-        <View style={[styles.metricCard, { borderLeftColor: colors.danger[500] }]}>
-          <Text style={styles.metricLabel}>Customer Receivables</Text>
-          <Text style={styles.metricValue}>₹ {stats.totalReceivables.toFixed(2)}</Text>
-          <Text style={styles.metricSub}>Outstanding Credit</Text>
-        </View>
+          <View style={[styles.metricCard, { borderLeftColor: colors.danger[500] }]}>
+            <Text style={styles.metricLabel}>Customer Receivables</Text>
+            <Text style={styles.metricValue}>₹ {stats.totalReceivables.toFixed(2)}</Text>
+            <Text style={styles.metricSub}>Outstanding Credit</Text>
+          </View>
 
-        <View style={[styles.metricCard, { borderLeftColor: colors.warning[500] }]}>
-          <Text style={styles.metricLabel}>Supplier Payables</Text>
-          <Text style={styles.metricValue}>₹ {stats.totalPayables.toFixed(2)}</Text>
-          <Text style={styles.metricSub}>Pending PO Dues</Text>
+          <View style={[styles.metricCard, { borderLeftColor: colors.warning[500] }]}>
+            <Text style={styles.metricLabel}>Supplier Payables</Text>
+            <Text style={styles.metricValue}>₹ {stats.totalPayables.toFixed(2)}</Text>
+            <Text style={styles.metricSub}>Pending PO Dues</Text>
+          </View>
         </View>
-      </View>
+      ) : (
+        <View style={styles.metricGrid}>
+          <View style={[styles.metricCard, { width: '100%', borderLeftColor: colors.primary[500] }]}>
+            <Text style={styles.metricLabel}>Today's Counter Billed</Text>
+            <Text style={styles.metricValue}>₹ {stats.todaySales.toFixed(2)}</Text>
+            <Text style={styles.metricSub}>{stats.todayTransactionsCount} Receipts Issued Today • Shift Active</Text>
+          </View>
+        </View>
+      )}
 
       {/* Quick Action Navigation Grid */}
       <Text style={styles.sectionTitle}>⚡ Quick Actions</Text>
@@ -95,33 +110,35 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
           <Text style={styles.actionSub}>Fast Barcode Billing</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionCard} onPress={() => onNavigate('Items')}>
-          <View style={[styles.actionIconBg, { backgroundColor: colors.warning[50] }]}>
-            <Text style={styles.actionEmoji}>📦</Text>
-          </View>
-          <Text style={styles.actionTitle}>Inventory</Text>
-          <Text style={styles.actionSub}>Stock & Labels</Text>
-        </TouchableOpacity>
+        {!isCashier && (
+          <TouchableOpacity style={styles.actionCard} onPress={() => onNavigate('Items')}>
+            <View style={[styles.actionIconBg, { backgroundColor: colors.warning[50] }]}>
+              <Text style={styles.actionEmoji}>📦</Text>
+            </View>
+            <Text style={styles.actionTitle}>Inventory</Text>
+            <Text style={styles.actionSub}>Stock & Labels</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity style={styles.actionCard} onPress={() => onNavigate('Transactions')}>
           <View style={[styles.actionIconBg, { backgroundColor: colors.success[50] }]}>
             <Text style={styles.actionEmoji}>🧾</Text>
           </View>
-          <Text style={styles.actionTitle}>Invoices</Text>
+          <Text style={styles.actionTitle}>{isCashier ? 'Receipts' : 'Invoices'}</Text>
           <Text style={styles.actionSub}>Print & WhatsApp</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionCard} onPress={() => onNavigate('Hub')}>
+        <TouchableOpacity style={styles.actionCard} onPress={() => onNavigate(isCashier ? 'Parties' : 'Hub')}>
           <View style={[styles.actionIconBg, { backgroundColor: colors.neutral[100] }]}>
-            <Text style={styles.actionEmoji}>🏢</Text>
+            <Text style={styles.actionEmoji}>{isCashier ? '👥' : '🏢'}</Text>
           </View>
-          <Text style={styles.actionTitle}>Business Hub</Text>
-          <Text style={styles.actionSub}>POs, Parties, Reports</Text>
+          <Text style={styles.actionTitle}>{isCashier ? 'Customers' : 'Business Hub'}</Text>
+          <Text style={styles.actionSub}>{isCashier ? 'Lookup & Balances' : 'POs, Parties, Reports'}</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Low Stock Watchlist */}
-      {lowStockItems.length > 0 && (
+      {/* Low Stock Watchlist for Managers/Owners */}
+      {!isCashier && lowStockItems.length > 0 && (
         <View style={styles.alertCard}>
           <View style={styles.alertHeader}>
             <Text style={styles.alertTitle}>⚠️ Low Stock Alerts ({lowStockItems.length})</Text>

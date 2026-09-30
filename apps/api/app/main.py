@@ -58,6 +58,8 @@ app.include_router(tenants.router, prefix=settings.API_V1_STR)
 app.include_router(labels.router, prefix=settings.API_V1_STR)
 app.include_router(shipping.router, prefix=settings.API_V1_STR)
 
+@app.get("/api/v1/health", tags=["Health"])
+@app.get("/health", tags=["Health"])
 @app.get("/health/live", tags=["Health"])
 async def liveness():
     return {"status": "ok", "service": settings.PROJECT_NAME, "version": settings.VERSION}
@@ -65,3 +67,4 @@ async def liveness():
 @app.get("/health/ready", tags=["Health"])
 async def readiness():
     return {"status": "ready", "database": "healthy"}
+

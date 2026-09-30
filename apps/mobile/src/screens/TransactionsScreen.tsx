@@ -20,15 +20,24 @@ import { printThermalReceipt, printA4Invoice } from '../utils/printInvoice';
 export const TransactionsScreen: React.FC = () => {
   const [invoices, setInvoices] = useState<Invoice[]>(() => store.getInvoices());
   const [business, setBusiness] = useState<Business>(() => store.getBusinessProfile());
+  const [user, setUser] = useState(() => store.getActiveUser());
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isSharing, setIsSharing] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
+  // Return Modal State
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
+  const [returnMap, setReturnMap] = useState<{ [itemId: string]: { qty: string; reason: string } }>({});
+  const [isProcessingReturn, setIsProcessingReturn] = useState(false);
+
+  const canProcessReturn = user?.role === 'TENANT_ADMIN' || user?.role === 'MANAGER' || user?.role === 'SUPER_ADMIN';
+
   useEffect(() => {
     const unsubscribe = store.subscribe(() => {
       setInvoices(store.getInvoices());
       setBusiness(store.getBusinessProfile());
+      setUser(store.getActiveUser());
     });
     return () => { unsubscribe(); };
   }, []);
@@ -40,6 +49,58 @@ export const TransactionsScreen: React.FC = () => {
       (inv.partyName && inv.partyName.toLowerCase().includes(q)) || 
       (inv.partyPhone && inv.partyPhone.includes(q));
   });
+
+  const handleOpenReturnModal = () => {
+    if (!selectedInvoice) return;
+    const initialMap: { [itemId: string]: { qty: string; reason: string } } = {};
+    selectedInvoice.items.forEach(it => {
+      initialMap[it.itemId] = { qty: '0', reason: 'CUSTOMER_RETURN' };
+    });
+    setReturnMap(initialMap);
+    setIsReturnModalOpen(true);
+  };
+
+  const handleConfirmReturn = async () => {
+    if (!selectedInvoice) return;
+    setIsProcessingReturn(true);
+
+    try {
+      const itemsToUpdate = selectedInvoice.items.map(it => {
+        const entry = returnMap[it.itemId];
+        const retQty = Math.min(it.quantity, Math.max(0, parseFloat(entry?.qty || '0') || 0));
+        return {
+          itemId: it.itemId,
+          quantity: it.quantity,
+          returnedQuantity: retQty,
+          returnReason: entry?.reason || 'CUSTOMER_RETURN',
+          unitPrice: it.unitPrice,
+          taxRate: it.taxRate,
+          discount: it.discountPercent ? (it.unitPrice * (it.discountPercent / 100)) : 0,
+        };
+      });
+
+      const hasAnyReturns = itemsToUpdate.some(i => i.returnedQuantity > 0);
+      if (!hasAnyReturns) {
+        Alert.alert('No Items Returned', 'Please enter at least 1 unit to return.');
+        setIsProcessingReturn(false);
+        return;
+      }
+
+      await store.updateInvoiceWithReturn(selectedInvoice.id, {
+        items: itemsToUpdate,
+        notes: `Returned processed by ${user?.name || 'Staff'} (${user?.role})`,
+        paymentMode: selectedInvoice.paymentMode,
+      });
+
+      setIsProcessingReturn(false);
+      setIsReturnModalOpen(false);
+      setSelectedInvoice(null);
+      Alert.alert('Return Processed', 'Invoice updated, inventory restocked, and customer balance adjusted.');
+    } catch (e: any) {
+      setIsProcessingReturn(false);
+      Alert.alert('Return Failed', e?.message || 'Could not process sales return.');
+    }
+  };
 
   const handleShareWhatsApp = async (inv: Invoice) => {
     setIsSharing(true);
@@ -157,7 +218,7 @@ export const TransactionsScreen: React.FC = () => {
                 </TouchableOpacity>
               </View>
 
-              <ScrollView style={{ maxHeight: 320 }}>
+              <ScrollView style={{ maxHeight: 300 }}>
                 <Text style={styles.sectionHeading}>Items Billed ({selectedInvoice.items.length})</Text>
                 {selectedInvoice.items.map((it, idx) => (
                   <View key={idx} style={styles.itemRow}>
@@ -194,7 +255,7 @@ export const TransactionsScreen: React.FC = () => {
                   onPress={() => handleShareWhatsApp(selectedInvoice)}
                   disabled={isSharing}
                 >
-                  <Text style={styles.modalActionText}>💬 WhatsApp PDF</Text>
+                  <Text style={styles.modalActionText}>💬 WhatsApp</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity 
@@ -202,7 +263,7 @@ export const TransactionsScreen: React.FC = () => {
                   onPress={() => handlePrintThermal(selectedInvoice)}
                   disabled={isPrinting}
                 >
-                  <Text style={styles.modalActionText}>🖨️ Thermal POS</Text>
+                  <Text style={styles.modalActionText}>🖨️ Thermal</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity 
@@ -210,7 +271,109 @@ export const TransactionsScreen: React.FC = () => {
                   onPress={() => handlePrintA4(selectedInvoice)}
                   disabled={isPrinting}
                 >
-                  <Text style={styles.modalActionText}>📄 A4 Tax PDF</Text>
+                  <Text style={styles.modalActionText}>📄 A4 PDF</Text>
+                </TouchableOpacity>
+
+                {canProcessReturn ? (
+                  <TouchableOpacity 
+                    style={[styles.modalActionBtn, { backgroundColor: colors.danger[500] }]}
+                    onPress={handleOpenReturnModal}
+                  >
+                    <Text style={styles.modalActionText}>🔄 Return</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={[styles.modalActionBtn, { backgroundColor: colors.neutral[200] }]}>
+                    <Text style={[styles.modalActionText, { color: colors.neutral[500], fontSize: 9 }]}>🔒 Return (Mgr Only)</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Invoice Return & Restock Modal */}
+      {isReturnModalOpen && selectedInvoice && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setIsReturnModalOpen(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={[styles.detailCard, { maxHeight: '85%' }]}>
+              <View style={styles.detailHeader}>
+                <View>
+                  <Text style={styles.detailTitle}>🔄 Process Sales Return</Text>
+                  <Text style={styles.detailSub}>{selectedInvoice.invoiceNumber} • {selectedInvoice.partyName}</Text>
+                </View>
+                <TouchableOpacity onPress={() => setIsReturnModalOpen(false)}>
+                  <Text style={styles.closeDetail}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={{ marginTop: 8 }}>
+                <Text style={{ fontSize: 11, color: colors.neutral[600], marginBottom: 10 }}>
+                  Enter the quantity to return for each item. Return value is calculated on MRP (tax-inclusive).
+                </Text>
+
+                {selectedInvoice.items.map((it) => {
+                  const currentRet = returnMap[it.itemId] || { qty: '0', reason: 'CUSTOMER_RETURN' };
+                  const retQtyNum = parseFloat(currentRet.qty) || 0;
+                  const refundAmount = Number((retQtyNum * it.unitPrice).toFixed(2));
+
+                  return (
+                    <View key={it.itemId} style={styles.returnItemCard}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.neutral[900], flex: 1 }}>{it.name}</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: colors.primary[700] }}>₹{it.unitPrice.toFixed(2)}/unit</Text>
+                      </View>
+                      <Text style={{ fontSize: 11, color: colors.neutral[500], marginTop: 2 }}>
+                        Billed Qty: {it.quantity} {it.unit || 'pcs'}
+                      </Text>
+
+                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 8, alignItems: 'center' }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: colors.neutral[600] }}>Return Quantity</Text>
+                          <TextInput
+                            style={styles.returnQtyInput}
+                            placeholder="0"
+                            value={currentRet.qty}
+                            onChangeText={(val) => {
+                              setReturnMap(prev => ({
+                                ...prev,
+                                [it.itemId]: { ...currentRet, qty: val }
+                              }));
+                            }}
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: colors.neutral[600] }}>Refund Value</Text>
+                          <View style={styles.refundValBox}>
+                            <Text style={styles.refundValText}>₹ {refundAmount.toFixed(2)}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                <TouchableOpacity 
+                  style={styles.cancelReturnBtn} 
+                  onPress={() => setIsReturnModalOpen(false)}
+                >
+                  <Text style={styles.cancelReturnText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.confirmReturnBtn} 
+                  onPress={handleConfirmReturn}
+                  disabled={isProcessingReturn}
+                >
+                  {isProcessingReturn ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.confirmReturnText}>✓ Confirm Return & Restock</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </View>
@@ -410,10 +573,71 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   modalActionText: {
     color: '#fff',
     fontWeight: '800',
     fontSize: 11,
+    textAlign: 'center',
+  },
+  returnItemCard: {
+    backgroundColor: colors.neutral[50],
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.neutral[200],
+    marginBottom: 10,
+  },
+  returnQtyInput: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: colors.neutral[300],
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  refundValBox: {
+    backgroundColor: colors.primary[50],
+    borderWidth: 1,
+    borderColor: colors.primary[200],
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginTop: 4,
+    justifyContent: 'center',
+  },
+  refundValText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primary[700],
+  },
+  cancelReturnBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.neutral[300],
+    alignItems: 'center',
+  },
+  cancelReturnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.neutral[700],
+  },
+  confirmReturnBtn: {
+    flex: 2,
+    backgroundColor: colors.danger[500],
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  confirmReturnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

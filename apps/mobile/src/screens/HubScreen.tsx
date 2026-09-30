@@ -14,12 +14,19 @@ import { ReportsScreen } from './ReportsScreen';
 import { SettingsScreen } from './SettingsScreen';
 import { ShippingDispatchScreen } from './ShippingDispatchScreen';
 
+import { store } from '../services/store';
+
 type HubModule = 'MENU' | 'PO' | 'PARTIES' | 'LEDGER' | 'REPORTS' | 'SETTINGS' | 'DISPATCH';
 
 export const HubScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const [activeModule, setActiveModule] = useState<HubModule>('MENU');
+  const user = store.getActiveUser();
+  const role = user?.role || 'CASHIER';
+  const isCashier = role === 'CASHIER';
+  const isManager = role === 'MANAGER';
+  const isOwner = role === 'TENANT_ADMIN' || role === 'SUPER_ADMIN';
 
-  if (activeModule === 'PO') {
+  if (activeModule === 'PO' && !isCashier) {
     return (
       <View style={{ flex: 1 }}>
         <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
@@ -52,7 +59,7 @@ export const HubScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => 
     );
   }
 
-  if (activeModule === 'REPORTS') {
+  if (activeModule === 'REPORTS' && !isCashier) {
     return (
       <View style={{ flex: 1 }}>
         <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
@@ -63,7 +70,7 @@ export const HubScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => 
     );
   }
 
-  if (activeModule === 'SETTINGS') {
+  if (activeModule === 'SETTINGS' && isOwner) {
     return (
       <View style={{ flex: 1 }}>
         <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
@@ -87,41 +94,47 @@ export const HubScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => 
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.hubTitle}>🏢 Business Operations Hub</Text>
-      <Text style={styles.hubSub}>Access all backend business workflows on mobile</Text>
+      <Text style={styles.hubTitle}>{isCashier ? '📋 Shift Operations Hub' : '🏢 Business Operations Hub'}</Text>
+      <Text style={styles.hubSub}>
+        {isCashier ? 'Counter customer directory, cash drawer, and order dispatch' : 'Access all store workflows, financials, and inventory operations'}
+      </Text>
 
       <View style={styles.moduleGrid}>
-        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('PO')}>
-          <View style={[styles.iconBox, { backgroundColor: '#e0e7ff' }]}>
-            <Text style={{ fontSize: 24 }}>📥</Text>
-          </View>
-          <Text style={styles.moduleName}>Purchase Orders</Text>
-          <Text style={styles.moduleDesc}>Supplier POs, Inwarding & Stock Receipts</Text>
-        </TouchableOpacity>
+        {!isCashier && (
+          <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('PO')}>
+            <View style={[styles.iconBox, { backgroundColor: '#e0e7ff' }]}>
+              <Text style={{ fontSize: 24 }}>📥</Text>
+            </View>
+            <Text style={styles.moduleName}>Purchase Orders</Text>
+            <Text style={styles.moduleDesc}>Supplier POs, Inwarding & Stock Receipts</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('PARTIES')}>
           <View style={[styles.iconBox, { backgroundColor: '#dcfce7' }]}>
             <Text style={{ fontSize: 24 }}>👥</Text>
           </View>
-          <Text style={styles.moduleName}>Parties Directory</Text>
-          <Text style={styles.moduleDesc}>Customers, Suppliers & Outstanding Balances</Text>
+          <Text style={styles.moduleName}>{isCashier ? 'Customer Directory' : 'Parties Directory'}</Text>
+          <Text style={styles.moduleDesc}>{isCashier ? 'Look up customer profiles & dues' : 'Customers, Suppliers & Balances'}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('LEDGER')}>
           <View style={[styles.iconBox, { backgroundColor: '#fef3c7' }]}>
             <Text style={{ fontSize: 24 }}>📖</Text>
           </View>
-          <Text style={styles.moduleName}>Financial Ledger</Text>
-          <Text style={styles.moduleDesc}>Payment In/Out, Cash Register & Daybook</Text>
+          <Text style={styles.moduleName}>{isCashier ? 'Cash Register' : 'Financial Ledger'}</Text>
+          <Text style={styles.moduleDesc}>{isCashier ? 'Daily cash drawer inflows/outflows' : 'Payment In/Out, Daybook & Expenses'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('REPORTS')}>
-          <View style={[styles.iconBox, { backgroundColor: '#f3e8ff' }]}>
-            <Text style={{ fontSize: 24 }}>📊</Text>
-          </View>
-          <Text style={styles.moduleName}>Reports & Analytics</Text>
-          <Text style={styles.moduleDesc}>Sales, P&L Statement, Tax GST & Export</Text>
-        </TouchableOpacity>
+        {!isCashier && (
+          <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('REPORTS')}>
+            <View style={[styles.iconBox, { backgroundColor: '#f3e8ff' }]}>
+              <Text style={{ fontSize: 24 }}>📊</Text>
+            </View>
+            <Text style={styles.moduleName}>Reports & Analytics</Text>
+            <Text style={styles.moduleDesc}>Sales, P&L Statement, Tax GST & Export</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('DISPATCH')}>
           <View style={[styles.iconBox, { backgroundColor: '#ffedd5' }]}>
@@ -131,13 +144,15 @@ export const HubScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => 
           <Text style={styles.moduleDesc}>Delivery Orders & Courier Tracking</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('SETTINGS')}>
-          <View style={[styles.iconBox, { backgroundColor: '#e2e8f0' }]}>
-            <Text style={{ fontSize: 24 }}>⚙️</Text>
-          </View>
-          <Text style={styles.moduleName}>Store Settings</Text>
-          <Text style={styles.moduleDesc}>Business Info, Multi-Branch & Hardware</Text>
-        </TouchableOpacity>
+        {isOwner && (
+          <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('SETTINGS')}>
+            <View style={[styles.iconBox, { backgroundColor: '#e2e8f0' }]}>
+              <Text style={{ fontSize: 24 }}>⚙️</Text>
+            </View>
+            <Text style={styles.moduleName}>Store Settings</Text>
+            <Text style={styles.moduleDesc}>Staff Management, Branches & Profile</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </ScrollView>
   );

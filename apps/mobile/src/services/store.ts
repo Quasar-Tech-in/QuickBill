@@ -21,15 +21,12 @@ const resolveDefaultBaseUrl = (): string => {
     const scriptURL = NativeModules?.SourceCode?.scriptURL;
     if (scriptURL) {
       const match = scriptURL.match(/^https?:\/\/([^:/]+)/);
-      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1' && match[1] !== '10.0.2.2') {
         return `http://${match[1]}:8000/api/v1`;
       }
     }
   } catch {}
 
-  if (Platform.OS === 'android') {
-    return 'http://10.0.2.2:8000/api/v1';
-  }
   return 'http://192.168.6.4:8000/api/v1';
 };
 
@@ -51,6 +48,9 @@ class MobileStore {
   private purchaseOrders: PurchaseOrder[] = [];
   private ledgerEntries: LedgerEntry[] = [];
   private cart: CartItem[] = [];
+  private users: User[] = [];
+  private locations: StoreLocation[] = [];
+  private expenses: Expense[] = [];
   
   private activeUser: User | null = null;
   private businessProfile: Business | null = null;
@@ -84,21 +84,27 @@ class MobileStore {
   }
 
   async testConnection(testUrl?: string): Promise<{ success: boolean; message: string }> {
-    const target = (testUrl || currentApiBaseUrl).trim().replace(/\/+$/, '');
-    const healthUrl = target.endsWith('/api/v1') 
-      ? target.replace('/api/v1', '/api/v1/health') 
-      : `${target}/api/v1/health`;
+    const rawTarget = (testUrl || currentApiBaseUrl).trim().replace(/\/+$/, '');
+    const baseUrl = rawTarget.endsWith('/api/v1') 
+      ? rawTarget.replace('/api/v1', '') 
+      : (rawTarget.endsWith('/api') ? rawTarget.replace('/api', '') : rawTarget);
 
     try {
-      const res = await axios.get(healthUrl, { timeout: 4000 });
+      const res = await axios.get(`${baseUrl}/health/live`, { timeout: 4000 });
       if (res.status === 200) {
-        return { success: true, message: `Connected successfully to ${target} (Server Online)` };
+        return { success: true, message: `Connected successfully to ${rawTarget} (Server Online)` };
       }
       return { success: false, message: `Server responded with status ${res.status}` };
     } catch (err: any) {
+      try {
+        const fallbackRes = await axios.get(`${rawTarget}/health`, { timeout: 3000 });
+        if (fallbackRes.status === 200) {
+          return { success: true, message: `Connected successfully to ${rawTarget} (Server Online)` };
+        }
+      } catch {}
       return { 
         success: false, 
-        message: err?.message || `Could not connect to ${target}. Ensure phone is on same Wi-Fi and port 8000 is open.` 
+        message: err?.message || `Could not connect to ${rawTarget}. Ensure phone is on same Wi-Fi and port 8000 is open.` 
       };
     }
   }
@@ -408,8 +414,7 @@ class MobileStore {
       const unitPrice = item.salePrice;
       const discountPercent = item.hasDiscount && item.discountType === 'PERCENT' ? (item.discountValue || 0) : 0;
       const effectivePrice = unitPrice * (1 - discountPercent / 100);
-      const taxAmount = effectivePrice * quantity * (item.taxRate / 100);
-      const lineTotal = Number((effectivePrice * quantity + taxAmount).toFixed(2));
+      const lineTotal = Number((effectivePrice * quantity).toFixed(2));
 
       this.cart.push({
         item,
@@ -429,10 +434,8 @@ class MobileStore {
     if (quantity <= 0) {
       this.cart.splice(index, 1);
     } else {
-      const item = this.cart[index].item;
       const effectivePrice = unitPrice * (1 - discountPercent / 100);
-      const taxAmount = effectivePrice * quantity * (item.taxRate / 100);
-      const lineTotal = Number((effectivePrice * quantity + taxAmount).toFixed(2));
+      const lineTotal = Number((effectivePrice * quantity).toFixed(2));
 
       this.cart[index] = {
         ...this.cart[index],
@@ -960,6 +963,225 @@ class MobileStore {
       lowStockCount,
       netProfit,
     };
+  }
+
+  // --- Locations & Branches ---
+  getLocations(): StoreLocation[] {
+    return [...this.locations];
+  }
+
+  getActiveLocation(): StoreLocation {
+    if (this.activeLocation) return this.activeLocation;
+    if (this.locations.length > 0) return this.locations[0];
+    return {
+      id: 'loc-main',
+      businessId: this.activeUser?.businessId || '',
+      name: 'Main Flagship Counter',
+      code: 'MAIN-01',
+      isActive: true,
+      isDefault: true,
+    };
+  }
+
+  setActiveLocation(loc: StoreLocation) {
+    this.activeLocation = loc;
+    this.notify();
+  }
+
+  async fetchLocations(): Promise<StoreLocation[]> {
+    try {
+      const res = await apiClient.get('/locations');
+      if (res.data && Array.isArray(res.data)) {
+        this.locations = res.data.map((l: any) => ({
+          id: l.id || l._id,
+          businessId: l.businessId || this.activeUser?.businessId || '',
+          name: l.name,
+          code: l.code || '',
+          address: l.address,
+          phone: l.phone,
+          isDefault: !!l.isDefault,
+          isActive: l.isActive !== false,
+        }));
+        if (!this.activeLocation && this.locations.length > 0) {
+          this.activeLocation = this.locations[0];
+        }
+        this.notify();
+      }
+    } catch (e) {
+      console.warn('Could not fetch locations:', e);
+    }
+    return this.locations;
+  }
+
+  async createLocation(location: Omit<StoreLocation, 'id' | 'businessId'>): Promise<StoreLocation> {
+    try {
+      const res = await apiClient.post('/locations', location);
+      const newLoc: StoreLocation = {
+        ...location,
+        id: res.data?.id || res.data?._id || `loc-${Date.now()}`,
+        businessId: this.activeUser?.businessId || '',
+      };
+      this.locations.push(newLoc);
+      this.notify();
+      return newLoc;
+    } catch (e) {
+      const newLoc: StoreLocation = {
+        ...location,
+        id: `loc-${Date.now()}`,
+        businessId: this.activeUser?.businessId || '',
+      };
+      this.locations.push(newLoc);
+      this.notify();
+      return newLoc;
+    }
+  }
+
+  // --- Staff & User Management ---
+  getUsers(): User[] {
+    return [...this.users];
+  }
+
+  async fetchUsers(): Promise<User[]> {
+    try {
+      const res = await apiClient.get('/users');
+      if (res.data && Array.isArray(res.data)) {
+        this.users = res.data.map((u: any) => ({
+          id: u.id || u._id,
+          email: u.email,
+          name: u.name,
+          role: (u.roles && u.roles[0]) || u.role || 'CASHIER',
+          businessId: u.businessId || u.tenantId || this.activeUser?.businessId || '',
+          isActive: u.isActive !== false,
+          assignedLocationIds: u.assignedLocationIds || [],
+        }));
+        this.notify();
+      }
+    } catch (e) {
+      console.warn('Could not fetch users:', e);
+    }
+    return this.users;
+  }
+
+  async createUser(userData: { name: string; email: string; password?: string; role: 'MANAGER' | 'CASHIER' }): Promise<User> {
+    try {
+      const res = await apiClient.post('/users', {
+        name: userData.name,
+        email: userData.email,
+        password: userData.password || 'QuickBill@123',
+        roles: [userData.role],
+      });
+      const newUser: User = {
+        id: res.data?.id || res.data?._id || `usr-${Date.now()}`,
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+        businessId: this.activeUser?.businessId || '',
+        isActive: true,
+      };
+      this.users.push(newUser);
+      this.notify();
+      return newUser;
+    } catch (e) {
+      const newUser: User = {
+        id: `usr-${Date.now()}`,
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+        businessId: this.activeUser?.businessId || '',
+        isActive: true,
+      };
+      this.users.push(newUser);
+      this.notify();
+      return newUser;
+    }
+  }
+
+  async deleteUser(userId: string) {
+    try {
+      await apiClient.delete(`/users/${userId}`);
+    } catch (e) {
+      console.warn('Delete user backend failed:', e);
+    }
+    this.users = this.users.filter(u => u.id !== userId);
+    this.notify();
+  }
+
+  // --- Expenses & Vouchers ---
+  getExpenses(): Expense[] {
+    return [...this.expenses];
+  }
+
+  async fetchExpenses(): Promise<Expense[]> {
+    try {
+      const res = await apiClient.get('/expenses', { params: { page: 1, page_size: 50 } });
+      if (res.data?.data && Array.isArray(res.data.data)) {
+        this.expenses = res.data.data.map((e: any) => ({
+          id: e.id || e._id,
+          businessId: e.businessId || this.activeUser?.businessId,
+          category: e.category || 'General',
+          amount: Number(e.amount || 0),
+          payee: e.payee,
+          paymentMode: e.paymentMode || 'CASH',
+          referenceNumber: e.referenceNumber,
+          description: e.description,
+          expenseDate: e.expenseDate || e.createdAt || new Date().toISOString(),
+        }));
+        this.notify();
+      }
+    } catch (e) {
+      console.warn('Could not fetch expenses:', e);
+    }
+    return this.expenses;
+  }
+
+  async createExpense(expense: Omit<Expense, 'id'>): Promise<Expense> {
+    let newExp: Expense;
+    try {
+      const res = await apiClient.post('/expenses', expense);
+      newExp = {
+        ...expense,
+        id: res.data?.id || res.data?._id || `exp-${Date.now()}`,
+      };
+    } catch (e) {
+      newExp = {
+        ...expense,
+        id: `exp-${Date.now()}`,
+      };
+    }
+    this.expenses.unshift(newExp);
+    this.ledgerEntries.unshift({
+      id: `led-${Date.now()}`,
+      date: newExp.expenseDate,
+      type: 'EXPENSE',
+      title: `Expense: ${newExp.category}`,
+      partyOrPayee: newExp.payee || 'Expense Payee',
+      category: newExp.category,
+      paymentMode: newExp.paymentMode,
+      referenceNumber: newExp.referenceNumber,
+      amount: newExp.amount,
+    });
+    this.notify();
+    return newExp;
+  }
+
+  async deleteItem(itemId: string) {
+    try {
+      await apiClient.delete(`/items/${itemId}`);
+    } catch (e) {
+      console.warn('Delete item backend failed:', e);
+    }
+    this.items = this.items.filter(i => i.id !== itemId && i.publicItemId !== itemId);
+    this.notify();
+  }
+
+  async deleteCategory(categoryId: string) {
+    try {
+      await apiClient.delete(`/categories/${categoryId}`);
+    } catch (e) {
+      console.warn('Delete category backend failed:', e);
+    }
+    this.categories = this.categories.filter(c => c.id !== categoryId);
+    this.notify();
   }
 }
 
