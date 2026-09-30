@@ -1,3 +1,4 @@
+import { Platform, NativeModules } from 'react-native';
 import axios from 'axios';
 import { 
   Item, 
@@ -14,11 +15,29 @@ import {
   Expense 
 } from '../types';
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+// Auto-detect host IP from Metro bundler URL or fallback to Wi-Fi/LAN IP
+const resolveDefaultBaseUrl = (): string => {
+  try {
+    const scriptURL = NativeModules?.SourceCode?.scriptURL;
+    if (scriptURL) {
+      const match = scriptURL.match(/^https?:\/\/([^:/]+)/);
+      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+        return `http://${match[1]}:8000/api/v1`;
+      }
+    }
+  } catch {}
+
+  if (Platform.OS === 'android') {
+    return 'http://10.0.2.2:8000/api/v1';
+  }
+  return 'http://192.168.6.4:8000/api/v1';
+};
+
+let currentApiBaseUrl = resolveDefaultBaseUrl();
 
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 8000,
+  baseURL: currentApiBaseUrl,
+  timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -48,6 +67,42 @@ class MobileStore {
     this.listeners.forEach((listener) => listener());
   }
 
+  // --- Server Connection Configuration ---
+  getApiBaseUrl(): string {
+    return currentApiBaseUrl;
+  }
+
+  setApiBaseUrl(newUrl: string): void {
+    let clean = newUrl.trim().replace(/\/+$/, '');
+    if (!clean.endsWith('/api/v1')) {
+      if (clean.endsWith('/api')) clean = `${clean}/v1`;
+      else clean = `${clean}/api/v1`;
+    }
+    currentApiBaseUrl = clean;
+    apiClient.defaults.baseURL = clean;
+    this.notify();
+  }
+
+  async testConnection(testUrl?: string): Promise<{ success: boolean; message: string }> {
+    const target = (testUrl || currentApiBaseUrl).trim().replace(/\/+$/, '');
+    const healthUrl = target.endsWith('/api/v1') 
+      ? target.replace('/api/v1', '/api/v1/health') 
+      : `${target}/api/v1/health`;
+
+    try {
+      const res = await axios.get(healthUrl, { timeout: 4000 });
+      if (res.status === 200) {
+        return { success: true, message: `Connected successfully to ${target} (Server Online)` };
+      }
+      return { success: false, message: `Server responded with status ${res.status}` };
+    } catch (err: any) {
+      return { 
+        success: false, 
+        message: err?.message || `Could not connect to ${target}. Ensure phone is on same Wi-Fi and port 8000 is open.` 
+      };
+    }
+  }
+
   // --- Auth & User Lifecycle ---
   async login(email: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> {
     const cleanEmail = email.trim().toLowerCase();
@@ -56,7 +111,7 @@ class MobileStore {
     }
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/auth/login`, {
+      const res = await axios.post(`${currentApiBaseUrl}/auth/login`, {
         email: cleanEmail,
         password: password,
       }, { timeout: 8000 });
