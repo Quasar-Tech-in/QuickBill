@@ -64,6 +64,7 @@ app.include_router(tenants.router, prefix=settings.API_V1_STR)
 app.include_router(labels.router, prefix=settings.API_V1_STR)
 app.include_router(shipping.router, prefix=settings.API_V1_STR)
 
+@app.get("/", tags=["Health"])
 @app.get("/api/v1/health", tags=["Health"])
 @app.get("/health", tags=["Health"])
 @app.get("/health/live", tags=["Health"])

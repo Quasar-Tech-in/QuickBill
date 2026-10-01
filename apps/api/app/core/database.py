@@ -1,3 +1,4 @@
+import certifi
 from typing import Optional, Dict
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
@@ -12,10 +13,21 @@ class MultiTenantDatabaseManager:
         self._custom_clients: Dict[str, AsyncIOMotorClient] = {}
 
     async def connect(self):
+        client_kwargs = {
+            "maxPoolSize": 50,
+            "minPoolSize": 1,
+            "serverSelectionTimeoutMS": 10000,
+        }
+        # Provide Mozilla CA certs for cloud MongoDB (Atlas) TLS handshakes
+        if "mongodb+srv://" in settings.MONGODB_URI or "tls=true" in settings.MONGODB_URI.lower() or "ssl=true" in settings.MONGODB_URI.lower():
+            try:
+                client_kwargs["tlsCAFile"] = certifi.where()
+            except Exception:
+                pass
+
         self.primary_client = AsyncIOMotorClient(
             settings.MONGODB_URI,
-            maxPoolSize=50,
-            minPoolSize=10
+            **client_kwargs
         )
         self.primary_db = self.primary_client[settings.DATABASE_NAME]
         await self.primary_db.command("ping")
