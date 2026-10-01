@@ -10,7 +10,10 @@ from app.api.v1 import auth, items, sales, parties, customers, payments, expense
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Ensure uploads directory exists
-    os.makedirs("uploads/item-images", exist_ok=True)
+    try:
+        os.makedirs("uploads/item-images", exist_ok=True)
+    except Exception:
+        pass
     # Startup
     try:
         await connect_to_mongo()
@@ -38,8 +41,11 @@ app.add_middleware(
 )
 
 # Static media mount
-os.makedirs("uploads", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+try:
+    os.makedirs("uploads", exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+except Exception:
+    pass
 
 # Register API v1 Routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
