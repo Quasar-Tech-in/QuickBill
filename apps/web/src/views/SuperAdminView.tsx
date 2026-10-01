@@ -83,9 +83,11 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     durationDays: 365,
     billingCycle: 'ANNUAL' as BillingCycle,
     isolationMode: 'SHARED' as 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER',
-    mongodbUri: 'mongodb://admin:secretpassword@localhost:27017/quickbill_db?authSource=admin',
+    mongodbUri: '',
     databaseName: 'quickbill_db',
   });
+  const [isTestingNewDb, setIsTestingNewDb] = useState(false);
+  const [newDbTestResult, setNewDbTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
 
   // Renewal Modal Form State
   const [renewalForm, setRenewalForm] = useState({
@@ -108,7 +110,12 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     address: '',
     status: 'ACTIVE' as 'ACTIVE' | 'SUSPENDED',
     plan: 'PROFESSIONAL' as PlanTier,
+    isolationMode: 'SHARED' as 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER',
+    mongodbUri: '',
+    databaseName: 'quickbill_db',
   });
+  const [isTestingEditDb, setIsTestingEditDb] = useState(false);
+  const [editDbTestResult, setEditDbTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
 
   // Reset Admin Password State
   const [resetPwForm, setResetPwForm] = useState({
@@ -177,6 +184,48 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     return matchesSearch && matchesPlan && matchesStatus && matchesExpiry;
   });
 
+  // Handle Test Connection for New Tenant Modal
+  const handleTestNewTenantConnection = async () => {
+    const uri = newTenant.mongodbUri.trim();
+    if (!uri) {
+      showToast('danger', 'Please enter a valid MongoDB connection string first.');
+      return;
+    }
+    if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')) {
+      showToast('danger', 'MongoDB Connection URI must begin with mongodb:// or mongodb+srv://');
+      return;
+    }
+    setIsTestingNewDb(true);
+    setNewDbTestResult(null);
+    const targetDb = newTenant.databaseName.trim() || `quickbill_${(newTenant.slug || newTenant.name).toLowerCase().replace(/[^a-z0-9]+/g, '_')}_db`;
+    const res = await store.testMongoConnection(uri, targetDb);
+    setIsTestingNewDb(false);
+    setNewDbTestResult({
+      success: res.success,
+      message: res.message,
+      latencyMs: res.latencyMs
+    });
+  };
+
+  // Handle Test Connection for Edit Tenant Modal
+  const handleTestEditTenantConnection = async () => {
+    const uri = editTenantForm.mongodbUri.trim();
+    if (!uri) {
+      showToast('danger', 'Please enter a valid MongoDB connection string first.');
+      return;
+    }
+    setIsTestingEditDb(true);
+    setEditDbTestResult(null);
+    const targetDb = editTenantForm.databaseName.trim() || 'quickbill_db';
+    const res = await store.testMongoConnection(uri, targetDb);
+    setIsTestingEditDb(false);
+    setEditDbTestResult({
+      success: res.success,
+      message: res.message,
+      latencyMs: res.latencyMs
+    });
+  };
+
   // Handle Create Tenant
   const handleCreateTenant = (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,15 +234,27 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     const slug = newTenant.slug.trim() || newTenant.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const dbName = newTenant.isolationMode === 'SHARED' 
       ? 'quickbill_db' 
-      : (newTenant.databaseName || `quickbill_${slug.replace(/-/g, '_')}_db`);
+      : (newTenant.databaseName.trim() || `quickbill_${slug.replace(/-/g, '_')}_db`);
+
+    if (newTenant.isolationMode === 'CUSTOM_CLUSTER') {
+      const uri = newTenant.mongodbUri.trim();
+      if (!uri) {
+        showToast('danger', 'Please enter a valid MongoDB Connection String (URI) for the dedicated cluster.');
+        return;
+      }
+      if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')) {
+        showToast('danger', 'MongoDB Connection URI must begin with mongodb:// or mongodb+srv://');
+        return;
+      }
+    }
 
     store.addTenant({
-      name: newTenant.name,
+      name: newTenant.name.trim(),
       slug,
-      adminEmail: newTenant.adminEmail,
-      phone: newTenant.phone,
-      gstin: newTenant.gstin,
-      address: newTenant.address,
+      adminEmail: newTenant.adminEmail.trim(),
+      phone: newTenant.phone?.trim(),
+      gstin: newTenant.gstin?.trim(),
+      address: newTenant.address?.trim(),
       plan: newTenant.plan,
       maxUsers: newTenant.maxUsers,
       maxLocations: newTenant.maxLocations,
@@ -201,7 +262,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       billingCycle: newTenant.billingCycle,
       databaseConfig: {
         isolationMode: newTenant.isolationMode,
-        mongodbUri: newTenant.mongodbUri,
+        mongodbUri: newTenant.isolationMode === 'CUSTOM_CLUSTER' ? newTenant.mongodbUri.trim() : undefined,
         databaseName: dbName,
       },
       initialPassword: newTenant.initialPassword || 'StoreAdmin@2026',
@@ -226,9 +287,10 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       durationDays: 365,
       billingCycle: 'ANNUAL',
       isolationMode: 'SHARED',
-      mongodbUri: 'mongodb://admin:secretpassword@localhost:27017/quickbill_db?authSource=admin',
+      mongodbUri: '',
       databaseName: 'quickbill_db',
     });
+    setNewDbTestResult(null);
   };
 
   // Open Renewal Modal
@@ -322,7 +384,11 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       address: t.address || '',
       status: t.status,
       plan: t.plan,
+      isolationMode: t.databaseConfig?.isolationMode || 'SHARED',
+      mongodbUri: t.databaseConfig?.mongodbUri || '',
+      databaseName: t.databaseConfig?.databaseName || 'quickbill_db',
     });
+    setEditDbTestResult(null);
     setIsEditTenantModalOpen(true);
   };
 
@@ -331,14 +397,32 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     e.preventDefault();
     if (!selectedTenant) return;
 
+    if (editTenantForm.isolationMode === 'CUSTOM_CLUSTER') {
+      const uri = editTenantForm.mongodbUri.trim();
+      if (!uri) {
+        showToast('danger', 'Please enter a valid MongoDB Connection String (URI) for the dedicated cluster.');
+        return;
+      }
+      if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')) {
+        showToast('danger', 'MongoDB Connection URI must begin with mongodb:// or mongodb+srv://');
+        return;
+      }
+    }
+
     await store.updateTenantProfile({
-      name: editTenantForm.name,
-      email: editTenantForm.adminEmail,
-      phone: editTenantForm.phone,
-      gstin: editTenantForm.gstin,
-      address: editTenantForm.address,
+      tenantId: selectedTenant.id,
+      name: editTenantForm.name.trim(),
+      email: editTenantForm.adminEmail.trim(),
+      phone: editTenantForm.phone.trim(),
+      gstin: editTenantForm.gstin.trim(),
+      address: editTenantForm.address.trim(),
       status: editTenantForm.status,
       plan: editTenantForm.plan,
+      databaseConfig: {
+        isolationMode: editTenantForm.isolationMode,
+        mongodbUri: editTenantForm.isolationMode === 'CUSTOM_CLUSTER' ? editTenantForm.mongodbUri.trim() : undefined,
+        databaseName: editTenantForm.isolationMode === 'SHARED' ? 'quickbill_db' : (editTenantForm.databaseName.trim() || 'quickbill_db'),
+      }
     });
 
     refreshTenants();
@@ -1415,7 +1499,17 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                       className="form-input"
                       placeholder="e.g. Apex Hypermarket South"
                       value={newTenant.name}
-                      onChange={(e) => setNewTenant({ ...newTenant, name: e.target.value })}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const autoSlug = val.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                        const autoDb = `quickbill_${autoSlug.replace(/-/g, '_')}_db`;
+                        setNewTenant({
+                          ...newTenant,
+                          name: val,
+                          slug: newTenant.slug === '' || newTenant.slug === newTenant.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') ? autoSlug : newTenant.slug,
+                          databaseName: newTenant.isolationMode !== 'SHARED' && (newTenant.databaseName === 'quickbill_db' || newTenant.databaseName.startsWith('quickbill_')) ? autoDb : newTenant.databaseName
+                        });
+                      }}
                       autoFocus
                     />
                   </div>
@@ -1425,10 +1519,18 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                       <label className="form-label">Store Slug / Identifier</label>
                       <input
                         type="text"
-                        className="form-input"
+                        className="form-input font-mono"
                         placeholder="e.g. apex-south-02"
                         value={newTenant.slug}
-                        onChange={(e) => setNewTenant({ ...newTenant, slug: e.target.value })}
+                        onChange={(e) => {
+                          const val = e.target.value.toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+                          const autoDb = `quickbill_${val.replace(/-/g, '_')}_db`;
+                          setNewTenant({
+                            ...newTenant,
+                            slug: val,
+                            databaseName: newTenant.isolationMode !== 'SHARED' && (newTenant.databaseName === 'quickbill_db' || newTenant.databaseName.startsWith('quickbill_')) ? autoDb : newTenant.databaseName
+                          });
+                        }}
                       />
                     </div>
                     <div className="form-group">
@@ -1547,16 +1649,126 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                   </span>
 
                   <div className="form-group" style={{ marginTop: 10 }}>
+                    <label className="form-label">Database Isolation Mode</label>
                     <select
                       className="form-select"
                       value={newTenant.isolationMode}
-                      onChange={(e) => setNewTenant({ ...newTenant, isolationMode: e.target.value as any })}
+                      onChange={(e) => {
+                        const mode = e.target.value as 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER';
+                        setNewTenant({
+                          ...newTenant,
+                          isolationMode: mode,
+                          databaseName: mode === 'SHARED' ? 'quickbill_db' : (newTenant.databaseName || `quickbill_${(newTenant.slug || 'store').replace(/-/g, '_')}_db`)
+                        });
+                        setNewDbTestResult(null);
+                      }}
                     >
-                      <option value="SHARED">Logical Shared Multi-Tenant Database (Fastest)</option>
-                      <option value="DEDICATED_DATABASE">Isolated MongoDB Database (Per-Tenant Database)</option>
-                      <option value="CUSTOM_CLUSTER">Dedicated MongoDB Cluster (Custom MongoDB URI)</option>
+                      <option value="SHARED">Logical Shared Multi-Tenant Database (Default / Shared Cluster)</option>
+                      <option value="DEDICATED_DATABASE">Isolated MongoDB Database (Separate Database on Primary Cluster)</option>
+                      <option value="CUSTOM_CLUSTER">Dedicated MongoDB Cluster (Custom MongoDB URI / Customer Atlas)</option>
                     </select>
                   </div>
+
+                  {newTenant.isolationMode === 'SHARED' && (
+                    <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: 'var(--neutral-50)', border: '1px solid var(--neutral-200)', marginTop: 8, fontSize: '0.78rem', color: 'var(--neutral-600)' }}>
+                      ℹ️ Store records will be securely isolated via <code>businessId</code> namespace inside the primary shared database (<code>quickbill_db</code>).
+                    </div>
+                  )}
+
+                  {newTenant.isolationMode === 'DEDICATED_DATABASE' && (
+                    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', fontSize: '0.78rem', color: '#1e40af' }}>
+                        🗄️ <strong>Per-Tenant Isolated Database:</strong> A separate database namespace will be used on the primary MongoDB instance.
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Dedicated Database Name *</label>
+                        <input
+                          type="text"
+                          required
+                          className="form-input"
+                          placeholder="e.g. quickbill_apex_south_db"
+                          value={newTenant.databaseName}
+                          onChange={(e) => setNewTenant({ ...newTenant, databaseName: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {newTenant.isolationMode === 'CUSTOM_CLUSTER' && (
+                    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: '#fdf4ff', border: '1px solid #f0abfc', fontSize: '0.78rem', color: '#86198f' }}>
+                        ⚡ <strong>Dedicated External MongoDB Cluster:</strong> This tenant's data will reside completely on a customer-provided or isolated MongoDB Atlas / Self-Hosted cluster.
+                      </div>
+
+                      <div className="form-group">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <label className="form-label">MongoDB Cluster Connection String (URI) *</label>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>mongodb+srv:// or mongodb://</span>
+                        </div>
+                        <input
+                          type="password"
+                          required
+                          className="form-input font-mono"
+                          placeholder="mongodb+srv://username:password@cluster0.mongodb.net/?retryWrites=true&w=majority"
+                          value={newTenant.mongodbUri}
+                          onChange={(e) => {
+                            setNewTenant({ ...newTenant, mongodbUri: e.target.value });
+                            setNewDbTestResult(null);
+                          }}
+                        />
+                        <p style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', margin: '4px 0 0 0' }}>
+                          Secure connection URI used exclusively by backend runtime for tenant routing.
+                        </p>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'flex-end' }}>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label">Target Database Name *</label>
+                          <input
+                            type="text"
+                            required
+                            className="form-input font-mono"
+                            placeholder="quickbill_tenant_db"
+                            value={newTenant.databaseName}
+                            onChange={(e) => {
+                              setNewTenant({ ...newTenant, databaseName: e.target.value });
+                              setNewDbTestResult(null);
+                            }}
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={handleTestNewTenantConnection}
+                          disabled={isTestingNewDb || !newTenant.mongodbUri.trim()}
+                          style={{ height: 38, fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
+                        >
+                          <RefreshCw size={13} className={isTestingNewDb ? 'spin' : ''} />
+                          <span>{isTestingNewDb ? 'Testing...' : 'Test Connection'}</span>
+                        </button>
+                      </div>
+
+                      {newDbTestResult && (
+                        <div 
+                          style={{ 
+                            padding: '10px 14px', 
+                            borderRadius: 8, 
+                            fontSize: '0.78rem',
+                            backgroundColor: newDbTestResult.success ? '#ecfdf5' : '#fef2f2',
+                            color: newDbTestResult.success ? '#065f46' : '#991b1b',
+                            border: `1px solid ${newDbTestResult.success ? '#a7f3d0' : '#fca5a5'}`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8
+                          }}
+                        >
+                          {newDbTestResult.success ? <CheckCircle2 size={16} color="#10b981" /> : <AlertTriangle size={16} color="#ef4444" />}
+                          <span style={{ flex: 1 }}>{newDbTestResult.message}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1795,7 +2007,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                   </div>
                 </div>
 
-                <div className="form-group" style={{ marginBottom: 0 }}>
+                <div className="form-group">
                   <label className="form-label">Address</label>
                   <input
                     type="text"
@@ -1803,6 +2015,103 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                     value={editTenantForm.address}
                     onChange={(e) => setEditTenantForm({ ...editTenantForm, address: e.target.value })}
                   />
+                </div>
+
+                {/* Database Architecture Configuration */}
+                <div style={{ borderTop: '1px solid var(--neutral-100)', paddingTop: 14 }}>
+                  <label className="form-label" style={{ fontWeight: 700 }}>Database Isolation Architecture</label>
+                  <select
+                    className="form-select"
+                    value={editTenantForm.isolationMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER';
+                      setEditTenantForm({
+                        ...editTenantForm,
+                        isolationMode: mode,
+                        databaseName: mode === 'SHARED' ? 'quickbill_db' : (editTenantForm.databaseName || `quickbill_${selectedTenant.slug.replace(/-/g, '_')}_db`)
+                      });
+                      setEditDbTestResult(null);
+                    }}
+                  >
+                    <option value="SHARED">Logical Shared Multi-Tenant Database (Shared Cluster)</option>
+                    <option value="DEDICATED_DATABASE">Isolated MongoDB Database (Primary Cluster)</option>
+                    <option value="CUSTOM_CLUSTER">Dedicated MongoDB Cluster (Custom MongoDB URI)</option>
+                  </select>
+
+                  {editTenantForm.isolationMode === 'DEDICATED_DATABASE' && (
+                    <div className="form-group" style={{ marginTop: 10 }}>
+                      <label className="form-label">Dedicated Database Name</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={editTenantForm.databaseName}
+                        onChange={(e) => setEditTenantForm({ ...editTenantForm, databaseName: e.target.value })}
+                      />
+                    </div>
+                  )}
+
+                  {editTenantForm.isolationMode === 'CUSTOM_CLUSTER' && (
+                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">MongoDB Cluster Connection String (URI)</label>
+                        <input
+                          type="password"
+                          className="form-input font-mono"
+                          placeholder="mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority"
+                          value={editTenantForm.mongodbUri}
+                          onChange={(e) => {
+                            setEditTenantForm({ ...editTenantForm, mongodbUri: e.target.value });
+                            setEditDbTestResult(null);
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'flex-end' }}>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label">Database Name</label>
+                          <input
+                            type="text"
+                            className="form-input font-mono"
+                            value={editTenantForm.databaseName}
+                            onChange={(e) => {
+                              setEditTenantForm({ ...editTenantForm, databaseName: e.target.value });
+                              setEditDbTestResult(null);
+                            }}
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={handleTestEditTenantConnection}
+                          disabled={isTestingEditDb || !editTenantForm.mongodbUri.trim()}
+                          style={{ height: 38, fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
+                        >
+                          <RefreshCw size={13} className={isTestingEditDb ? 'spin' : ''} />
+                          <span>{isTestingEditDb ? 'Testing...' : 'Test Connection'}</span>
+                        </button>
+                      </div>
+
+                      {editDbTestResult && (
+                        <div 
+                          style={{ 
+                            padding: '10px 14px', 
+                            borderRadius: 8, 
+                            fontSize: '0.78rem',
+                            backgroundColor: editDbTestResult.success ? '#ecfdf5' : '#fef2f2',
+                            color: editDbTestResult.success ? '#065f46' : '#991b1b',
+                            border: `1px solid ${editDbTestResult.success ? '#a7f3d0' : '#fca5a5'}`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8
+                          }}
+                        >
+                          {editDbTestResult.success ? <CheckCircle2 size={16} color="#10b981" /> : <AlertTriangle size={16} color="#ef4444" />}
+                          <span style={{ flex: 1 }}>{editDbTestResult.message}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 

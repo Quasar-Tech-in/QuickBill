@@ -377,23 +377,51 @@ async def get_tenant_by_id(tenant_id: str, user: TokenPayload = Depends(get_curr
 
 
 @router.post("/test-db-connection")
-async def test_db_connection(req: TestConnectionRequest):
-    try:
-        client = AsyncIOMotorClient(req.mongodb_uri, serverSelectionTimeoutMS=2500)
-        db = client[req.database_name or "quickbill_db"]
-        await db.command("ping")
-        client.close()
-        return {
-            "success": True,
-            "message": f"Successfully connected to MongoDB database '{req.database_name}'!",
-            "status": "HEALTHY"
-        }
-    except Exception as e:
+async def test_db_connection(req: TestConnectionRequest, user: TokenPayload = Depends(get_current_user)):
+    if not is_super_admin(user):
+        raise HTTPException(status_code=403, detail="Super Admin authorization required to test database connections.")
+
+    clean_uri = req.mongodb_uri.strip() if req.mongodb_uri else ""
+    if not clean_uri or not (clean_uri.startswith("mongodb://") or clean_uri.startswith("mongodb+srv://")):
         return {
             "success": False,
-            "message": f"Connection failed: {str(e)}",
-            "status": "UNREACHABLE"
+            "message": "Invalid connection URI. URI must start with mongodb:// or mongodb+srv://",
+            "status": "INVALID_URI"
         }
+
+    client = None
+    try:
+        client = AsyncIOMotorClient(clean_uri, serverSelectionTimeoutMS=4000)
+        target_db = req.database_name.strip() if req.database_name and req.database_name.strip() else "quickbill_db"
+        db = client[target_db]
+        start_time = datetime.now()
+        await db.command("ping")
+        latency_ms = round((datetime.now() - start_time).total_seconds() * 1000, 1)
+        return {
+            "success": True,
+            "message": f"Successfully connected to MongoDB cluster and verified database '{target_db}' (Latency: {latency_ms}ms)!",
+            "status": "HEALTHY",
+            "latencyMs": latency_ms
+        }
+    except Exception as e:
+        err_msg = str(e)
+        if "Authentication failed" in err_msg or "auth" in err_msg.lower():
+            hint = "Authentication failed. Please verify the username, password, and authSource in your connection string."
+        elif "ServerSelectionTimeoutError" in err_msg or "timed out" in err_msg.lower():
+            hint = "Connection timed out. Please check your network connection, cluster hostname, and ensure IP Access List (e.g. 0.0.0.0/0) is enabled in MongoDB Atlas."
+        elif "ConfigurationError" in err_msg:
+            hint = "Configuration error in URI parameters. Please ensure special characters in passwords are URL-encoded."
+        else:
+            hint = f"Database unreachable: {err_msg}"
+        return {
+            "success": False,
+            "message": hint,
+            "status": "UNREACHABLE",
+            "rawError": err_msg
+        }
+    finally:
+        if client:
+            client.close()
 
 class TenantUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -403,6 +431,7 @@ class TenantUpdateRequest(BaseModel):
     address: Optional[str] = None
     status: Optional[str] = None
     plan: Optional[str] = None
+    database_config: Optional[DatabaseConfig] = None
 
 @router.put("/{tenant_id}")
 async def update_tenant_profile(
@@ -441,6 +470,12 @@ async def update_tenant_profile(
         update_data["plan"] = req.plan.upper()
         update_data["subscription.planId"] = req.plan.upper()
         update_data["subscription.planName"] = f"{req.plan.upper().title()} Tier"
+    if req.database_config is not None and is_super_admin(user):
+        update_data["databaseConfig"] = {
+            "isolationMode": req.database_config.isolation_mode,
+            "mongodbUri": req.database_config.mongodb_uri,
+            "databaseName": req.database_config.database_name
+        }
 
     if update_data:
         query = {"_id": t_oid} if t_oid else {"slug": tenant_id}
@@ -633,6 +668,18 @@ async def create_tenant(req: TenantCreateRequest, user: TokenPayload = Depends(g
         }]
     }
 
+    # Validate database configuration
+    db_mode = req.database_config.isolation_mode.upper() if req.database_config else "SHARED"
+    custom_uri = req.database_config.mongodb_uri.strip() if req.database_config and req.database_config.mongodb_uri else None
+    target_db_name = req.database_config.database_name.strip() if req.database_config and req.database_config.database_name else f"quickbill_{req.slug.strip().lower().replace('-', '_')}_db"
+
+    if db_mode == "CUSTOM_CLUSTER":
+        if not custom_uri or not (custom_uri.startswith("mongodb://") or custom_uri.startswith("mongodb+srv://")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A valid MongoDB connection URI (starting with mongodb:// or mongodb+srv://) is required for Dedicated MongoDB Cluster mode."
+            )
+
     new_tenant_doc = {
         "name": req.name.strip(),
         "slug": req.slug.strip().lower(),
@@ -644,9 +691,9 @@ async def create_tenant(req: TenantCreateRequest, user: TokenPayload = Depends(g
         "address": req.address,
         "createdAt": now,
         "databaseConfig": {
-            "isolationMode": req.database_config.isolation_mode,
-            "mongodbUri": req.database_config.mongodb_uri or settings.MONGODB_URI,
-            "databaseName": req.database_config.database_name
+            "isolationMode": db_mode,
+            "mongodbUri": custom_uri if db_mode == "CUSTOM_CLUSTER" else settings.MONGODB_URI,
+            "databaseName": target_db_name if db_mode != "SHARED" else "quickbill_db"
         },
         "subscription": sub_doc,
         "stats": {

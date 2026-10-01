@@ -1161,6 +1161,7 @@ class StoreService {
   }
 
   async updateTenantProfile(updates: {
+    tenantId?: string;
     name?: string;
     gstin?: string;
     phone?: string;
@@ -1169,8 +1170,10 @@ class StoreService {
     currency?: string;
     status?: 'ACTIVE' | 'SUSPENDED';
     plan?: any;
+    databaseConfig?: TenantDatabaseConfig;
   }): Promise<Tenant> {
-    const current = this.getActiveTenant();
+    const targetId = updates.tenantId || this.getActiveTenant().id;
+    const current = this.tenants.find(t => t.id === targetId) || this.getActiveTenant();
     const updatedTenant: Tenant = {
       ...current,
       name: updates.name ? updates.name.trim() : current.name,
@@ -1180,20 +1183,23 @@ class StoreService {
       address: updates.address !== undefined ? updates.address.trim() : current.address,
       status: updates.status || current.status,
       plan: updates.plan || current.plan,
+      databaseConfig: updates.databaseConfig || current.databaseConfig,
     };
 
     // Update in local array
-    const idx = this.tenants.findIndex(t => t.id === current.id);
+    const idx = this.tenants.findIndex(t => t.id === targetId);
     if (idx !== -1) {
       this.tenants[idx] = updatedTenant;
     }
-    this.currentTenant = updatedTenant;
+    if (this.currentTenant?.id === targetId) {
+      this.currentTenant = updatedTenant;
+    }
     this.saveToStorage();
 
     // Sync to backend if online
-    if (this.currentTenant.id) {
+    if (targetId) {
       try {
-        await apiClient.put(`/tenants/${this.currentTenant.id}`, {
+        await apiClient.put(`/tenants/${targetId}`, {
           name: updates.name,
           gstin: updates.gstin,
           phone: updates.phone,
@@ -1201,13 +1207,19 @@ class StoreService {
           address: updates.address,
           status: updates.status,
           plan: updates.plan,
+          database_config: updates.databaseConfig ? {
+            isolation_mode: updates.databaseConfig.isolationMode,
+            mongodb_uri: updates.databaseConfig.mongodbUri,
+            database_name: updates.databaseConfig.databaseName
+          } : undefined
         });
       } catch (e) {
         console.warn('Backend tenant profile update error:', e);
       }
     }
 
-    return this.currentTenant;
+    await this.fetchTenants();
+    return updatedTenant;
   }
 
   async updateTenantSubscription(
@@ -1540,23 +1552,30 @@ class StoreService {
     return newTenant;
   }
 
-  async testMongoConnection(uri: string, dbName: string): Promise<{ success: boolean; message: string }> {
+  async testMongoConnection(uri: string, dbName: string): Promise<{ success: boolean; message: string; latencyMs?: number; status?: string }> {
     try {
-      const res = await axios.post(`${API_BASE_URL}/tenants/test-db-connection`, {
+      const res = await apiClient.post('/tenants/test-db-connection', {
         mongodb_uri: uri,
         database_name: dbName,
-      }, { timeout: 3000 });
+      }, { timeout: 6000 });
       return res.data;
-    } catch {
+    } catch (err: any) {
+      if (err?.response?.data?.message) {
+        return {
+          success: false,
+          message: err.response.data.message,
+          status: err.response.data.status || 'FAILED'
+        };
+      }
       if (uri.startsWith('mongodb://') || uri.startsWith('mongodb+srv://')) {
         return {
-          success: true,
-          message: `Connection syntax valid. Target database: '${dbName}' ready for isolation.`,
+          success: false,
+          message: 'Unable to reach backend server to verify connection string.',
         };
       }
       return {
         success: false,
-        message: 'Invalid MongoDB connection URI format.',
+        message: 'Invalid MongoDB connection URI format. Must start with mongodb:// or mongodb+srv://',
       };
     }
   }
