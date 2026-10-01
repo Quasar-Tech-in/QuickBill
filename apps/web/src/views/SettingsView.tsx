@@ -152,7 +152,7 @@ export const SettingsView: React.FC = () => {
     setLoading(true);
     try {
       const [uList, lList, liveTenant] = await Promise.all([
-        store.getUsers(),
+        store.fetchUsers(),
         store.fetchLocations(),
         store.fetchActiveTenant(),
       ]);

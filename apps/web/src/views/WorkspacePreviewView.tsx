@@ -200,6 +200,30 @@ export const WorkspacePreviewView: React.FC<WorkspacePreviewViewProps> = ({ onTe
   const cartGst = cartSubtotal * 0.18;
   const cartGrandTotal = Math.round(cartSubtotal + cartGst);
 
+  if (tenants.length === 0) {
+    return (
+      <div className="view-container" style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', animation: 'fadeIn 0.25s ease-out' }}>
+        <div className="card" style={{ padding: '48px 32px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          <div style={{ width: 56, height: 56, borderRadius: '16px', backgroundColor: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5' }}>
+            <Building size={28} />
+          </div>
+          <h2 style={{ fontSize: '1.3rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>No Business Stores Provisioned</h2>
+          <p style={{ fontSize: '0.88rem', color: '#64748b', maxWidth: 500, margin: 0 }}>
+            There are currently no tenant stores registered in the database. Provision your first business store from the Super Admin portal to enable live workspace simulation.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => navigate('/superadmin')}
+            style={{ marginTop: 8 }}
+          >
+            Go to Store Governance
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="view-container" style={{ padding: '24px', maxWidth: '1600px', margin: '0 auto', animation: 'fadeIn 0.25s ease-out' }}>
       

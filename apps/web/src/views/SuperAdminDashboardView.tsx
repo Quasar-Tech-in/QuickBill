@@ -180,8 +180,8 @@ export const SuperAdminDashboardView: React.FC<SuperAdminDashboardViewProps> = (
         />
         <MetricCard
           title="Total Staff Users"
-          value={String(platformStats.totalUsers || 3)}
-          subtitle={`Across ${platformStats.totalLocations || 3} store branches`}
+          value={String(platformStats.totalUsers || 0)}
+          subtitle={`Across ${platformStats.totalLocations || 0} store branches`}
           variant="primary"
           icon={Users}
         />
@@ -222,7 +222,7 @@ export const SuperAdminDashboardView: React.FC<SuperAdminDashboardViewProps> = (
                 <span>Active & Healthy</span>
               </div>
               <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#065f46', margin: '6px 0 2px 0' }}>
-                {statusCounts['ACTIVE'] || tenants.length} Stores
+                {statusCounts['ACTIVE'] || 0} Stores
               </div>
               <div style={{ fontSize: '0.72rem', color: '#047857' }}>Licenses valid & operational</div>
             </div>
@@ -246,7 +246,7 @@ export const SuperAdminDashboardView: React.FC<SuperAdminDashboardViewProps> = (
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ backgroundColor: '#fdf4ff', color: '#9333ea', border: '1px solid #f0abfc', padding: '4px 10px', borderRadius: '6px', fontSize: '0.76rem', fontWeight: 700 }}>
-                Enterprise: {tierCounts['ENTERPRISE'] || 1}
+                Enterprise: {tierCounts['ENTERPRISE'] || 0}
               </span>
               <span style={{ backgroundColor: '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe', padding: '4px 10px', borderRadius: '6px', fontSize: '0.76rem', fontWeight: 700 }}>
                 Professional: {tierCounts['PROFESSIONAL'] || 0}
@@ -288,16 +288,18 @@ export const SuperAdminDashboardView: React.FC<SuperAdminDashboardViewProps> = (
               <span style={{ fontSize: '0.74rem', color: '#10b981', fontWeight: 700 }}>Latency: 3ms</span>
             </div>
 
-            <div style={{ padding: '12px 14px', borderRadius: '8px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Zap size={16} color="#f59e0b" />
-                <div>
-                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#1e293b' }}>Enterprise Isolated Database</div>
-                  <div style={{ fontSize: '0.7rem', color: '#64748b', fontFamily: 'monospace' }}>quickbill_main_db (Dedicated DB)</div>
+            {tenants.filter(t => t.databaseConfig?.isolationMode === 'DEDICATED_DATABASE').map(t => (
+              <div key={t.id} style={{ padding: '12px 14px', borderRadius: '8px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Zap size={16} color="#f59e0b" />
+                  <div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#1e293b' }}>{t.name} (Dedicated Database)</div>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b', fontFamily: 'monospace' }}>{t.databaseConfig.databaseName || `quickbill_${t.slug}_db`}</div>
+                  </div>
                 </div>
+                <span style={{ fontSize: '0.74rem', color: '#10b981', fontWeight: 700 }}>Latency: 2ms</span>
               </div>
-              <span style={{ fontSize: '0.74rem', color: '#10b981', fontWeight: 700 }}>Latency: 2ms</span>
-            </div>
+            ))}
           </div>
 
           {/* Quick link */}
@@ -348,64 +350,72 @@ export const SuperAdminDashboardView: React.FC<SuperAdminDashboardViewProps> = (
               </tr>
             </thead>
             <tbody>
-              {tenants.map((t) => {
-                const sub = t.subscription;
-                const maxUsers = sub?.maxUsers || 5;
-                const maxLocs = sub?.maxLocations || 3;
-                const currentUsers = t.stats.usersCount || 1;
-                const currentLocs = t.stats.locationsCount || 1;
+              {tenants.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '36px 0', color: 'var(--neutral-400)' }}>
+                    No business stores provisioned yet in the database. Click "Manage All Stores" or "Provision New Store" to get started.
+                  </td>
+                </tr>
+              ) : (
+                tenants.map((t) => {
+                  const sub = t.subscription;
+                  const maxUsers = sub?.maxUsers || 5;
+                  const maxLocs = sub?.maxLocations || 3;
+                  const currentUsers = t.stats.usersCount || 0;
+                  const currentLocs = t.stats.locationsCount || 0;
 
-                return (
-                  <tr key={t.id}>
-                    <td>
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.88rem' }}>{t.name}</span>
-                        <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{t.slug} • {t.adminEmail}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span 
-                        style={{
-                          backgroundColor: t.plan === 'ENTERPRISE' ? '#fdf4ff' : '#eef2ff',
-                          color: t.plan === 'ENTERPRISE' ? '#9333ea' : '#4f46e5',
-                          border: `1px solid ${t.plan === 'ENTERPRISE' ? '#f0abfc' : '#c7d2fe'}`,
-                          padding: '3px 8px',
-                          borderRadius: '5px',
-                          fontSize: '0.74rem',
-                          fontWeight: 700
-                        }}
-                      >
-                        {t.plan}
-                      </span>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{currentUsers} / {maxUsers} Users</span>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{currentLocs} / {maxLocs} Outlets</span>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#334155' }}>
-                        {t.databaseConfig.isolationMode === 'DEDICATED_DATABASE' ? '🗄️ Dedicated DB' : '🔗 Shared DB'}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="badge badge-paid">● Active</span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-primary"
-                        onClick={() => navigate(`/workspace-preview?tenantId=${t.id}`)}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: '0.75rem' }}
-                      >
-                        <Eye size={12} />
-                        <span>Preview</span>
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                  return (
+                    <tr key={t.id}>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.88rem' }}>{t.name}</span>
+                          <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{t.slug} • {t.adminEmail}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span 
+                          style={{
+                            backgroundColor: t.plan === 'ENTERPRISE' ? '#fdf4ff' : '#eef2ff',
+                            color: t.plan === 'ENTERPRISE' ? '#9333ea' : '#4f46e5',
+                            border: `1px solid ${t.plan === 'ENTERPRISE' ? '#f0abfc' : '#c7d2fe'}`,
+                            padding: '3px 8px',
+                            borderRadius: '5px',
+                            fontSize: '0.74rem',
+                            fontWeight: 700
+                          }}
+                        >
+                          {t.plan}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{currentUsers} / {maxUsers} Users</span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{currentLocs} / {maxLocs} Outlets</span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#334155' }}>
+                          {t.databaseConfig.isolationMode === 'DEDICATED_DATABASE' ? '🗄️ Dedicated DB' : '🔗 Shared DB'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="badge badge-paid">● Active</span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-primary"
+                          onClick={() => navigate(`/workspace-preview?tenantId=${t.id}`)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: '0.75rem' }}
+                        >
+                          <Eye size={12} />
+                          <span>Preview</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

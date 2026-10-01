@@ -8,36 +8,6 @@ from app.core.database import get_database, get_tenant_db
 
 router = APIRouter(prefix="/locations", tags=["Store Locations & Branches"])
 
-DEFAULT_SEED_LOCATIONS = [
-    {
-        "_id": ObjectId("65f2a1b9a000000000000101"),
-        "name": "Main Flagship Counter",
-        "code": "MAIN-01",
-        "address": "Ground Floor, Metro Retail Plaza, Sector 18",
-        "phone": "+91 9876543210",
-        "isDefault": True,
-        "isActive": True,
-    },
-    {
-        "_id": ObjectId("65f2a1b9a000000000000102"),
-        "name": "Downtown Express Branch",
-        "code": "DT-02",
-        "address": "Shop 14, City Walk Center, Downtown",
-        "phone": "+91 9811223344",
-        "isDefault": False,
-        "isActive": True,
-    },
-    {
-        "_id": ObjectId("65f2a1b9a000000000000103"),
-        "name": "Central Supply Warehouse",
-        "code": "WH-03",
-        "address": "Plot 8B, Industrial Logistics Park",
-        "phone": "+91 9988776655",
-        "isDefault": False,
-        "isActive": True,
-    },
-]
-
 class LocationCreateRequest(BaseModel):
     name: str
     code: str
@@ -156,25 +126,6 @@ async def _sync_location_to_items(primary_db, tenant_id: str, new_loc_id: str, n
                     {"$set": {"locations": item_locations, "updatedAt": datetime.now(timezone.utc)}}
                 )
 
-async def _ensure_seed_locations(primary_db, tenant_id: str):
-    """Seed initial store locations if none exist for tenant."""
-    if not tenant_id:
-        return
-    count = await primary_db.locations.count_documents({"businessId": tenant_id})
-    if count == 0:
-        now = datetime.now(timezone.utc)
-        for loc in DEFAULT_SEED_LOCATIONS:
-            doc = {
-                **loc,
-                "businessId": tenant_id,
-                "createdAt": now
-            }
-            await primary_db.locations.update_one(
-                {"_id": loc["_id"]},
-                {"$setOnInsert": doc},
-                upsert=True
-            )
-
 def _build_id_query(location_id: str, tenant_id: Optional[str] = None):
     or_clauses = [{"_id": location_id}, {"id": location_id}, {"code": location_id}]
     if ObjectId.is_valid(location_id):
@@ -190,9 +141,8 @@ async def list_locations(
     user: TokenPayload = Depends(get_current_user)
 ):
     primary_db = get_database()
-    tenant_id = user.default_business_id or "65f2a1b9a000000000000001"
-    
-    await _ensure_seed_locations(primary_db, tenant_id)
+    tenant_id = user.default_business_id
+
 
     filter_query = {}
     if "SUPER_ADMIN" not in user.roles:
@@ -226,7 +176,12 @@ async def create_location(
         )
 
     primary_db = get_database()
-    tenant_id = current_user.default_business_id or "65f2a1b9a000000000000001"
+    tenant_id = current_user.default_business_id
+    if not tenant_id and "SUPER_ADMIN" not in current_user.roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User does not have an associated store tenant."
+        )
     clean_code = req.code.strip().upper()
 
     # Check subscription maxLocations quota (unless Super Admin)
@@ -302,9 +257,7 @@ async def update_location(
         )
 
     primary_db = get_database()
-    tenant_id = current_user.default_business_id or "65f2a1b9a000000000000001"
-    await _ensure_seed_locations(primary_db, tenant_id)
-
+    tenant_id = current_user.default_business_id
     query = _build_id_query(location_id, tenant_id if "SUPER_ADMIN" not in current_user.roles else None)
     loc_doc = await primary_db.locations.find_one(query)
 
@@ -357,8 +310,7 @@ async def delete_location(
         )
 
     primary_db = get_database()
-    tenant_id = current_user.default_business_id or "65f2a1b9a000000000000001"
-    query = _build_id_query(location_id, tenant_id if "SUPER_ADMIN" not in current_user.roles else None)
+    query = _build_id_query(location_id, current_user.default_business_id if "SUPER_ADMIN" not in current_user.roles else None)
 
     loc_doc = await primary_db.locations.find_one(query)
     if not loc_doc:
@@ -366,6 +318,8 @@ async def delete_location(
     
     if not loc_doc:
         raise HTTPException(status_code=404, detail="Location not found.")
+
+    tenant_id = loc_doc.get("businessId") or current_user.default_business_id or ""
 
     if loc_doc.get("isDefault"):
         raise HTTPException(
@@ -415,16 +369,18 @@ async def sync_location_inventory(
         )
 
     primary_db = get_database()
-    tenant_id = current_user.default_business_id or "65f2a1b9a000000000000001"
-    tenant_db = await get_tenant_db(tenant_id)
-    query = _build_id_query(location_id, tenant_id if "SUPER_ADMIN" not in current_user.roles else None)
+    query = _build_id_query(location_id, current_user.default_business_id if "SUPER_ADMIN" not in current_user.roles else None)
 
     loc_doc = await primary_db.locations.find_one(query)
     if not loc_doc:
         loc_doc = await primary_db.locations.find_one(_build_id_query(location_id))
-    if not loc_doc:
+    
+    tenant_id = (loc_doc.get("businessId") if loc_doc else None) or current_user.default_business_id or ""
+    tenant_db = await get_tenant_db(tenant_id) if tenant_id else primary_db
+    
+    if not loc_doc and tenant_db:
         loc_doc = await tenant_db.locations.find_one(query)
-    if not loc_doc:
+    if not loc_doc and tenant_db:
         loc_doc = await tenant_db.locations.find_one(_build_id_query(location_id))
     
     if not loc_doc:

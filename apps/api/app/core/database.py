@@ -3,6 +3,7 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from fastapi import HTTPException, status
 from app.core.config import settings
+from app.core.init_db import init_primary_superadmin_database
 
 class MultiTenantDatabaseManager:
     def __init__(self):
@@ -19,6 +20,13 @@ class MultiTenantDatabaseManager:
         self.primary_db = self.primary_client[settings.DATABASE_NAME]
         await self.primary_db.command("ping")
         print(f"Connected to Primary Database: {settings.DATABASE_NAME}")
+        
+        # Initialize primary SuperAdmin collections, indexes, and root user
+        try:
+            await init_primary_superadmin_database(self.primary_db)
+        except Exception as e:
+            print(f"Warning: Failed to initialize primary database collections: {e}")
+
 
     async def close(self):
         if self.primary_client:

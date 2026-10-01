@@ -623,7 +623,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               <div>
                 <h3 className="card-title">Provisioned Business Stores & Quotas</h3>
                 <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', margin: 0 }}>
-                  Active context: <strong style={{ color: 'var(--primary-600)' }}>{activeTenant.name} ({activeTenant.slug})</strong>
+                  Active context: <strong style={{ color: 'var(--primary-600)' }}>{activeTenant?.name ? `${activeTenant.name} (${activeTenant.slug})` : 'None (No stores provisioned)'}</strong>
                 </p>
               </div>
             </div>
@@ -688,7 +688,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                 {filteredTenants.length === 0 ? (
                   <tr>
                     <td colSpan={8} style={{ textAlign: 'center', padding: '36px 0', color: 'var(--neutral-400)' }}>
-                      No business tenants match the selected filters.
+                      No business tenants found in database. Click "Provision New Store" to onboard your first store.
                     </td>
                   </tr>
                 ) : (
@@ -696,9 +696,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                     const isCurrent = t.id === activeTenant.id;
                     const sub = t.subscription;
                     const maxUsers = sub?.maxUsers || 5;
-                    const currentUsers = t.stats.usersCount || 1;
+                    const currentUsers = t.stats.usersCount || 0;
                     const maxLocs = sub?.maxLocations || 3;
-                    const currentLocs = t.stats.locationsCount || 1;
+                    const currentLocs = t.stats.locationsCount || 0;
 
                     const isUsersMaxed = currentUsers >= maxUsers;
                     const isLocsMaxed = currentLocs >= maxLocs;

@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day for dev, 15 min for prod
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     
+    # SuperAdmin Default Credentials
+    SUPERADMIN_EMAIL: str = "superadmin@quickbill.local"
+    SUPERADMIN_PASSWORD: str = "superadmin123"
+    SUPERADMIN_NAME: str = "Super Administrator"
+    
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",

@@ -49,6 +49,8 @@ class StoreService {
     this.checkHealth().then(isOnline => {
       if (isOnline) {
         this.fetchTenants().catch(() => {});
+        this.fetchUsers().catch(() => {});
+        this.fetchLocations().catch(() => {});
         this.fetchCategories().catch(() => {});
         this.fetchItems().catch(() => {});
         this.fetchInvoices().catch(() => {});
@@ -812,6 +814,30 @@ class StoreService {
   }
 
   // --- Team & Staff Users Management ---
+  async fetchUsers(): Promise<User[]> {
+    try {
+      const res = await apiClient.get('/users');
+      if (Array.isArray(res.data)) {
+        this.users = res.data.map((u: any) => ({
+          id: u.id || u._id,
+          name: u.name || '',
+          email: u.email || '',
+          role: u.role || 'CASHIER',
+          businessId: u.businessId || u.business_id || '',
+          tenantName: u.tenantName || u.tenant_name || '',
+          assignedLocationIds: u.assignedLocationIds || u.assigned_location_ids || [],
+          isActive: u.isActive !== undefined ? u.isActive : (u.is_active !== undefined ? u.is_active : true),
+          createdAt: u.createdAt || u.created_at || new Date().toISOString(),
+        }));
+        this.saveToStorage();
+        this.notifyListeners();
+      }
+    } catch (e) {
+      console.warn('Backend fetchUsers failed:', e);
+    }
+    return this.getUsers();
+  }
+
   getUsers(): User[] {
     const activeTenantId = this.currentTenant?.id || '';
     return this.users.filter(u => u.businessId === activeTenantId || !u.businessId);
@@ -955,8 +981,8 @@ class StoreService {
           productsCount: tenantItems.length,
           invoicesCount: tenantInvoices.length,
           monthlyGmv: monthlyGmv,
-          usersCount: tenantUsers.length || 1,
-          locationsCount: tenantLocations.length || 1,
+          usersCount: tenantUsers.length,
+          locationsCount: tenantLocations.length,
         }
       };
     });
@@ -965,7 +991,7 @@ class StoreService {
   async fetchTenants(): Promise<Tenant[]> {
     try {
       const res = await apiClient.get('/tenants');
-      if (Array.isArray(res.data) && res.data.length > 0) {
+      if (Array.isArray(res.data)) {
         this.tenants = res.data.map((t: any) => ({
           id: t.id || t._id,
           name: t.name,
@@ -1004,14 +1030,22 @@ class StoreService {
             productsCount: 0,
             invoicesCount: 0,
             monthlyGmv: 0,
-            usersCount: 1,
-            locationsCount: 1,
+            usersCount: 0,
+            locationsCount: 0,
           }
         }));
+
+        if (this.tenants.length === 0) {
+          this.currentTenant = null;
+        } else if (!this.currentTenant || !this.tenants.some(t => t.id === this.currentTenant?.id)) {
+          this.currentTenant = this.tenants[0];
+        }
+
         this.saveToStorage();
+        this.notifyListeners();
       }
     } catch (e) {
-      console.warn('Backend fetchTenants failed, using local tenants:', e);
+      console.warn('Backend fetchTenants failed:', e);
     }
     return this.getTenants();
   }
@@ -1059,8 +1093,8 @@ class StoreService {
             productsCount: 0,
             invoicesCount: 0,
             monthlyGmv: 0,
-            usersCount: 1,
-            locationsCount: 1,
+            usersCount: 0,
+            locationsCount: 0,
           }
         };
 
@@ -1535,7 +1569,7 @@ class StoreService {
     const totalProducts = tenantsWithLiveStats.reduce((sum, t) => sum + t.stats.productsCount, 0);
     const totalInvoices = tenantsWithLiveStats.reduce((sum, t) => sum + t.stats.invoicesCount, 0);
     const totalUsers = tenantsWithLiveStats.reduce((sum, t) => sum + t.stats.usersCount, 0);
-    const totalLocations = tenantsWithLiveStats.reduce((sum, t) => sum + (t.stats.locationsCount || 1), 0);
+    const totalLocations = tenantsWithLiveStats.reduce((sum, t) => sum + (t.stats.locationsCount || 0), 0);
 
     const expiringSubscriptionsCount = tenantsWithLiveStats.filter(t => {
       const days = t.subscription?.daysRemaining ?? 365;

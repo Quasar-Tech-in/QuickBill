@@ -184,6 +184,103 @@ def build_tenant_response(t: dict) -> TenantResponse:
         notes=sub_doc.get("notes")
     )
 
+from app.core.database import get_database, db_manager
+
+async def get_live_tenant_stats(primary_db, tid_str: str, db_config: Optional[dict] = None) -> dict:
+    t_oid = ObjectId(tid_str) if ObjectId.is_valid(tid_str) else None
+    
+    # 1. Staff users from primary_db.users
+    u_queries = [{"tenantId": tid_str}, {"authorizedTenantIds": tid_str}]
+    if t_oid:
+        u_queries.append({"tenantId": t_oid})
+    users_count = await primary_db.users.count_documents({"$or": u_queries})
+    
+    # Get tenant DB
+    try:
+        tdb = await db_manager.get_tenant_database(tid_str)
+    except Exception:
+        tdb = primary_db
+
+    # 2. Store Locations
+    loc_queries = [{"businessId": tid_str}]
+    if t_oid:
+        loc_queries.append({"businessId": t_oid})
+    locations_count = await tdb.locations.count_documents({"$or": loc_queries})
+    
+    # 3. Items/Products
+    items_count = await tdb.items.count_documents({"$or": loc_queries})
+    
+    # 4. Invoices
+    invoices_count = await tdb.invoices.count_documents({"$or": loc_queries})
+    
+    # 5. Monthly GMV
+    gmv_pipeline = [
+        {"$match": {"$or": loc_queries}},
+        {"$group": {"_id": None, "totalGmv": {"$sum": "$grandTotal"}}}
+    ]
+    try:
+        gmv_res = await tdb.invoices.aggregate(gmv_pipeline).to_list(1)
+        monthly_gmv = float(gmv_res[0]["totalGmv"]) if gmv_res and gmv_res[0].get("totalGmv") else 0.0
+    except Exception:
+        monthly_gmv = 0.0
+
+    return {
+        "productsCount": items_count,
+        "invoicesCount": invoices_count,
+        "monthlyGmv": monthly_gmv,
+        "usersCount": users_count,
+        "locationsCount": locations_count
+    }
+
+def build_tenant_response(t: dict, stats_override: Optional[dict] = None) -> TenantResponse:
+    now = datetime.now(timezone.utc)
+    tid_str = str(t.get("_id", t.get("id", "")))
+    plan_str = t.get("plan", "PROFESSIONAL").upper()
+    
+    # Pull or build subscription
+    sub_doc = t.get("subscription", {})
+    sub_plan = sub_doc.get("planId") or sub_doc.get("plan") or plan_str
+    default_limits = PLAN_DEFAULTS.get(sub_plan, PLAN_DEFAULTS["PROFESSIONAL"])
+    
+    sub_end_date = sub_doc.get("endDate") or (now + timedelta(days=365)).isoformat()
+    sub_start_date = sub_doc.get("startDate") or t.get("createdAt", now.isoformat())
+    if isinstance(sub_start_date, datetime):
+        sub_start_date = sub_start_date.isoformat()
+    if isinstance(sub_end_date, datetime):
+        sub_end_date = sub_end_date.isoformat()
+
+    calculated_status, days_left = calculate_subscription_status(
+        sub_end_date,
+        base_status=t.get("status", "ACTIVE")
+    )
+
+    # Determine max_users and max_locations directly from DB sub_doc, only falling back if absent
+    max_u = sub_doc.get("maxUsers") if sub_doc.get("maxUsers") is not None else (
+        sub_doc.get("max_users") if sub_doc.get("max_users") is not None else default_limits["max_users"]
+    )
+    max_l = sub_doc.get("maxLocations") if sub_doc.get("maxLocations") is not None else (
+        sub_doc.get("max_locations") if sub_doc.get("max_locations") is not None else default_limits["max_locations"]
+    )
+
+    subscription_model = TenantSubscriptionModel(
+        plan_id=sub_plan,
+        plan_name=sub_doc.get("planName", f"{sub_plan.title()} Tier"),
+        status=calculated_status,
+        max_users=max_u,
+        max_locations=max_l,
+        billing_cycle=sub_doc.get("billingCycle", "ANNUAL"),
+        start_date=sub_start_date,
+        end_date=sub_end_date,
+        days_remaining=days_left,
+        grace_period_days=sub_doc.get("gracePeriodDays", 7),
+        price_per_cycle=sub_doc.get("pricePerCycle", 999.0),
+        currency="₹",
+        auto_renew=sub_doc.get("autoRenew", False),
+        features=sub_doc.get("features", default_limits["features"]),
+        renewal_history=sub_doc.get("renewalHistory", []),
+        notes=sub_doc.get("notes")
+    )
+
     db_cfg = t.get("databaseConfig", {})
     db_config_model = DatabaseConfig(
         isolation_mode=db_cfg.get("isolationMode", db_cfg.get("isolation_mode", "SHARED")),
@@ -191,13 +288,13 @@ def build_tenant_response(t: dict) -> TenantResponse:
         database_name=db_cfg.get("databaseName", db_cfg.get("database_name", "quickbill_db"))
     )
 
-    stats_doc = t.get("stats", {
+    stats_doc = stats_override or t.get("stats") or {
         "productsCount": 0,
         "invoicesCount": 0,
         "monthlyGmv": 0.0,
-        "usersCount": 1,
-        "locationsCount": 1
-    })
+        "usersCount": 0,
+        "locationsCount": 0
+    }
 
     return TenantResponse(
         id=tid_str,
@@ -219,11 +316,25 @@ def build_tenant_response(t: dict) -> TenantResponse:
 async def list_tenants(user: TokenPayload = Depends(get_current_user)):
     primary_db = get_database()
     
-    # Query all tenants strictly from DB - no in-code fallbacks
+    # Query all tenants strictly from DB
     cursor = primary_db.tenants.find({})
     db_tenants = await cursor.to_list(length=100)
     
-    return [build_tenant_response(t) for t in db_tenants]
+    results = []
+    for t in db_tenants:
+        tid_str = str(t.get("_id", t.get("id", "")))
+        try:
+            stats = await get_live_tenant_stats(primary_db, tid_str, t.get("databaseConfig"))
+        except Exception:
+            stats = {
+                "productsCount": 0,
+                "invoicesCount": 0,
+                "monthlyGmv": 0.0,
+                "usersCount": 0,
+                "locationsCount": 0
+            }
+        results.append(build_tenant_response(t, stats_override=stats))
+    return results
 
 @router.get("/current", response_model=TenantResponse)
 async def get_current_tenant(user: TokenPayload = Depends(get_current_user)):
@@ -234,7 +345,9 @@ async def get_current_tenant(user: TokenPayload = Depends(get_current_user)):
         first_t = await primary_db.tenants.find_one({})
         if not first_t:
             raise HTTPException(status_code=404, detail="No tenants configured.")
-        return build_tenant_response(first_t)
+        tid_str = str(first_t.get("_id", first_t.get("id", "")))
+        stats = await get_live_tenant_stats(primary_db, tid_str, first_t.get("databaseConfig"))
+        return build_tenant_response(first_t, stats_override=stats)
 
     t_oid = ObjectId(tenant_id) if ObjectId.is_valid(tenant_id) else None
     q = {"_id": t_oid} if t_oid else {"slug": tenant_id}
@@ -242,7 +355,9 @@ async def get_current_tenant(user: TokenPayload = Depends(get_current_user)):
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant store profile not found.")
 
-    return build_tenant_response(tenant)
+    tid_str = str(tenant.get("_id", tenant.get("id", "")))
+    stats = await get_live_tenant_stats(primary_db, tid_str, tenant.get("databaseConfig"))
+    return build_tenant_response(tenant, stats_override=stats)
 
 @router.get("/{tenant_id}", response_model=TenantResponse)
 async def get_tenant_by_id(tenant_id: str, user: TokenPayload = Depends(get_current_user)):
@@ -256,7 +371,10 @@ async def get_tenant_by_id(tenant_id: str, user: TokenPayload = Depends(get_curr
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found.")
 
-    return build_tenant_response(tenant)
+    tid_str = str(tenant.get("_id", tenant.get("id", "")))
+    stats = await get_live_tenant_stats(primary_db, tid_str, tenant.get("databaseConfig"))
+    return build_tenant_response(tenant, stats_override=stats)
+
 
 @router.post("/test-db-connection")
 async def test_db_connection(req: TestConnectionRequest):
