@@ -416,7 +416,8 @@ class StoreService {
 
   async checkHealth(): Promise<boolean> {
     try {
-      const res = await axios.get('http://localhost:8000/health/ready', { timeout: 1500 });
+      // Check health against configured API base URL (e.g. /api/v1/health)
+      const res = await apiClient.get('/health', { timeout: 5000 });
       this.isOnline = res.status === 200;
       return this.isOnline;
     } catch {
