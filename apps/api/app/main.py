@@ -40,6 +40,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
+from fastapi.responses import JSONResponse
+from fastapi import Request
+
+@app.exception_handler(ServerSelectionTimeoutError)
+@app.exception_handler(PyMongoError)
+async def mongo_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": f"Database unreachable: {str(exc)}. Please ensure MongoDB Atlas Network Access has 0.0.0.0/0 enabled and MONGODB_URI is correctly configured in Vercel environment variables."
+        }
+    )
+
 # Static media mount
 try:
     os.makedirs("uploads", exist_ok=True)
