@@ -84,11 +84,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
   }, [selectedLocationId]);
 
   const handleNav = (tab: string) => {
-    if (onNavigate) {
-      onNavigate(tab);
-    }
     if (tab === 'transactions') {
       navigate('/invoices');
+    } else if (tab.startsWith('/')) {
+      navigate(tab);
     } else {
       navigate(`/${tab}`);
     }

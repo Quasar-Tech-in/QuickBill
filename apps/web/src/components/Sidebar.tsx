@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   ReceiptText, 
@@ -35,8 +35,7 @@ interface NavItem {
   isLockedWhenStoreSuspended?: boolean;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogout }) => {
-  const navigate = useNavigate();
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabChange, onLogout }) => {
   const location = useLocation();
 
   const activeTenant = store.getActiveTenant();
@@ -77,28 +76,28 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
   const tenantNavItems: NavItem[] = [
     { 
       id: 'dashboard', 
-      path: '/dashboard',
+      path: '/dashboard', 
       label: 'Dashboard', 
       icon: LayoutDashboard, 
       roles: ['TENANT_ADMIN', 'MANAGER'] 
     },
     { 
       id: 'reports', 
-      path: '/reports',
+      path: '/reports', 
       label: 'Reports & Analytics', 
       icon: BarChart3, 
       roles: ['TENANT_ADMIN', 'MANAGER'] 
     },
     { 
       id: 'transactions', 
-      path: '/invoices',
+      path: '/invoices', 
       label: userRole === 'CASHIER' ? 'Counter Receipts' : 'Invoices & Bills', 
       icon: FileText, 
       roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'] 
     },
     { 
       id: 'pos', 
-      path: '/pos',
+      path: '/pos', 
       label: 'POS Billing', 
       icon: ReceiptText, 
       badge: 'Fast', 
@@ -107,7 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
     },
     { 
       id: 'inventory', 
-      path: '/inventory',
+      path: '/inventory', 
       label: 'Inventory & Items', 
       icon: Package, 
       roles: ['TENANT_ADMIN', 'MANAGER'],
@@ -115,7 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
     },
     { 
       id: 'purchase-orders', 
-      path: '/purchase-orders',
+      path: '/purchase-orders', 
       label: 'Purchase Orders', 
       icon: ShoppingBag, 
       roles: ['TENANT_ADMIN', 'MANAGER'],
@@ -123,7 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
     },
     { 
       id: 'shipping', 
-      path: '/shipping',
+      path: '/shipping', 
       label: 'Shipping & Dispatch', 
       icon: Truck, 
       roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
@@ -131,7 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
     },
     { 
       id: 'parties', 
-      path: '/parties',
+      path: '/parties', 
       label: userRole === 'CASHIER' ? 'Customer Directory' : 'Parties & CRM', 
       icon: Users, 
       roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
@@ -139,7 +138,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
     },
     { 
       id: 'ledger', 
-      path: '/ledger',
+      path: '/ledger', 
       label: 'Ledger & Expenses', 
       icon: BookOpen, 
       roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
@@ -147,27 +146,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
     },
     { 
       id: 'settings', 
-      path: '/settings',
+      path: '/settings', 
       label: 'Settings & License', 
       icon: Settings, 
-      roles: ['TENANT_ADMIN']
+      roles: ['TENANT_ADMIN'] 
     },
   ];
 
   const navItems: NavItem[] = isSuperAdmin 
     ? superAdminNavItems 
     : tenantNavItems.filter(item => item.roles?.includes(userRole));
-
-  const handleItemClick = (item: NavItem) => {
-    if (isStoreLocked && item.isLockedWhenStoreSuspended) {
-      navigate('/dashboard');
-      return;
-    }
-    if (onTabChange) {
-      onTabChange(item.id);
-    }
-    navigate(item.path);
-  };
 
   return (
     <aside className="sidebar">
@@ -186,28 +174,34 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
         {navItems.map((item) => {
           const Icon = item.icon;
           const isItemLocked = isStoreLocked && item.isLockedWhenStoreSuspended;
-          const isActive = 
+          const isItemActive = 
             location.pathname === item.path || 
-            (item.id === 'transactions' && location.pathname === '/transactions') ||
-            (activeTab && (activeTab === item.id || (activeTab === 'invoices' && item.id === 'transactions')));
+            (item.id === 'transactions' && location.pathname === '/transactions');
 
           return (
-            <button
+            <NavLink
               key={item.id}
-              onClick={() => handleItemClick(item)}
-              className={`nav-link ${isActive ? 'active' : ''}`}
+              to={isItemLocked ? '#' : item.path}
+              onClick={(e) => {
+                if (isItemLocked) {
+                  e.preventDefault();
+                  return;
+                }
+                if (onTabChange) {
+                  onTabChange(item.id);
+                }
+              }}
+              className={({ isActive }) => `nav-link ${isActive || isItemActive ? 'active' : ''}`}
               title={isItemLocked ? 'Feature locked: Store is currently suspended / expired' : undefined}
               style={{ 
                 width: '100%', 
-                border: 'none', 
-                background: isActive ? undefined : 'transparent', 
-                textAlign: 'left',
+                textDecoration: 'none',
                 opacity: isItemLocked ? 0.55 : 1,
                 cursor: isItemLocked ? 'not-allowed' : 'pointer'
               }}
             >
               <Icon size={18} color={item.isSuper ? '#a5b4fc' : undefined} />
-              <span style={{ flex: 1, color: item.isSuper && !isActive ? '#c7d2fe' : undefined, fontWeight: item.isSuper ? 600 : undefined }}>
+              <span style={{ flex: 1, color: item.isSuper && !isItemActive ? '#c7d2fe' : undefined, fontWeight: item.isSuper ? 600 : undefined }}>
                 {item.label}
               </span>
               {isItemLocked ? (
@@ -242,7 +236,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onLogo
                   </span>
                 )
               )}
-            </button>
+            </NavLink>
           );
         })}
       </nav>

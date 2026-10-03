@@ -134,13 +134,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({
       {/* Sidebar Navigation */}
       <Sidebar 
         activeTab={location.pathname.replace('/', '') || 'dashboard'} 
-        onTabChange={(tab) => {
-          if (tab === 'transactions') {
-            navigate('/invoices');
-          } else {
-            navigate(`/${tab}`);
-          }
-        }} 
         onLogout={onLogout}
       />
 
@@ -226,6 +219,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({
           onNavigate={(tab) => {
             if (tab === 'transactions') {
               navigate('/invoices');
+            } else if (tab.startsWith('/')) {
+              navigate(tab);
             } else {
               navigate(`/${tab}`);
             }
@@ -234,7 +229,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
           onLogout={onLogout}
         />
 
-        <main className="main-content-scroll">
+        <main className="main-content-scroll" key={location.pathname}>
           <Outlet />
         </main>
       </div>
