@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   ShieldCheck, 
   Building, 
@@ -48,9 +48,28 @@ interface SuperAdminViewProps {
   onTenantSwitched: (tenant: Tenant) => void;
 }
 
+type SuperAdminTab = 'tenants' | 'subscriptions' | 'profile' | 'simulator' | 'clusters';
+const VALID_SUPERADMIN_TABS: SuperAdminTab[] = ['tenants', 'subscriptions', 'profile', 'simulator', 'clusters'];
+
 export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched }) => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'tenants' | 'subscriptions' | 'profile' | 'simulator' | 'clusters'>('tenants');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get('tab') as SuperAdminTab | null;
+  const initialTab: SuperAdminTab = (tabFromUrl && VALID_SUPERADMIN_TABS.includes(tabFromUrl)) ? tabFromUrl : 'tenants';
+
+  const [activeTab, setActiveTab] = useState<SuperAdminTab>(initialTab);
+
+  useEffect(() => {
+    const qTab = searchParams.get('tab') as SuperAdminTab | null;
+    if (qTab && VALID_SUPERADMIN_TABS.includes(qTab) && qTab !== activeTab) {
+      setActiveTab(qTab);
+    }
+  }, [searchParams]);
+
+  const handleTabChange = (newTab: SuperAdminTab) => {
+    setActiveTab(newTab);
+    setSearchParams({ tab: newTab });
+  };
   const [tenants, setTenants] = useState<Tenant[]>(store.getTenants());
   const [activeTenant, setActiveTenant] = useState<Tenant>(store.getActiveTenant());
   const [searchQuery, setSearchQuery] = useState('');
@@ -634,7 +653,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
         <button
           type="button"
           className={`btn btn-sm ${activeTab === 'tenants' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setActiveTab('tenants')}
+          onClick={() => handleTabChange('tenants')}
           style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <Building size={14} />
@@ -644,7 +663,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
         <button
           type="button"
           className={`btn btn-sm ${activeTab === 'subscriptions' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setActiveTab('subscriptions')}
+          onClick={() => handleTabChange('subscriptions')}
           style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <CreditCard size={14} />
@@ -666,7 +685,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
         <button
           type="button"
           className={`btn btn-sm ${activeTab === 'simulator' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setActiveTab('simulator')}
+          onClick={() => handleTabChange('simulator')}
           style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <Eye size={14} />
@@ -676,7 +695,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
         <button
           type="button"
           className={`btn btn-sm ${activeTab === 'profile' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setActiveTab('profile')}
+          onClick={() => handleTabChange('profile')}
           style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <ShieldCheck size={14} />
@@ -686,7 +705,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
         <button
           type="button"
           className={`btn btn-sm ${activeTab === 'clusters' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setActiveTab('clusters')}
+          onClick={() => handleTabChange('clusters')}
           style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <Database size={14} />

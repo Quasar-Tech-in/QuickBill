@@ -53,6 +53,13 @@ export const WorkspacePreviewView: React.FC<WorkspacePreviewViewProps> = ({ onTe
   const [previewTab, setPreviewTab] = useState<'dashboard' | 'pos' | 'inventory' | 'parties' | 'features'>('dashboard');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  useEffect(() => {
+    const qTenantId = searchParams.get('tenantId');
+    if (qTenantId && qTenantId !== selectedTenantId) {
+      setSelectedTenantId(qTenantId);
+    }
+  }, [searchParams]);
+
   // Cart simulation for POS preview
   const [testCart, setTestCart] = useState<Array<{ name: string; price: number; qty: number }>>([
     { name: 'Basmati Rice 5kg', price: 420, qty: 2 },

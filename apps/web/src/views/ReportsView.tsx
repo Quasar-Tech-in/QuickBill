@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { 
   BarChart3, 
   Download, 
@@ -20,8 +21,27 @@ import {
 import { store } from '../services/store';
 import { Invoice, Item } from '../types';
 
+type ReportType = 'PNL' | 'STOCK_VALUATION' | 'DAY_BOOK';
+const VALID_REPORT_TYPES: ReportType[] = ['PNL', 'STOCK_VALUATION', 'DAY_BOOK'];
+
 export const ReportsView: React.FC = () => {
-  const [reportType, setReportType] = useState<'PNL' | 'STOCK_VALUATION' | 'DAY_BOOK'>('PNL');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const typeParam = searchParams.get('type') as ReportType | null;
+  const initialType: ReportType = (typeParam && VALID_REPORT_TYPES.includes(typeParam)) ? typeParam : 'PNL';
+
+  const [reportType, setReportType] = useState<ReportType>(initialType);
+
+  useEffect(() => {
+    const qType = searchParams.get('type') as ReportType | null;
+    if (qType && VALID_REPORT_TYPES.includes(qType) && qType !== reportType) {
+      setReportType(qType);
+    }
+  }, [searchParams]);
+
+  const handleReportTypeChange = (newType: ReportType) => {
+    setReportType(newType);
+    setSearchParams({ type: newType });
+  };
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
   const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices(selectedLocationId));
   const [items, setItems] = useState<Item[]>(store.getItems(selectedLocationId, true));
@@ -207,7 +227,7 @@ export const ReportsView: React.FC = () => {
         ].map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setReportType(tab.id as any)}
+            onClick={() => handleReportTypeChange(tab.id as any)}
             style={{
               padding: '8px 16px',
               borderRadius: 'var(--radius-md)',

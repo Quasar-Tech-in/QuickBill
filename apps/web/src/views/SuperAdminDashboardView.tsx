@@ -306,7 +306,7 @@ export const SuperAdminDashboardView: React.FC<SuperAdminDashboardViewProps> = (
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => navigate('/superadmin')}
+            onClick={() => navigate('/superadmin?tab=clusters')}
             style={{ fontSize: '0.78rem', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
           >
             <Database size={13} />
@@ -328,7 +328,7 @@ export const SuperAdminDashboardView: React.FC<SuperAdminDashboardViewProps> = (
           <button
             type="button"
             className="btn btn-sm btn-primary"
-            onClick={() => navigate('/superadmin')}
+            onClick={() => navigate('/superadmin?tab=tenants')}
             style={{ fontSize: '0.78rem', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <span>Manage All Stores</span>

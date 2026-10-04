@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { 
   Users, 
   MapPin, 
@@ -49,21 +49,31 @@ interface ConfirmModalState {
   targetUser?: User;
 }
 
+type SettingsTab = 'staff' | 'locations' | 'profile' | 'subscription' | 'health';
+const VALID_SETTINGS_TABS: SettingsTab[] = ['staff', 'locations', 'profile', 'subscription', 'health'];
+
 export const SettingsView: React.FC = () => {
   const location = useLocation();
-  const searchParams = new URLSearchParams(location.search);
+  const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = (location.state as any)?.tab || searchParams.get('tab');
   const isInitiallyLocked = store.isStoreLocked();
-  const defaultTab = (requestedTab as any) || (isInitiallyLocked ? 'subscription' : 'staff');
+  const defaultTab: SettingsTab = (requestedTab && VALID_SETTINGS_TABS.includes(requestedTab as SettingsTab))
+    ? (requestedTab as SettingsTab)
+    : (isInitiallyLocked ? 'subscription' : 'staff');
 
-  const [activeTab, setActiveTab] = useState<'staff' | 'locations' | 'profile' | 'subscription' | 'health'>(defaultTab);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(defaultTab);
 
   useEffect(() => {
-    const qTab = (new URLSearchParams(location.search)).get('tab') || (location.state as any)?.tab;
-    if (qTab && ['staff', 'locations', 'profile', 'subscription', 'health'].includes(qTab)) {
-      setActiveTab(qTab as any);
+    const qTab = searchParams.get('tab') as SettingsTab | null || (location.state as any)?.tab;
+    if (qTab && VALID_SETTINGS_TABS.includes(qTab) && qTab !== activeTab) {
+      setActiveTab(qTab);
     }
-  }, [location.search, location.state]);
+  }, [searchParams, location.state]);
+
+  const handleTabChange = (newTab: SettingsTab) => {
+    setActiveTab(newTab);
+    setSearchParams({ tab: newTab });
+  };
   const [users, setUsers] = useState<User[]>([]);
   const [locations, setLocations] = useState<StoreLocation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -545,7 +555,7 @@ export const SettingsView: React.FC = () => {
           <button
             type="button"
             className={`btn btn-sm ${activeTab === 'staff' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('staff')}
+            onClick={() => handleTabChange('staff')}
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <Users size={14} />
@@ -554,7 +564,7 @@ export const SettingsView: React.FC = () => {
           <button
             type="button"
             className={`btn btn-sm ${activeTab === 'locations' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('locations')}
+            onClick={() => handleTabChange('locations')}
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <MapPin size={14} />
@@ -563,7 +573,7 @@ export const SettingsView: React.FC = () => {
           <button
             type="button"
             className={`btn btn-sm ${activeTab === 'profile' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('profile')}
+            onClick={() => handleTabChange('profile')}
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <Building size={14} />
@@ -572,7 +582,7 @@ export const SettingsView: React.FC = () => {
           <button
             type="button"
             className={`btn btn-sm ${activeTab === 'subscription' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('subscription')}
+            onClick={() => handleTabChange('subscription')}
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <CreditCard size={14} />
@@ -581,7 +591,7 @@ export const SettingsView: React.FC = () => {
           <button
             type="button"
             className={`btn btn-sm ${activeTab === 'health' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('health')}
+            onClick={() => handleTabChange('health')}
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <Activity size={14} />
