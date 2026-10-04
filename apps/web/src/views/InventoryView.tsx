@@ -961,8 +961,23 @@ export const InventoryView: React.FC = () => {
                   ? `${branchInv.discountValue}% OFF`
                   : `₹${branchInv?.discountValue} OFF`;
 
+                const isConsolidated = !selectedLocationId || selectedLocationId === 'ALL';
+                const effectiveStock = isConsolidated
+                  ? (raw.locations && raw.locations.length > 0
+                      ? raw.locations.reduce((sum, l) => sum + (Number(l.currentStock) || 0), 0)
+                      : Number(item.currentStock || 0))
+                  : (branchInv && branchInv.currentStock !== undefined
+                      ? Number(branchInv.currentStock || 0)
+                      : Number(item.currentStock || 0));
+
+                const effectiveMinStock = isConsolidated
+                  ? Number(item.minStockAlert ?? 5)
+                  : (branchInv && branchInv.minStockAlert !== undefined
+                      ? Number(branchInv.minStockAlert)
+                      : Number(item.minStockAlert ?? 5));
+
                 const stockStatus = 
-                  item.currentStock === 0 ? 'OUT_OF_STOCK' : (item.currentStock <= item.minStockAlert ? 'LOW_STOCK' : 'IN_STOCK');
+                  effectiveStock === 0 ? 'OUT_OF_STOCK' : (effectiveStock <= effectiveMinStock ? 'LOW_STOCK' : 'IN_STOCK');
 
                 return (
                   <tr key={item.id} style={{ opacity: isListed ? 1 : 0.6 }}>
@@ -1039,10 +1054,10 @@ export const InventoryView: React.FC = () => {
                     <td style={{ fontSize: '0.85rem', padding: '10px 12px' }}>{Number(item.taxRate || 0)}%</td>
                     <td style={{ padding: '10px 12px' }}>
                       <span style={{ fontWeight: 700, fontSize: '0.85rem', color: stockStatus === 'OUT_OF_STOCK' ? 'var(--danger-600)' : 'var(--neutral-900)' }}>
-                        {Number(item.currentStock || 0)} {item.unit || 'pcs'}
+                        {effectiveStock} {item.unit || 'pcs'}
                       </span>
                       <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)', marginLeft: 3 }}>
-                        (Min: {Number(item.minStockAlert ?? 5)})
+                        (Min: {effectiveMinStock})
                       </span>
                     </td>
                     <td style={{ padding: '10px 12px' }}>
@@ -1879,7 +1894,13 @@ export const InventoryView: React.FC = () => {
                     {selectedItemForAdjust.name}
                   </p>
                   <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>
-                    Code: {selectedItemForAdjust.publicItemId} | Current Stock: {selectedItemForAdjust.currentStock} {selectedItemForAdjust.unit}
+                    Code: {selectedItemForAdjust.publicItemId} | Branch Available Stock: {
+                      (() => {
+                        const raw = rawItems.find(r => r.id === selectedItemForAdjust.id) || selectedItemForAdjust;
+                        const bInv = raw.locations?.find(l => l.locationId === adjustLocationId);
+                        return bInv && bInv.currentStock !== undefined ? Number(bInv.currentStock) : Number(selectedItemForAdjust.currentStock || 0);
+                      })()
+                    } {selectedItemForAdjust.unit}
                   </p>
                 </div>
 

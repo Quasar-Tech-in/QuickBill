@@ -1836,32 +1836,66 @@ class StoreService {
 
       const res = await apiClient.get('/items', { params: qParams });
       if (res.data && Array.isArray(res.data.data)) {
-        const liveItems: Item[] = res.data.data.map((d: any) => ({
-          id: d._id || d.id || d.publicItemId,
-          businessId: d.businessId || this.currentTenant?.id || '',
-          publicItemId: d.publicItemId || d.sku || 'ITM-TEMP',
-          name: d.name,
-          sku: d.sku,
-          barcode: d.barcode,
-          category: d.category || 'General',
-          taxRate: Number(d.taxRate || 0),
-          unit: d.unit || 'pcs',
-          description: d.description,
-          mrp: d.mrp ? Number(d.mrp) : Number(d.salePrice || 0),
-          salePrice: Number(d.salePrice || 0),
-          purchasePrice: Number(d.purchasePrice || 0),
-          averageCostPrice: d.averageCostPrice !== undefined ? Number(d.averageCostPrice) : Number(d.purchasePrice || 0),
-          currentStock: Number(d.currentStock || 0),
-          minStockAlert: Number(d.minStockAlert || 5),
-          hasDiscount: d.hasDiscount,
-          discountType: d.discountType,
-          discountValue: d.discountValue ? Number(d.discountValue) : undefined,
-          batches: Array.isArray(d.batches) ? d.batches : [],
-          locations: d.locations,
-          images: d.images,
-          imageUrl: d.imageUrl,
-          allowParts: !!d.allowParts,
-        }));
+        const liveItems: Item[] = res.data.data.map((d: any) => {
+          const locInv = (locId && locId !== 'ALL' && Array.isArray(d.locations))
+            ? d.locations.find((l: any) => l.locationId === locId)
+            : undefined;
+
+          const mrp = locInv?.mrp !== undefined ? Number(locInv.mrp) : (d.mrp !== undefined ? Number(d.mrp) : Number(d.salePrice || 0));
+          let salePrice = locInv?.salePrice !== undefined ? Number(locInv.salePrice) : Number(d.salePrice || 0);
+          const hasDiscount = locInv ? (locInv.hasDiscount || false) : d.hasDiscount;
+          const discountType = locInv ? locInv.discountType : d.discountType;
+          const discountValue = locInv?.discountValue !== undefined ? Number(locInv.discountValue) : (d.discountValue !== undefined ? Number(d.discountValue) : undefined);
+
+          if (hasDiscount && discountValue && discountValue > 0) {
+            if (discountType === 'PERCENT') {
+              salePrice = Number((mrp - (mrp * discountValue / 100)).toFixed(2));
+            } else {
+              salePrice = Math.max(0, Number((mrp - discountValue).toFixed(2)));
+            }
+          }
+
+          const currentStock = (locId && locId !== 'ALL')
+            ? (locInv && locInv.currentStock !== undefined ? Number(locInv.currentStock) : Number(d.currentStock || 0))
+            : (Array.isArray(d.locations) && d.locations.length > 0
+                ? d.locations.reduce((sum: number, l: any) => sum + (Number(l.currentStock) || 0), 0)
+                : Number(d.currentStock || 0));
+
+          const minStockAlert = (locId && locId !== 'ALL')
+            ? (locInv && locInv.minStockAlert !== undefined ? Number(locInv.minStockAlert) : Number(d.minStockAlert || 5))
+            : Number(d.minStockAlert || 5);
+
+          const purchasePrice = locInv && locInv.purchasePrice !== undefined
+            ? Number(locInv.purchasePrice)
+            : Number(d.purchasePrice || 0);
+
+          return {
+            id: d._id || d.id || d.publicItemId,
+            businessId: d.businessId || this.currentTenant?.id || '',
+            publicItemId: d.publicItemId || d.sku || 'ITM-TEMP',
+            name: d.name,
+            sku: d.sku,
+            barcode: d.barcode,
+            category: d.category || 'General',
+            taxRate: Number(d.taxRate || 0),
+            unit: d.unit || 'pcs',
+            description: d.description,
+            mrp,
+            salePrice,
+            purchasePrice,
+            averageCostPrice: d.averageCostPrice !== undefined ? Number(d.averageCostPrice) : purchasePrice,
+            currentStock,
+            minStockAlert,
+            hasDiscount,
+            discountType,
+            discountValue,
+            batches: Array.isArray(d.batches) ? d.batches : [],
+            locations: d.locations,
+            images: d.images,
+            imageUrl: d.imageUrl,
+            allowParts: !!d.allowParts,
+          };
+        });
 
         return {
           data: liveItems,
