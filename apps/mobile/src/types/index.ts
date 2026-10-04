@@ -7,6 +7,7 @@ export interface StoreLocation {
   code: string;
   address?: string;
   phone?: string;
+  gstin?: string;
   isDefault?: boolean;
   isActive: boolean;
   createdAt?: string;
@@ -140,6 +141,7 @@ export interface Invoice {
   businessId?: string;
   locationId?: string;
   locationName?: string;
+  locationGstin?: string;
   invoiceNumber: string;
   date: string;
   partyId?: string;

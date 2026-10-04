@@ -21,17 +21,20 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   
   const activeTenant = store.getActiveTenant();
   const activeLocation = store.getActiveLocation();
+  const branchLocation = store.getAllLocations().find(l => l.id === invoice.locationId || l.name === invoice.locationName);
 
   const handlePrint = () => {
     window.print();
   };
 
-
-  const storeName = activeTenant?.name || 'QUICKBILL ENTERPRISE';
+  const storeName = activeTenant?.name || 'STORE COUNTER';
+  const storeLogo = activeTenant?.logoUrl;
+  const storeTagline = activeTenant?.tagline;
+  const receiptFooter = activeTenant?.receiptFooterNote || 'Please keep this receipt for future reference';
   const branchName = invoice.locationName || activeLocation?.name || 'Main Branch';
-  const branchAddress = invoice.locationAddress || activeLocation?.address || 'Plot 42, Tech Park, New Delhi, 110001';
-  const branchPhone = invoice.locationPhone || activeLocation?.phone || '+91 98765 43210';
-  const gstin = activeTenant?.gstin || '07AABCB1234F1Z5';
+  const branchAddress = invoice.locationAddress || branchLocation?.address || activeLocation?.address || '';
+  const branchPhone = invoice.locationPhone || branchLocation?.phone || activeLocation?.phone || '';
+  const gstin = invoice.locationGstin || branchLocation?.gstin || (invoice.locationId === activeLocation?.id ? activeLocation?.gstin : undefined) || activeTenant?.gstin || '';
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
@@ -202,15 +205,32 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
             <div style={{ maxWidth: 330, margin: '0 auto', textAlign: 'center' }}>
               {/* Company & Location Header Directly on Receipt */}
               <div style={{ marginBottom: 8 }}>
+                {storeLogo && (
+                  <div style={{ marginBottom: 4 }}>
+                    <img 
+                      src={storeLogo} 
+                      alt="Store Logo" 
+                      style={{ maxHeight: 42, maxWidth: 140, objectFit: 'contain' }} 
+                      onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                    />
+                  </div>
+                )}
                 <h2 style={{ fontSize: '1.15rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0, color: '#000000' }}>
                   {storeName}
                 </h2>
+                {storeTagline && (
+                  <p style={{ margin: '1px 0 0 0', fontSize: '0.7rem', color: '#444444', fontStyle: 'italic' }}>
+                    {storeTagline}
+                  </p>
+                )}
                 <p style={{ margin: '2px 0 0 0', fontSize: '0.78rem', fontWeight: 600 }}>
                   {branchName}
                 </p>
-                <p style={{ margin: '1px 0 0 0', fontSize: '0.72rem', color: '#333333' }}>
-                  {branchAddress}
-                </p>
+                {branchAddress && (
+                  <p style={{ margin: '1px 0 0 0', fontSize: '0.72rem', color: '#333333' }}>
+                    {branchAddress}
+                  </p>
+                )}
                 {branchPhone && (
                   <p style={{ margin: '1px 0 0 0', fontSize: '0.72rem', color: '#333333' }}>
                     Tel: {branchPhone}
@@ -346,8 +366,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               {/* Footer Notice */}
               <div style={{ borderTop: '1px dashed #000000', marginTop: 10, paddingTop: 6, textAlign: 'center', fontSize: '0.68rem' }}>
                 <p style={{ margin: 0, fontWeight: 800 }}>*** THANK YOU FOR SHOPPING WITH US! ***</p>
-                <p style={{ margin: '2px 0 0 0', color: '#555555' }}>Please keep this receipt for future reference</p>
-                <p style={{ margin: '1px 0 0 0', fontSize: '0.62rem', color: '#777777' }}>Powered by QuickBill POS</p>
+                <p style={{ margin: '2px 0 0 0', color: '#555555' }}>{receiptFooter}</p>
               </div>
             </div>
           ) : (
@@ -358,14 +377,25 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               {/* A4 Header */}
               <div style={{ borderBottom: '2px solid var(--neutral-900)', paddingBottom: 14, marginBottom: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--neutral-900)', margin: 0 }}>
-                      {storeName}
-                    </h1>
-                    <p style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--neutral-700)', marginTop: 2 }}>{branchName}</p>
-                    <p style={{ fontSize: '0.78rem', color: 'var(--neutral-600)', margin: '1px 0' }}>{branchAddress}</p>
-                    {branchPhone && <p style={{ fontSize: '0.78rem', color: 'var(--neutral-600)', margin: '1px 0' }}>Tel: {branchPhone}</p>}
-                    {gstin && <p style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--neutral-800)', marginTop: 2 }}>GSTIN: {gstin}</p>}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    {storeLogo && (
+                      <img 
+                        src={storeLogo} 
+                        alt="Store Logo" 
+                        style={{ maxHeight: 54, maxWidth: 120, objectFit: 'contain' }} 
+                        onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                      />
+                    )}
+                    <div>
+                      <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--neutral-900)', margin: 0 }}>
+                        {storeName}
+                      </h1>
+                      {storeTagline && <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', margin: '1px 0' }}>{storeTagline}</p>}
+                      <p style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--neutral-700)', marginTop: 2 }}>{branchName}</p>
+                      {branchAddress && <p style={{ fontSize: '0.78rem', color: 'var(--neutral-600)', margin: '1px 0' }}>{branchAddress}</p>}
+                      {branchPhone && <p style={{ fontSize: '0.78rem', color: 'var(--neutral-600)', margin: '1px 0' }}>Tel: {branchPhone}</p>}
+                      {gstin && <p style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--neutral-800)', marginTop: 2 }}>GSTIN: {gstin}</p>}
+                    </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ display: 'inline-block', backgroundColor: 'var(--primary-50)', color: 'var(--primary-700)', padding: '4px 10px', borderRadius: 4, fontWeight: 700, fontSize: '0.85rem' }}>
@@ -472,7 +502,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   Thank you for your business!
                 </p>
                 <p style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-                  For questions regarding warranty or returns, please retain this invoice copy.
+                  {receiptFooter}
                 </p>
               </div>
             </div>

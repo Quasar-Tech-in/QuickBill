@@ -70,10 +70,20 @@ export const Header: React.FC<HeaderProps> = ({
   const tenantMenuRef = useRef<HTMLDivElement>(null);
   const locationMenuRef = useRef<HTMLDivElement>(null);
 
+  const [, setTick] = useState(0);
+
   useEffect(() => {
-    setLocations(store.getLocations());
-    setActiveLocationState(store.getActiveLocation());
-  }, [currentUser, activeTenant]);
+    const syncHeaderState = () => {
+      setLocations(store.getLocations());
+      setActiveLocationState(store.getActiveLocation());
+      setTick(t => t + 1);
+    };
+    syncHeaderState();
+    const unsubscribe = store.subscribe(syncHeaderState);
+    return () => {
+      unsubscribe();
+    };
+  }, [currentUser]);
 
   // Close menus on outside click
   useEffect(() => {
@@ -172,8 +182,8 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="top-header">
       <div className="header-left">
-        {/* Store Context Display: Clean Governance Hub Badge for SuperAdmin, Static Isolated Badge for Tenants */}
-        {isSuperAdmin ? (
+        {/* Store Context Display: Governance Hub Badge for SuperAdmin */}
+        {isSuperAdmin && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div 
               style={{ 
@@ -221,23 +231,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Workspace Preview</span>
             </button>
           </div>
-        ) : (
-          /* Static Tenant Badge (Isolated Customer Store View - No Cross-tenant Leaks) */
-          <div className="header-tenant-badge-static" title={`Logged in to isolated store: ${activeTenant.name}`}>
-            <div className="tenant-static-icon">
-              <Building size={14} />
-            </div>
-            <div className="tenant-static-text">
-              <span className="tenant-static-label">Store</span>
-              <span className="tenant-static-name">{activeTenant.name}</span>
-            </div>
-            <span className="tenant-slug-badge">{activeTenant.slug}</span>
-          </div>
-        )}
-
-        {/* Visual Separator */}
-        {!isSuperAdmin && (
-          <div style={{ width: 1, height: 26, backgroundColor: 'var(--neutral-200)', margin: '0 4px' }} />
         )}
 
         {/* Location / Branch Context Badge & Dropdown */}

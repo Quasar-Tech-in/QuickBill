@@ -19,7 +19,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { store } from '../services/store';
-import { Invoice, Item } from '../types';
+import { Invoice, Item, Expense, StoreLocation } from '../types';
 
 type ReportType = 'PNL' | 'STOCK_VALUATION' | 'DAY_BOOK';
 const VALID_REPORT_TYPES: ReportType[] = ['PNL', 'STOCK_VALUATION', 'DAY_BOOK'];
@@ -45,22 +45,26 @@ export const ReportsView: React.FC = () => {
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
   const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices(selectedLocationId));
   const [items, setItems] = useState<Item[]>(store.getItems(selectedLocationId, true));
+  const [expenses, setExpenses] = useState<Expense[]>(() => store.getExpenses(selectedLocationId));
+  const [locations, setLocations] = useState<StoreLocation[]>(() => store.getAllLocations());
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  const locations = store.getAllLocations();
-
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [invData, itemData] = await Promise.all([
+      const [invData, itemData, expData, locs] = await Promise.all([
         store.fetchInvoices(selectedLocationId),
-        store.fetchItems(selectedLocationId)
+        store.fetchItems(selectedLocationId),
+        store.fetchExpenses(selectedLocationId),
+        store.fetchLocations()
       ]);
       setInvoices(invData);
       setItems(itemData);
+      setExpenses(expData);
+      setLocations(locs);
       
       // Extract unique categories
       const cats = Array.from(new Set(itemData.map(i => i.category).filter(Boolean)));
@@ -76,6 +80,8 @@ export const ReportsView: React.FC = () => {
     // Initial sync from local store
     setInvoices(store.getInvoices(selectedLocationId));
     setItems(store.getItems(selectedLocationId, true));
+    setExpenses(store.getExpenses(selectedLocationId));
+    setLocations(store.getAllLocations());
     
     // Fetch live from backend
     loadData();
@@ -84,12 +90,12 @@ export const ReportsView: React.FC = () => {
   // Financial Metrics
   const totalRevenue = invoices.reduce((s, i) => s + (i.grandTotal || 0), 0);
   const totalTaxCollected = invoices.reduce((s, i) => s + (i.taxTotal || 0), 0);
-  const totalNetSales = totalRevenue - totalTaxCollected;
+  const totalNetSales = Math.max(0, totalRevenue - totalTaxCollected);
   
   // Cost of Goods Sold (COGS) Estimation
-  const estimatedCOGS = totalNetSales * 0.72; // ~72% average cost
+  const estimatedCOGS = totalNetSales > 0 ? (totalNetSales * 0.70) : 0;
   const grossProfit = totalNetSales - estimatedCOGS;
-  const operatingExpenses = selectedLocationId === 'ALL' ? 3600.0 : 1200.0;
+  const operatingExpenses = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const netProfit = grossProfit - operatingExpenses;
 
   // Filtered Stock Items for Valuation Tab

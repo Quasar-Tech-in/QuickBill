@@ -45,6 +45,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onLogout }) => {
   const [newLocName, setNewLocName] = useState('');
   const [newLocCode, setNewLocCode] = useState('');
   const [newLocAddress, setNewLocAddress] = useState('');
+  const [newLocGstin, setNewLocGstin] = useState('');
 
   const isOwner = currentUser?.role === 'TENANT_ADMIN' || currentUser?.role === 'SUPER_ADMIN';
 
@@ -119,6 +120,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onLogout }) => {
       name: newLocName.trim(),
       code,
       address: newLocAddress.trim() || undefined,
+      gstin: newLocGstin.trim().toUpperCase() || undefined,
       isActive: true,
       isDefault: false,
     });
@@ -126,6 +128,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onLogout }) => {
     setNewLocName('');
     setNewLocCode('');
     setNewLocAddress('');
+    setNewLocGstin('');
     Alert.alert('Branch Added', `Store branch "${newLocName}" added.`);
   };
 
@@ -284,7 +287,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onLogout }) => {
                       {isActive ? '✓ ' : '○ '} {loc.name}
                     </Text>
                     <Text style={{ fontSize: 11, color: colors.neutral[500], marginTop: 2 }}>
-                      Code: {loc.code} {loc.address ? `• ${loc.address}` : ''}
+                      Code: {loc.code} {loc.gstin ? `• GSTIN: ${loc.gstin}` : ''} {loc.address ? `• ${loc.address}` : ''}
                     </Text>
                   </View>
                   {isActive && (
@@ -369,6 +372,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onLogout }) => {
 
               <Text style={styles.fieldLabel}>Address</Text>
               <TextInput style={styles.input} placeholder="e.g. Unit 4, Market Complex" value={newLocAddress} onChangeText={setNewLocAddress} />
+
+              <Text style={styles.fieldLabel}>Branch GSTIN (Optional)</Text>
+              <TextInput style={styles.input} placeholder="e.g. 07AABCB1234F1Z5" autoCapitalize="characters" value={newLocGstin} onChangeText={setNewLocGstin} />
 
               <TouchableOpacity style={styles.saveBtn} onPress={handleCreateLocation}>
                 <Text style={styles.saveBtnText}>Save Store Branch</Text>

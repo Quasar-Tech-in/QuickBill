@@ -13,6 +13,7 @@ class LocationCreateRequest(BaseModel):
     code: str
     address: Optional[str] = None
     phone: Optional[str] = None
+    gstin: Optional[str] = None
     isDefault: bool = False
 
 class LocationUpdateRequest(BaseModel):
@@ -20,6 +21,7 @@ class LocationUpdateRequest(BaseModel):
     code: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
+    gstin: Optional[str] = None
     isActive: Optional[bool] = None
     isDefault: Optional[bool] = None
 
@@ -30,6 +32,7 @@ class LocationResponse(BaseModel):
     code: str
     address: Optional[str] = None
     phone: Optional[str] = None
+    gstin: Optional[str] = None
     isDefault: bool = False
     isActive: bool = True
     createdAt: str
@@ -145,8 +148,11 @@ async def list_locations(
 
 
     filter_query = {}
-    if "SUPER_ADMIN" not in user.roles:
-        filter_query = {"businessId": tenant_id}
+    if "SUPER_ADMIN" not in user.roles and tenant_id:
+        b_queries = [{"businessId": str(tenant_id)}]
+        if ObjectId.is_valid(tenant_id):
+            b_queries.append({"businessId": ObjectId(tenant_id)})
+        filter_query = {"$or": b_queries}
 
     cursor = primary_db.locations.find(filter_query).sort("createdAt", 1)
     results = []
@@ -158,6 +164,7 @@ async def list_locations(
             code=loc.get("code", ""),
             address=loc.get("address"),
             phone=loc.get("phone"),
+            gstin=loc.get("gstin"),
             isDefault=loc.get("isDefault", False),
             isActive=loc.get("isActive", True),
             createdAt=loc.get("createdAt", datetime.now(timezone.utc)).isoformat() if isinstance(loc.get("createdAt"), datetime) else str(loc.get("createdAt", ""))
@@ -215,6 +222,7 @@ async def create_location(
         "code": clean_code,
         "address": req.address,
         "phone": req.phone,
+        "gstin": req.gstin.strip().upper() if req.gstin else None,
         "isDefault": req.isDefault,
         "isActive": True,
         "createdAt": now
@@ -239,6 +247,7 @@ async def create_location(
         code=clean_code,
         address=req.address,
         phone=req.phone,
+        gstin=new_doc["gstin"],
         isDefault=req.isDefault,
         isActive=True,
         createdAt=now.isoformat()
@@ -277,6 +286,8 @@ async def update_location(
         update_fields["address"] = req.address.strip()
     if req.phone is not None:
         update_fields["phone"] = req.phone.strip()
+    if req.gstin is not None:
+        update_fields["gstin"] = req.gstin.strip().upper() if req.gstin.strip() else None
     if req.isActive is not None:
         update_fields["isActive"] = req.isActive
     if req.isDefault is not None:
@@ -293,6 +304,7 @@ async def update_location(
         code=loc_doc.get("code", ""),
         address=loc_doc.get("address"),
         phone=loc_doc.get("phone"),
+        gstin=loc_doc.get("gstin"),
         isDefault=loc_doc.get("isDefault", False),
         isActive=loc_doc.get("isActive", True),
         createdAt=loc_doc.get("createdAt", datetime.now(timezone.utc)).isoformat() if isinstance(loc_doc.get("createdAt"), datetime) else str(loc_doc.get("createdAt", ""))

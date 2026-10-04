@@ -31,11 +31,16 @@ import {
   Boxes,
   CreditCard,
   Clock,
-  Calendar
+  Calendar,
+  Upload,
+  Image as ImageIcon,
+  X
 } from 'lucide-react';
 import { store } from '../services/store';
 import { User, StoreLocation, UserRole, Tenant } from '../types';
 import { SyncInventoryModal } from '../components/SyncInventoryModal';
+import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
+import { uploadItemImage } from '../services/supabaseStorage';
 
 interface ConfirmModalState {
   isOpen: boolean;
@@ -120,6 +125,7 @@ export const SettingsView: React.FC = () => {
   const [newLocName, setNewLocName] = useState('');
   const [newLocAddress, setNewLocAddress] = useState('');
   const [newLocPhone, setNewLocPhone] = useState('');
+  const [newLocGstin, setNewLocGstin] = useState('');
   const [locFormError, setLocFormError] = useState('');
 
   // Location Edit modal state
@@ -129,6 +135,7 @@ export const SettingsView: React.FC = () => {
   const [editLocName, setEditLocName] = useState('');
   const [editLocAddress, setEditLocAddress] = useState('');
   const [editLocPhone, setEditLocPhone] = useState('');
+  const [editLocGstin, setEditLocGstin] = useState('');
   const [editLocFormError, setEditLocFormError] = useState('');
 
   // Store Profile & Active Tenant State
@@ -138,9 +145,15 @@ export const SettingsView: React.FC = () => {
   const [profilePhone, setProfilePhone] = useState(activeTenant?.phone || '');
   const [profileEmail, setProfileEmail] = useState(activeTenant?.adminEmail || '');
   const [profileAddress, setProfileAddress] = useState(activeTenant?.address || 'Ground Floor, Metro Retail Plaza, Sector 18, New Delhi');
+  const [profileLogoUrl, setProfileLogoUrl] = useState(activeTenant?.logoUrl || '');
+  const [profileTagline, setProfileTagline] = useState(activeTenant?.tagline || '');
+  const [profileReceiptFooter, setProfileReceiptFooter] = useState(activeTenant?.receiptFooterNote || '');
   const [profileCurrency, setProfileCurrency] = useState('₹ (INR)');
   const [profileSavedMsg, setProfileSavedMsg] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [logoUploadMsg, setLogoUploadMsg] = useState('');
+  const [logoCompressionStat, setLogoCompressionStat] = useState('');
 
   const currentUser = store.getCurrentUser();
   const canManage = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'TENANT_ADMIN';
@@ -158,6 +171,33 @@ export const SettingsView: React.FC = () => {
   const daysRemaining = sub?.daysRemaining ?? 365;
   const isStoreLocked = store.isStoreLocked();
 
+  const handleLogoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingLogo(true);
+    setLogoUploadMsg('Compressing logo image...');
+    setLogoCompressionStat('');
+    try {
+      const compressed: CompressionResult = await compressImage(file, { maxWidth: 500, maxHeight: 500, quality: 0.85 });
+      const statsStr = `${formatBytes(compressed.originalSizeBytes)} ➔ ${formatBytes(compressed.compressedSizeBytes)} (${compressed.compressionRatio} WebP)`;
+      setLogoCompressionStat(statsStr);
+      setProfileLogoUrl(compressed.dataUrl); // Immediate local preview
+      
+      setLogoUploadMsg('Uploading compressed logo...');
+      const targetTenantId = activeTenant?.id || currentUser?.businessId || 'default';
+      const uploadRes = await uploadItemImage(targetTenantId, 'store_logo', compressed, 0);
+      if (uploadRes && uploadRes.url) {
+        setProfileLogoUrl(uploadRes.url);
+        setLogoUploadMsg(`✓ Logo compressed & saved (${statsStr})`);
+      }
+    } catch (err: any) {
+      console.error('Logo compression/upload failed:', err);
+      setLogoUploadMsg('Failed to process logo image. You can also paste an image URL directly.');
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -166,18 +206,23 @@ export const SettingsView: React.FC = () => {
         store.fetchLocations(),
         store.fetchActiveTenant(),
       ]);
-      setUsers(uList);
-      setLocations(lList);
+      setUsers(uList && uList.length > 0 ? uList : store.getUsers());
+      setLocations(lList && lList.length > 0 ? lList : store.getLocations());
       if (liveTenant) {
         setActiveTenant(liveTenant);
         setProfileName(liveTenant.name || '');
         setProfileGstin(liveTenant.gstin || '');
         setProfilePhone(liveTenant.phone || '');
         setProfileEmail(liveTenant.adminEmail || '');
+        setProfileLogoUrl(liveTenant.logoUrl || '');
+        setProfileTagline(liveTenant.tagline || '');
+        setProfileReceiptFooter(liveTenant.receiptFooterNote || '');
         if (liveTenant.address) setProfileAddress(liveTenant.address);
       }
     } catch (e) {
       console.error('Failed loading staff, locations, and live tenant:', e);
+      setUsers(store.getUsers());
+      setLocations(store.getLocations());
     } finally {
       setLoading(false);
     }
@@ -365,6 +410,7 @@ export const SettingsView: React.FC = () => {
         name: newLocName.trim(),
         address: newLocAddress.trim() || 'Store Branch',
         phone: newLocPhone.trim() || '',
+        gstin: newLocGstin.trim().toUpperCase() || undefined,
       });
 
       if (created) {
@@ -373,6 +419,7 @@ export const SettingsView: React.FC = () => {
         setNewLocName('');
         setNewLocAddress('');
         setNewLocPhone('');
+        setNewLocGstin('');
         await loadData();
         // Automatically pop up the Sync Inventory Modal for the newly created branch!
         setSyncTargetLocation(created);
@@ -389,6 +436,7 @@ export const SettingsView: React.FC = () => {
     setEditLocName(loc.name);
     setEditLocAddress(loc.address || '');
     setEditLocPhone(loc.phone || '');
+    setEditLocGstin(loc.gstin || '');
     setEditLocFormError('');
     setIsEditLocModalOpen(true);
   };
@@ -409,6 +457,7 @@ export const SettingsView: React.FC = () => {
         code: editLocCode.trim().toUpperCase(),
         address: editLocAddress.trim(),
         phone: editLocPhone.trim(),
+        gstin: editLocGstin.trim().toUpperCase() || '',
       });
       setIsEditLocModalOpen(false);
       loadData();
@@ -513,6 +562,9 @@ export const SettingsView: React.FC = () => {
         email: profileEmail.trim().toLowerCase(),
         address: profileAddress.trim(),
         currency: profileCurrency.trim(),
+        logoUrl: profileLogoUrl.trim(),
+        tagline: profileTagline.trim(),
+        receiptFooterNote: profileReceiptFooter.trim(),
       });
       setProfileSavedMsg(true);
       setTimeout(() => setProfileSavedMsg(false), 3500);
@@ -935,6 +987,11 @@ export const SettingsView: React.FC = () => {
                       <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', marginBottom: 6 }}>
                         📍 {loc.address || 'Address not specified'}
                       </p>
+                      {loc.gstin && (
+                        <p style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--primary-700)', marginBottom: 6 }}>
+                          🏛️ GSTIN: {loc.gstin}
+                        </p>
+                      )}
                       {loc.phone && (
                         <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', marginBottom: 12 }}>
                           📞 {loc.phone}
@@ -1052,23 +1109,147 @@ export const SettingsView: React.FC = () => {
             )}
 
             <form onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Store Name */}
+              {/* Store Branding Section: Logo, Name & Tagline */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+                {/* Store Name */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Store / Business Name *</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={profileName} 
+                    onChange={(e) => setProfileName(e.target.value)}
+                    placeholder="e.g. Acme Organic Mart"
+                    required 
+                  />
+                </div>
+
+                {/* Tagline */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Store Tagline / Slogan</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={profileTagline} 
+                    onChange={(e) => setProfileTagline(e.target.value)}
+                    placeholder="e.g. Fresh Daily Essentials & Organics" 
+                  />
+                </div>
+              </div>
+
+              {/* Store Logo Management: Auto-Compression & Storage */}
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Store / Company Business Name *</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value={profileName} 
-                  onChange={(e) => setProfileName(e.target.value)}
-                  placeholder="e.g. QuickBill Enterprise Retail"
-                  required 
-                />
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Store Brand Logo (Auto-Compressed & Stored)</span>
+                  {logoCompressionStat && (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--success-700)', fontWeight: 700, background: 'var(--success-50)', padding: '2px 8px', borderRadius: 4 }}>
+                      ⚡ {logoCompressionStat}
+                    </span>
+                  )}
+                </label>
+                
+                <div style={{
+                  padding: 16,
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--neutral-200)',
+                  backgroundColor: 'var(--neutral-50)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12
+                }}>
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                    {/* Logo Preview Box */}
+                    <div style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 'var(--radius-md)',
+                      border: '2px solid var(--neutral-200)',
+                      backgroundColor: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                      flexShrink: 0,
+                      boxShadow: 'var(--shadow-sm)'
+                    }}>
+                      {profileLogoUrl ? (
+                        <img 
+                          src={profileLogoUrl} 
+                          alt="Store Logo" 
+                          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                        />
+                      ) : (
+                        <ImageIcon size={28} color="var(--neutral-400)" />
+                      )}
+                    </div>
+
+                    {/* Upload / File Input Actions */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 200 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <label className="btn btn-secondary btn-sm" style={{ cursor: isUploadingLogo ? 'wait' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <Upload size={14} />
+                          <span>{isUploadingLogo ? 'Compressing & Uploading...' : 'Upload Logo Image'}</span>
+                          <input 
+                            type="file" 
+                            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                            style={{ display: 'none' }}
+                            onChange={handleLogoFileChange}
+                            disabled={isUploadingLogo}
+                          />
+                        </label>
+
+                        {profileLogoUrl && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs text-danger"
+                            onClick={() => {
+                              setProfileLogoUrl('');
+                              setLogoCompressionStat('');
+                              setLogoUploadMsg('');
+                            }}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          >
+                            <X size={13} />
+                            <span>Remove Logo</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {logoUploadMsg && (
+                        <span style={{ fontSize: '0.75rem', color: isUploadingLogo ? 'var(--primary-600)' : 'var(--success-700)', fontWeight: 600 }}>
+                          {logoUploadMsg}
+                        </span>
+                      )}
+                      {!logoUploadMsg && (
+                        <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>
+                          Upload PNG, JPG, or WebP. The image is automatically compressed under 50KB for fast POS printing and dashboard rendering.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Or Direct URL Input */}
+                  <div style={{ borderTop: '1px dashed var(--neutral-200)', paddingTop: 10 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-600)', marginBottom: 4, display: 'block' }}>
+                      Or paste direct image URL:
+                    </label>
+                    <input 
+                      type="url" 
+                      className="form-input" 
+                      style={{ fontSize: '0.82rem', padding: '6px 10px' }}
+                      value={profileLogoUrl} 
+                      onChange={(e) => setProfileLogoUrl(e.target.value)}
+                      placeholder="https://example.com/logo.png" 
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Tax & Currency */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">GSTIN / Tax Identification Number</label>
+                  <label className="form-label">Primary Business GSTIN / Tax ID</label>
                   <input 
                     type="text" 
                     className="form-input" 
@@ -1118,7 +1299,7 @@ export const SettingsView: React.FC = () => {
                       style={{ paddingLeft: 36 }}
                       value={profileEmail} 
                       onChange={(e) => setProfileEmail(e.target.value)}
-                      placeholder="info@quickbill.com" 
+                      placeholder="info@yourstore.com" 
                     />
                   </div>
                 </div>
@@ -1132,14 +1313,29 @@ export const SettingsView: React.FC = () => {
                   className="form-input" 
                   value={profileAddress} 
                   onChange={(e) => setProfileAddress(e.target.value)}
-                  placeholder="Plot 42, Tech Park, Sector 18, New Delhi, 110001" 
+                  placeholder="Plot 42, Market Complex, New Delhi, 110001" 
                 />
+              </div>
+
+              {/* Custom Receipt Footer Note */}
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Custom Bill / Receipt Footer Note</label>
+                <textarea 
+                  className="form-input" 
+                  style={{ minHeight: 60, resize: 'vertical' }}
+                  value={profileReceiptFooter} 
+                  onChange={(e) => setProfileReceiptFooter(e.target.value)}
+                  placeholder="e.g. Thank you for shopping with us! Returns and exchanges accepted within 7 days with this bill." 
+                />
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', marginTop: 4, display: 'block' }}>
+                  This personalized note replaces default branding in thermal and A4 bill printouts.
+                </span>
               </div>
 
               <div style={{ marginTop: 8 }}>
                 <button type="submit" className="btn btn-primary" disabled={isSavingProfile} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   <Save size={16} />
-                  <span>{isSavingProfile ? 'Saving Changes...' : 'Save Store Profile'}</span>
+                  <span>{isSavingProfile ? 'Saving Changes...' : 'Save Store Profile & Branding'}</span>
                 </button>
               </div>
             </form>
@@ -2212,17 +2408,31 @@ export const SettingsView: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Phone / Counter Contact</label>
-                  <div style={{ position: 'relative' }}>
-                    <Phone size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Phone / Counter Contact</label>
+                    <div style={{ position: 'relative' }}>
+                      <Phone size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                      <input
+                        type="text"
+                        className="form-input"
+                        style={{ paddingLeft: 36 }}
+                        placeholder="e.g. +91 98765 00000"
+                        value={newLocPhone}
+                        onChange={(e) => setNewLocPhone(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Branch GSTIN / Tax ID (Optional)</label>
                     <input
                       type="text"
                       className="form-input"
-                      style={{ paddingLeft: 36 }}
-                      placeholder="e.g. +91 98765 00000"
-                      value={newLocPhone}
-                      onChange={(e) => setNewLocPhone(e.target.value)}
+                      style={{ textTransform: 'uppercase' }}
+                      placeholder="e.g. 07AABCB1234F1Z5"
+                      value={newLocGstin}
+                      onChange={(e) => setNewLocGstin(e.target.value)}
                     />
                   </div>
                 </div>
@@ -2379,16 +2589,30 @@ export const SettingsView: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Phone / Counter Contact</label>
-                  <div style={{ position: 'relative' }}>
-                    <Phone size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Phone / Counter Contact</label>
+                    <div style={{ position: 'relative' }}>
+                      <Phone size={15} color="var(--neutral-400)" style={{ position: 'absolute', left: 12, top: 11 }} />
+                      <input
+                        type="text"
+                        className="form-input"
+                        style={{ paddingLeft: 36 }}
+                        value={editLocPhone}
+                        onChange={(e) => setEditLocPhone(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>Branch GSTIN / Tax ID (Optional)</label>
                     <input
                       type="text"
                       className="form-input"
-                      style={{ paddingLeft: 36 }}
-                      value={editLocPhone}
-                      onChange={(e) => setEditLocPhone(e.target.value)}
+                      style={{ textTransform: 'uppercase' }}
+                      placeholder="e.g. 07AABCB1234F1Z5"
+                      value={editLocGstin}
+                      onChange={(e) => setEditLocGstin(e.target.value)}
                     />
                   </div>
                 </div>

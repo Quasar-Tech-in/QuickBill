@@ -86,6 +86,9 @@ class TenantResponse(BaseModel):
     phone: Optional[str] = None
     gstin: Optional[str] = None
     address: Optional[str] = None
+    logo_url: Optional[str] = None
+    tagline: Optional[str] = None
+    receipt_footer: Optional[str] = None
     created_at: str
     database_config: DatabaseConfig
     subscription: TenantSubscriptionModel
@@ -306,6 +309,9 @@ def build_tenant_response(t: dict, stats_override: Optional[dict] = None) -> Ten
         phone=t.get("phone"),
         gstin=t.get("gstin"),
         address=t.get("address"),
+        logo_url=t.get("logoUrl") or t.get("logo_url"),
+        tagline=t.get("tagline"),
+        receipt_footer=t.get("receiptFooter") or t.get("receipt_footer"),
         created_at=str(t.get("createdAt", now.isoformat())),
         database_config=db_config_model,
         subscription=subscription_model,
@@ -429,6 +435,9 @@ class TenantUpdateRequest(BaseModel):
     phone: Optional[str] = None
     admin_email: Optional[str] = None
     address: Optional[str] = None
+    logo_url: Optional[str] = None
+    tagline: Optional[str] = None
+    receipt_footer: Optional[str] = None
     status: Optional[str] = None
     plan: Optional[str] = None
     database_config: Optional[DatabaseConfig] = None
@@ -462,6 +471,12 @@ async def update_tenant_profile(
         update_data["adminEmail"] = req.admin_email.strip().lower()
     if req.address is not None:
         update_data["address"] = req.address.strip()
+    if req.logo_url is not None:
+        update_data["logoUrl"] = req.logo_url.strip()
+    if req.tagline is not None:
+        update_data["tagline"] = req.tagline.strip()
+    if req.receipt_footer is not None:
+        update_data["receiptFooter"] = req.receipt_footer.strip()
     if req.status is not None and is_super_admin(user):
         clean_status = req.status.strip().upper()
         update_data["status"] = clean_status

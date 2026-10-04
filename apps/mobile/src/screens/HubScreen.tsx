@@ -12,11 +12,10 @@ import { PartiesScreen } from './PartiesScreen';
 import { LedgerScreen } from './LedgerScreen';
 import { ReportsScreen } from './ReportsScreen';
 import { SettingsScreen } from './SettingsScreen';
-import { ShippingDispatchScreen } from './ShippingDispatchScreen';
 
 import { store } from '../services/store';
 
-type HubModule = 'MENU' | 'PO' | 'PARTIES' | 'LEDGER' | 'REPORTS' | 'SETTINGS' | 'DISPATCH';
+type HubModule = 'MENU' | 'PO' | 'PARTIES' | 'LEDGER' | 'REPORTS' | 'SETTINGS';
 
 export const HubScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const [activeModule, setActiveModule] = useState<HubModule>('MENU');
@@ -81,22 +80,11 @@ export const HubScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => 
     );
   }
 
-  if (activeModule === 'DISPATCH') {
-    return (
-      <View style={{ flex: 1 }}>
-        <TouchableOpacity style={styles.backHeader} onPress={() => setActiveModule('MENU')}>
-          <Text style={styles.backHeaderText}>&larr; Back to Business Hub</Text>
-        </TouchableOpacity>
-        <ShippingDispatchScreen />
-      </View>
-    );
-  }
-
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.hubTitle}>{isCashier ? '📋 Shift Operations Hub' : '🏢 Business Operations Hub'}</Text>
       <Text style={styles.hubSub}>
-        {isCashier ? 'Counter customer directory, cash drawer, and order dispatch' : 'Access all store workflows, financials, and inventory operations'}
+        {isCashier ? 'Counter customer directory and cash drawer operations' : 'Access all store workflows, financials, and inventory operations'}
       </Text>
 
       <View style={styles.moduleGrid}>
@@ -135,14 +123,6 @@ export const HubScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => 
             <Text style={styles.moduleDesc}>Sales, P&L Statement, Tax GST & Export</Text>
           </TouchableOpacity>
         )}
-
-        <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('DISPATCH')}>
-          <View style={[styles.iconBox, { backgroundColor: '#ffedd5' }]}>
-            <Text style={{ fontSize: 24 }}>🚚</Text>
-          </View>
-          <Text style={styles.moduleName}>Shipping & Dispatch</Text>
-          <Text style={styles.moduleDesc}>Delivery Orders & Courier Tracking</Text>
-        </TouchableOpacity>
 
         {isOwner && (
           <TouchableOpacity style={styles.moduleCard} onPress={() => setActiveModule('SETTINGS')}>

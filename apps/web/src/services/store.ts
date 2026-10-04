@@ -475,13 +475,18 @@ class StoreService {
   // --- Locations & Branches ---
   getLocations(): StoreLocation[] {
     const user = this.currentUser;
+    const tenantId = this.currentTenant?.id || user?.businessId || '';
+    const tenantLocs = (!tenantId || this.isSuperAdmin()) 
+      ? this.locations 
+      : this.locations.filter(l => !l.businessId || l.businessId === tenantId);
+
     // Store Admin & Super Admin see all locations (including inactive for administration)
     if (!user || user.role === 'SUPER_ADMIN' || user.role === 'TENANT_ADMIN') {
-      return this.locations;
+      return tenantLocs;
     }
     // Managers and Cashiers see only their assigned ACTIVE locations
     const assignedIds = user.assignedLocationIds || [];
-    const activeLocations = this.locations.filter(loc => loc.isActive !== false);
+    const activeLocations = tenantLocs.filter(loc => loc.isActive !== false);
     if (assignedIds.length === 0) {
       return activeLocations.slice(0, 1);
     }
@@ -489,7 +494,11 @@ class StoreService {
   }
 
   getAllLocations(): StoreLocation[] {
-    return this.locations;
+    const tenantId = this.currentTenant?.id || this.currentUser?.businessId || '';
+    if (!tenantId || this.isSuperAdmin()) {
+      return this.locations;
+    }
+    return this.locations.filter(l => !l.businessId || l.businessId === tenantId);
   }
 
   async fetchLocations(): Promise<StoreLocation[]> {
@@ -498,22 +507,24 @@ class StoreService {
       if (res.data && Array.isArray(res.data)) {
         const liveLocs: StoreLocation[] = res.data.map((l: any) => ({
           id: l.id || l._id,
-          businessId: l.businessId || this.currentTenant?.id || '',
+          businessId: l.businessId || this.currentTenant?.id || this.currentUser?.businessId || '',
           name: l.name,
           code: l.code,
           address: l.address || '',
           phone: l.phone || '',
+          gstin: l.gstin || '',
           isDefault: !!l.isDefault,
           isActive: l.isActive !== undefined ? !!l.isActive : true,
           createdAt: l.createdAt || new Date().toISOString(),
         }));
         this.locations = liveLocs;
         this.saveToStorage();
+        return liveLocs;
       }
     } catch (e) {
       console.warn('Could not fetch locations from backend API, using local:', e);
     }
-    return this.locations;
+    return this.getLocations();
   }
 
   getActiveLocation(): StoreLocation {
@@ -587,6 +598,7 @@ class StoreService {
         code: locData.code,
         address: locData.address,
         phone: locData.phone,
+        gstin: locData.gstin,
         isDefault: locData.isDefault || false,
       });
       if (res.data?.id || res.data?._id) {
@@ -643,6 +655,7 @@ class StoreService {
           code: res.data.code || this.locations[idx].code,
           address: res.data.address !== undefined ? res.data.address : (this.locations[idx].address || ''),
           phone: res.data.phone !== undefined ? res.data.phone : (this.locations[idx].phone || ''),
+          gstin: res.data.gstin !== undefined ? res.data.gstin : (this.locations[idx].gstin || ''),
           isDefault: res.data.isDefault !== undefined ? !!res.data.isDefault : !!this.locations[idx].isDefault,
           isActive: res.data.isActive !== undefined ? !!res.data.isActive : (this.locations[idx].isActive !== false),
           createdAt: res.data.createdAt || this.locations[idx].createdAt,
@@ -824,7 +837,7 @@ class StoreService {
           name: u.name || '',
           email: u.email || '',
           role: u.role || 'CASHIER',
-          businessId: u.businessId || u.business_id || '',
+          businessId: u.businessId || u.tenantId || u.business_id || this.currentTenant?.id || this.currentUser?.businessId || '',
           tenantName: u.tenantName || u.tenant_name || '',
           assignedLocationIds: u.assignedLocationIds || u.assigned_location_ids || [],
           isActive: u.isActive !== undefined ? u.isActive : (u.is_active !== undefined ? u.is_active : true),
@@ -832,6 +845,7 @@ class StoreService {
         }));
         this.saveToStorage();
         this.notifyListeners();
+        return this.users;
       }
     } catch (e) {
       console.warn('Backend fetchUsers failed:', e);
@@ -840,8 +854,11 @@ class StoreService {
   }
 
   getUsers(): User[] {
-    const activeTenantId = this.currentTenant?.id || '';
-    return this.users.filter(u => u.businessId === activeTenantId || !u.businessId);
+    const activeTenantId = this.currentTenant?.id || this.currentUser?.businessId || '';
+    if (!activeTenantId || this.isSuperAdmin()) {
+      return this.users;
+    }
+    return this.users.filter(u => !u.businessId || u.businessId === activeTenantId);
   }
 
   async addUser(userData: { name: string; email: string; password?: string; role: UserRole; assignedLocationIds: string[] }): Promise<User> {
@@ -1003,6 +1020,9 @@ class StoreService {
           phone: t.phone,
           gstin: t.gstin,
           address: t.address,
+          logoUrl: t.logo_url || t.logoUrl,
+          tagline: t.tagline,
+          receiptFooterNote: t.receipt_footer || t.receiptFooterNote || t.receiptFooter,
           createdAt: t.created_at || t.createdAt || new Date().toISOString(),
           databaseConfig: {
             isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
@@ -1066,6 +1086,9 @@ class StoreService {
           phone: t.phone,
           gstin: t.gstin,
           address: t.address,
+          logoUrl: t.logo_url || t.logoUrl,
+          tagline: t.tagline,
+          receiptFooterNote: t.receipt_footer || t.receiptFooterNote || t.receiptFooter,
           createdAt: t.created_at || t.createdAt || new Date().toISOString(),
           databaseConfig: {
             isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
@@ -1100,6 +1123,9 @@ class StoreService {
         };
 
         this.currentTenant = normalizedTenant;
+        if (this.currentUser) {
+          this.currentUser.tenantName = normalizedTenant.name;
+        }
         const idx = this.tenants.findIndex(x => x.id === normalizedTenant.id);
         if (idx >= 0) {
           this.tenants[idx] = normalizedTenant;
@@ -1107,6 +1133,7 @@ class StoreService {
           this.tenants.unshift(normalizedTenant);
         }
         this.saveToStorage();
+        this.notifyListeners();
         return normalizedTenant;
       }
     } catch (e) {
@@ -1116,7 +1143,7 @@ class StoreService {
   }
 
   getActiveTenant(): Tenant {
-    if (this.currentTenant) {
+    if (this.currentTenant && this.currentTenant.id) {
       const all = this.getTenants();
       const found = all.find(t => t.id === this.currentTenant?.id);
       if (found) {
@@ -1124,15 +1151,23 @@ class StoreService {
       }
       return this.currentTenant;
     }
+    if (this.currentUser?.businessId) {
+      const all = this.getTenants();
+      const found = all.find(t => t.id === this.currentUser?.businessId);
+      if (found) {
+        this.currentTenant = found;
+        return this.currentTenant;
+      }
+    }
     if (this.tenants.length > 0) {
       this.currentTenant = this.tenants[0];
       return this.currentTenant;
     }
     return {
-      id: '',
-      name: '',
+      id: this.currentUser?.businessId || '',
+      name: this.currentUser?.tenantName || 'Store Portal',
       slug: '',
-      adminEmail: '',
+      adminEmail: this.currentUser?.email || '',
       plan: 'STARTER',
       status: 'ACTIVE',
       createdAt: new Date().toISOString(),
@@ -1144,12 +1179,13 @@ class StoreService {
         planId: 'STARTER',
         planName: 'Starter Plan',
         status: 'ACTIVE',
-        maxUsers: 1,
-        maxLocations: 1,
+        maxUsers: 5,
+        maxLocations: 3,
         billingCycle: 'MONTHLY',
         startDate: new Date().toISOString(),
-        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        features: ['pos', 'inventory'],
+        endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        daysRemaining: 365,
+        features: ['pos', 'inventory', 'ledger'],
       },
       stats: {
         productsCount: 0,
@@ -1169,6 +1205,9 @@ class StoreService {
     email?: string;
     address?: string;
     currency?: string;
+    logoUrl?: string;
+    tagline?: string;
+    receiptFooterNote?: string;
     status?: 'ACTIVE' | 'SUSPENDED';
     plan?: any;
     databaseConfig?: TenantDatabaseConfig;
@@ -1182,6 +1221,9 @@ class StoreService {
       phone: updates.phone !== undefined ? updates.phone.trim() : current.phone,
       adminEmail: updates.email !== undefined ? updates.email.trim().toLowerCase() : current.adminEmail,
       address: updates.address !== undefined ? updates.address.trim() : current.address,
+      logoUrl: updates.logoUrl !== undefined ? updates.logoUrl.trim() : current.logoUrl,
+      tagline: updates.tagline !== undefined ? updates.tagline.trim() : current.tagline,
+      receiptFooterNote: updates.receiptFooterNote !== undefined ? updates.receiptFooterNote.trim() : current.receiptFooterNote,
       status: updates.status || current.status,
       plan: updates.plan || current.plan,
       databaseConfig: updates.databaseConfig || current.databaseConfig,
@@ -1192,10 +1234,14 @@ class StoreService {
     if (idx !== -1) {
       this.tenants[idx] = updatedTenant;
     }
-    if (this.currentTenant?.id === targetId) {
+    if (this.currentTenant?.id === targetId || !this.currentTenant) {
       this.currentTenant = updatedTenant;
     }
+    if (this.currentUser && updates.name) {
+      this.currentUser.tenantName = updates.name.trim();
+    }
     this.saveToStorage();
+    this.notifyListeners();
 
     // Sync to backend if online
     if (targetId) {
@@ -1206,6 +1252,9 @@ class StoreService {
           phone: updates.phone,
           admin_email: updates.email,
           address: updates.address,
+          logo_url: updates.logoUrl,
+          tagline: updates.tagline,
+          receipt_footer: updates.receiptFooterNote,
           status: updates.status,
           plan: updates.plan,
           database_config: updates.databaseConfig ? {
@@ -1220,6 +1269,7 @@ class StoreService {
     }
 
     await this.fetchTenants();
+    this.notifyListeners();
     return updatedTenant;
   }
 

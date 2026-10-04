@@ -69,9 +69,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
   const activeTenant = store.getActiveTenant();
   const isStoreLocked = store.isStoreLocked();
   const isSuspended = store.isStoreSuspended();
-  const locations = store.getAllLocations();
+  const [locations, setLocations] = useState<StoreLocation[]>(() => store.getAllLocations());
 
   useEffect(() => {
+    store.fetchLocations().then(locs => {
+      setLocations(locs);
+    }).catch(() => {});
     store.fetchInvoices(selectedLocationId).then(data => {
       setInvoices(data);
     }).catch(() => {});
@@ -81,7 +84,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
     store.fetchParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId).then(data => {
       setParties(data);
     }).catch(() => {});
-  }, [selectedLocationId]);
+  }, [selectedLocationId, activeTenant?.id]);
 
   const handleNav = (tab: string) => {
     if (tab === 'transactions') {

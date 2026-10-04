@@ -7,6 +7,7 @@ export interface StoreLocation {
   code: string;
   address?: string;
   phone?: string;
+  gstin?: string;
   isDefault?: boolean;
   isActive: boolean;
   createdAt: string;
@@ -186,6 +187,7 @@ export interface Invoice {
   locationCode?: string;
   locationAddress?: string;
   locationPhone?: string;
+  locationGstin?: string;
   invoiceNumber: string;
   date: string;
   partyId?: string;
@@ -288,6 +290,9 @@ export interface Tenant {
   phone?: string;
   gstin?: string;
   address?: string;
+  logoUrl?: string;
+  tagline?: string;
+  receiptFooterNote?: string;
   createdAt: string;
   databaseConfig: TenantDatabaseConfig;
   subscription: TenantSubscription;

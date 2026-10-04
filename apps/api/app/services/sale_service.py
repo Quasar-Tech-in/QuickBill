@@ -196,6 +196,7 @@ class SaleService:
             "locationCode": request.location_code,
             "locationAddress": request.location_address,
             "locationPhone": request.location_phone,
+            "locationGstin": request.location_gstin,
             "billedById": request.billed_by_id or user_id,
             "billedByName": request.billed_by_name,
             "billedByRole": request.billed_by_role,

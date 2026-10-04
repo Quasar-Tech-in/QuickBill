@@ -999,6 +999,7 @@ class MobileStore {
           code: l.code || '',
           address: l.address,
           phone: l.phone,
+          gstin: l.gstin,
           isDefault: !!l.isDefault,
           isActive: l.isActive !== false,
         }));

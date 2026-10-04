@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -14,7 +14,7 @@ import {
   ShieldCheck, 
   LogOut,
   Lock,
-  Truck
+  Building
 } from 'lucide-react';
 import { store } from '../services/store';
 
@@ -35,14 +35,29 @@ interface NavItem {
   isLockedWhenStoreSuspended?: boolean;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabChange, onLogout }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabChange: _onTabChange, onLogout }) => {
   const location = useLocation();
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = store.subscribe(() => {
+      setTick(t => t + 1);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   const activeTenant = store.getActiveTenant();
   const currentUser = store.getCurrentUser();
   const userRole = currentUser?.role || 'TENANT_ADMIN';
   const isSuperAdmin = userRole === 'SUPER_ADMIN';
   const isStoreLocked = !isSuperAdmin && store.isStoreLocked();
+
+  const brandTitle = isSuperAdmin 
+    ? 'QuickBill Control' 
+    : (activeTenant?.name || currentUser?.tenantName || 'Store Portal');
+  const brandTagline = !isSuperAdmin ? activeTenant?.tagline : undefined;
 
   // Super Admin dedicated navigation items
   const superAdminNavItems: NavItem[] = [
@@ -121,14 +136,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabCh
       isLockedWhenStoreSuspended: true
     },
     { 
-      id: 'shipping', 
-      path: '/shipping', 
-      label: 'Shipping & Dispatch', 
-      icon: Truck, 
-      roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
-      isLockedWhenStoreSuspended: true
-    },
-    { 
       id: 'parties', 
       path: '/parties', 
       label: userRole === 'CASHIER' ? 'Customer Directory' : 'Parties & CRM', 
@@ -161,11 +168,29 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabCh
     <aside className="sidebar">
       {/* Sidebar Header */}
       <div className="sidebar-header">
-        <div className="sidebar-brand-icon">
-          <Sparkles size={20} color="#ffffff" />
+        <div className="sidebar-brand-icon" style={{ overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {!isSuperAdmin && activeTenant?.logoUrl ? (
+            <img 
+              src={activeTenant.logoUrl} 
+              alt="Logo" 
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+              onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+            />
+          ) : isSuperAdmin ? (
+            <Sparkles size={20} color="#ffffff" />
+          ) : (
+            <Building size={20} color="#ffffff" />
+          )}
         </div>
-        <div>
-          <h1 className="sidebar-brand-title">QuickBill</h1>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <h1 className="sidebar-brand-title" style={{ fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={brandTitle}>
+            {brandTitle}
+          </h1>
+          {brandTagline && (
+            <p style={{ fontSize: '0.68rem', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {brandTagline}
+            </p>
+          )}
         </div>
       </div>
 
@@ -186,9 +211,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabCh
                 if (isItemLocked) {
                   e.preventDefault();
                   return;
-                }
-                if (onTabChange) {
-                  onTabChange(item.id);
                 }
               }}
               className={({ isActive }) => `nav-link ${isActive || isItemActive ? 'active' : ''}`}

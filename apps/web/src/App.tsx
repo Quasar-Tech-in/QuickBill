@@ -14,7 +14,6 @@ import { DashboardView } from './views/DashboardView';
 import { PosBillingView } from './views/PosBillingView';
 import { InventoryView } from './views/InventoryView';
 import { PurchaseOrdersView } from './views/PurchaseOrdersView';
-import { ShippingDispatchView } from './views/ShippingDispatchView';
 import { PartiesView } from './views/PartiesView';
 import { LedgerView } from './views/LedgerView';
 import { TransactionsView } from './views/TransactionsView';
@@ -59,11 +58,22 @@ const AppLayout: React.FC<AppLayoutProps> = ({
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = store.subscribe(() => {
+      setTick(t => t + 1);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   const isStaffNonAdmin = currentUser.role === 'MANAGER' || currentUser.role === 'CASHIER';
   const [activeLocationsList, setActiveLocationsList] = useState<any[]>(() => {
     return isStaffNonAdmin ? store.getLocations() : [];
   });
+  const [hasCheckedLocations, setHasCheckedLocations] = useState(false);
   const [isRefreshingLocations, setIsRefreshingLocations] = useState(false);
 
   const activeTenant = store.getActiveTenant();
@@ -85,6 +95,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
       console.error('Failed to verify active locations:', e);
     } finally {
       setIsRefreshingLocations(false);
+      setHasCheckedLocations(true);
     }
   };
 
@@ -126,14 +137,13 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     }
   }, [currentUser, location.pathname, navigate, isSuperAdmin]);
 
-  // If non-admin staff has 0 active branch locations available
-  const isBranchLockedOut = isStaffNonAdmin && activeLocationsList.length === 0;
+  // If non-admin staff has 0 active branch locations available after verification
+  const isBranchLockedOut = isStaffNonAdmin && hasCheckedLocations && activeLocationsList.length === 0;
 
   return (
     <div className="app-layout" style={{ position: 'relative' }}>
       {/* Sidebar Navigation */}
       <Sidebar 
-        activeTab={location.pathname.replace('/', '') || 'dashboard'} 
         onLogout={onLogout}
       />
 
@@ -370,6 +380,49 @@ const AppLayout: React.FC<AppLayoutProps> = ({
   );
 };
 
+// Login route wrappers with react-router navigation
+const TenantLoginRoute: React.FC<{ onLoginSuccess: (u: User) => void }> = ({ onLoginSuccess }) => {
+  const navigate = useNavigate();
+  return (
+    <TenantLoginView 
+      onLoginSuccess={onLoginSuccess}
+      onNavigateToSuperAdmin={() => navigate('/superadmin/login')}
+    />
+  );
+};
+
+const SuperAdminLoginRoute: React.FC<{ onLoginSuccess: (u: User) => void }> = ({ onLoginSuccess }) => {
+  const navigate = useNavigate();
+  return (
+    <SuperAdminLoginView 
+      onLoginSuccess={onLoginSuccess}
+      onNavigateToTenantLogin={() => navigate('/login')}
+    />
+  );
+};
+
+const DashboardRoute: React.FC<{ role: string; setViewingInvoice: (inv: Invoice | null) => void }> = ({ role, setViewingInvoice }) => {
+  const navigate = useNavigate();
+  if (role === 'SUPER_ADMIN') {
+    return (
+      <SuperAdminDashboardView onNavigateToTab={(tab) => {
+        if (tab.startsWith('/')) navigate(tab);
+        else navigate(`/${tab}`);
+      }} />
+    );
+  }
+  return (
+    <DashboardView 
+      onNavigate={(tab) => {
+        if (tab === 'transactions') navigate('/invoices');
+        else if (tab.startsWith('/')) navigate(tab);
+        else navigate(`/${tab}`);
+      }} 
+      onViewInvoice={(inv) => setViewingInvoice(inv)} 
+    />
+  );
+};
+
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(store.getCurrentUser());
   const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
@@ -403,10 +456,7 @@ export const App: React.FC = () => {
             currentUser ? (
               <Navigate to={getDefaultPathForRole(currentUser)} replace />
             ) : (
-              <TenantLoginView 
-                onLoginSuccess={handleLoginSuccess}
-                onNavigateToSuperAdmin={() => {}}
-              />
+              <TenantLoginRoute onLoginSuccess={handleLoginSuccess} />
             )
           } 
         />
@@ -417,10 +467,7 @@ export const App: React.FC = () => {
             currentUser && currentUser.role === 'SUPER_ADMIN' ? (
               <Navigate to="/superadmin" replace />
             ) : (
-              <SuperAdminLoginView 
-                onLoginSuccess={handleLoginSuccess}
-                onNavigateToTenantLogin={() => {}}
-              />
+              <SuperAdminLoginRoute onLoginSuccess={handleLoginSuccess} />
             )
           } 
         />
@@ -442,14 +489,10 @@ export const App: React.FC = () => {
             <Route 
               path="/dashboard" 
               element={
-                currentUser.role === 'SUPER_ADMIN' ? (
-                  <SuperAdminDashboardView onNavigateToTab={() => {}} />
-                ) : (
-                  <DashboardView 
-                    onNavigate={() => {}} 
-                    onViewInvoice={(inv) => setViewingInvoice(inv)} 
-                  />
-                )
+                <DashboardRoute 
+                  role={currentUser.role} 
+                  setViewingInvoice={setViewingInvoice} 
+                />
               } 
             />
             <Route 
@@ -462,7 +505,6 @@ export const App: React.FC = () => {
             />
             <Route path="/inventory" element={<InventoryView />} />
             <Route path="/purchase-orders" element={<PurchaseOrdersView />} />
-            <Route path="/shipping" element={<ShippingDispatchView />} />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="/ledger" element={<LedgerView />} />
             <Route 
