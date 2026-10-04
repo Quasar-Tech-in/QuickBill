@@ -124,6 +124,28 @@ export interface CartItem {
   allowParts?: boolean;
 }
 
+export interface StagedOrder {
+  id: string;
+  businessId: string;
+  locationId: string;
+  locationName?: string;
+  label: string;
+  customerName?: string;
+  customerPhone?: string;
+  partyId?: string;
+  items: CartItem[];
+  itemCount: number;
+  discountType?: 'PERCENT' | 'FLAT';
+  discountValue?: number;
+  discountAmount?: number;
+  subtotal: number;
+  taxTotal: number;
+  grandTotal: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface InvoiceItem {
   itemId: string;
   name: string;
@@ -243,3 +265,31 @@ export interface DashboardStats {
   lowStockCount: number;
   netProfit: number;
 }
+
+export interface StagedOrder {
+  id: string;
+  businessId?: string;
+  locationId?: string;
+  locationName?: string;
+  label: string; // e.g. "Table 4", "Rohan (Cold Coffee)", "Order #1"
+  customerName?: string;
+  customerPhone?: string;
+  partyId?: string;
+  selectedPartyId?: string;
+  cart: CartItem[];
+  items?: CartItem[];
+  itemCount?: number;
+  discountType?: 'PERCENT' | 'FLAT';
+  discountValue?: number;
+  discountAmount?: number;
+  orderDiscountType?: 'PERCENT' | 'FLAT';
+  orderDiscountValue?: string;
+  paymentMode?: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'BANK_TRANSFER' | 'SPLIT';
+  subtotal?: number;
+  taxTotal?: number;
+  grandTotal?: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+

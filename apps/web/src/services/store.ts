@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -23,6 +23,7 @@ class StoreService {
   private locations: StoreLocation[] = [];
   private users: User[] = [];
   private categories: ItemCategory[] = [];
+  private stagedOrders: StagedOrder[] = [];
   private activeLocation: StoreLocation | null = null;
   private currentTenant: Tenant | null = null;
   private isSuperAdminMode: boolean = false;
@@ -127,6 +128,9 @@ class StoreService {
         this.purchaseOrders.forEach(po => { po.businessId = this.currentTenant!.id; });
       }
 
+      const savedStagedOrders = localStorage.getItem('qb_staged_orders');
+      this.stagedOrders = savedStagedOrders ? JSON.parse(savedStagedOrders) : [];
+
     } catch {
       this.items = [];
       this.parties = [];
@@ -154,6 +158,7 @@ class StoreService {
     localStorage.setItem('qb_locations', JSON.stringify(this.locations));
     localStorage.setItem('qb_users', JSON.stringify(this.users));
     localStorage.setItem('qb_categories', JSON.stringify(this.categories));
+    localStorage.setItem('qb_staged_orders', JSON.stringify(this.stagedOrders));
     localStorage.setItem('qb_active_location_id', this.activeLocation?.id || '');
     if (this.currentTenant?.id) {
       localStorage.setItem('qb_current_tenant_id', this.currentTenant.id);
@@ -3865,7 +3870,198 @@ class StoreService {
       return true;
     }
   }
+
+  // --- Staged / Held Orders (Multi-Tenant & Location Scoped with Cloud DB Sync) ---
+  getStagedOrders(locationId?: string): StagedOrder[] {
+    const activeTenantId = this.currentTenant?.id || '';
+    const targetLocId = locationId || this.activeLocation?.id;
+    return this.stagedOrders.filter(order => {
+      const matchTenant = !order.businessId || order.businessId === activeTenantId;
+      const matchLoc = !targetLocId || targetLocId === 'ALL' || !order.locationId || order.locationId === targetLocId;
+      return matchTenant && matchLoc;
+    });
+  }
+
+  async fetchStagedOrders(locationId?: string): Promise<StagedOrder[]> {
+    const activeTenantId = this.currentTenant?.id || '';
+    const targetLocId = locationId || this.activeLocation?.id;
+    try {
+      const params: Record<string, string> = {};
+      if (targetLocId && targetLocId !== 'ALL') {
+        params.locationId = targetLocId;
+      }
+      const res = await apiClient.get('/staged-orders', { params });
+      if (Array.isArray(res.data)) {
+        const fetched: StagedOrder[] = res.data.map((d: any) => ({
+          id: d._id || d.id,
+          businessId: d.businessId || activeTenantId,
+          locationId: d.locationId,
+          locationName: d.locationName,
+          label: d.label,
+          customerName: d.customerName,
+          customerPhone: d.customerPhone,
+          partyId: d.partyId,
+          cart: d.cart || [],
+          orderDiscountType: d.orderDiscountType,
+          orderDiscountValue: d.orderDiscountValue,
+          paymentMode: d.paymentMode,
+          subtotal: d.subtotal ? Number(d.subtotal) : undefined,
+          taxTotal: d.taxTotal ? Number(d.taxTotal) : undefined,
+          grandTotal: d.grandTotal ? Number(d.grandTotal) : undefined,
+          notes: d.notes,
+          createdAt: d.createdAt || new Date().toISOString(),
+          updatedAt: d.updatedAt || new Date().toISOString(),
+        }));
+
+        const otherOrders = this.stagedOrders.filter(o => 
+          (o.businessId && o.businessId !== activeTenantId) || 
+          (targetLocId && targetLocId !== 'ALL' && o.locationId && o.locationId !== targetLocId)
+        );
+        this.stagedOrders = [...fetched, ...otherOrders];
+        this.saveToStorage();
+        this.notifyListeners();
+        return this.getStagedOrders(targetLocId);
+      }
+    } catch (e) {
+      console.warn('Could not fetch remote staged orders, using offline local cache:', e);
+    }
+    return this.getStagedOrders(targetLocId);
+  }
+
+  async stageCurrentOrder(orderData: {
+    id?: string;
+    label: string;
+    cart: CartItem[];
+    locationId?: string;
+    locationName?: string;
+    customerName?: string;
+    customerPhone?: string;
+    partyId?: string;
+    selectedPartyId?: string;
+    orderDiscountType?: 'PERCENT' | 'FLAT';
+    orderDiscountValue?: string;
+    paymentMode?: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'BANK_TRANSFER';
+    subtotal?: number;
+    taxTotal?: number;
+    grandTotal?: number;
+    notes?: string;
+  }): Promise<StagedOrder> {
+    const activeTenantId = this.currentTenant?.id || '';
+    const locId = orderData.locationId || this.activeLocation?.id;
+    const locName = orderData.locationName || this.activeLocation?.name;
+    const now = new Date().toISOString();
+
+    const existingIdx = orderData.id ? this.stagedOrders.findIndex(o => o.id === orderData.id) : -1;
+    let targetOrder: StagedOrder;
+
+    if (existingIdx >= 0) {
+      targetOrder = {
+        ...this.stagedOrders[existingIdx],
+        ...orderData,
+        partyId: orderData.partyId || orderData.selectedPartyId || this.stagedOrders[existingIdx].partyId,
+        businessId: activeTenantId,
+        locationId: locId,
+        locationName: locName,
+        updatedAt: now,
+      };
+      this.stagedOrders[existingIdx] = targetOrder;
+    } else {
+      targetOrder = {
+        id: orderData.id || `stg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        businessId: activeTenantId,
+        locationId: locId,
+        locationName: locName,
+        label: orderData.label,
+        cart: orderData.cart,
+        customerName: orderData.customerName,
+        customerPhone: orderData.customerPhone,
+        partyId: orderData.partyId || orderData.selectedPartyId,
+        orderDiscountType: orderData.orderDiscountType,
+        orderDiscountValue: orderData.orderDiscountValue,
+        paymentMode: orderData.paymentMode,
+        subtotal: orderData.subtotal,
+        taxTotal: orderData.taxTotal,
+        grandTotal: orderData.grandTotal,
+        notes: orderData.notes,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.stagedOrders.unshift(targetOrder);
+    }
+
+    this.saveToStorage();
+    this.notifyListeners();
+
+    try {
+      const payload = {
+        id: targetOrder.id,
+        label: targetOrder.label,
+        locationId: targetOrder.locationId,
+        locationName: targetOrder.locationName,
+        customerName: targetOrder.customerName,
+        customerPhone: targetOrder.customerPhone,
+        partyId: targetOrder.partyId,
+        cart: targetOrder.cart,
+        orderDiscountType: targetOrder.orderDiscountType,
+        orderDiscountValue: targetOrder.orderDiscountValue,
+        paymentMode: targetOrder.paymentMode,
+        subtotal: targetOrder.subtotal,
+        taxTotal: targetOrder.taxTotal,
+        grandTotal: targetOrder.grandTotal,
+        notes: targetOrder.notes,
+      };
+
+      const res = await apiClient.post('/staged-orders', payload);
+      if (res.data && (res.data._id || res.data.id)) {
+        const syncedId = res.data._id || res.data.id;
+        if (syncedId !== targetOrder.id) {
+          targetOrder.id = syncedId;
+          this.saveToStorage();
+          this.notifyListeners();
+        }
+      }
+    } catch (err) {
+      console.warn('Backend staged order sync failed, queued in offline local storage:', err);
+    }
+
+    return targetOrder;
+  }
+
+  async updateStagedOrderLabel(id: string, newLabel: string): Promise<StagedOrder | null> {
+    const idx = this.stagedOrders.findIndex(o => o.id === id);
+    if (idx === -1) return null;
+    this.stagedOrders[idx].label = newLabel;
+    this.stagedOrders[idx].updatedAt = new Date().toISOString();
+    this.saveToStorage();
+    this.notifyListeners();
+
+    try {
+      await apiClient.put(`/staged-orders/${id}`, {
+        id,
+        label: newLabel,
+        cart: this.stagedOrders[idx].cart,
+      });
+    } catch (e) {
+      console.warn('Backend update staged order label failed, saved locally:', e);
+    }
+    return this.stagedOrders[idx];
+  }
+
+  async deleteStagedOrder(id: string): Promise<boolean> {
+    this.stagedOrders = this.stagedOrders.filter(o => o.id !== id);
+    this.saveToStorage();
+    this.notifyListeners();
+
+    try {
+      await apiClient.delete(`/staged-orders/${id}`);
+      return true;
+    } catch (err) {
+      console.warn('Backend staged order delete failed, removed locally:', err);
+      return true;
+    }
+  }
 }
+
 
 export const store = new StoreService();
 

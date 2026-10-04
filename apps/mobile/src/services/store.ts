@@ -5,6 +5,7 @@ import {
   Party, 
   Invoice, 
   CartItem, 
+  StagedOrder,
   PurchaseOrder, 
   LedgerEntry, 
   DashboardStats, 
@@ -48,6 +49,7 @@ class MobileStore {
   private purchaseOrders: PurchaseOrder[] = [];
   private ledgerEntries: LedgerEntry[] = [];
   private cart: CartItem[] = [];
+  private stagedOrders: StagedOrder[] = [];
   private users: User[] = [];
   private locations: StoreLocation[] = [];
   private expenses: Expense[] = [];
@@ -458,6 +460,79 @@ class MobileStore {
   clearCart() {
     this.cart = [];
     this.notify();
+  }
+
+  setCart(newCart: CartItem[]) {
+    this.cart = [...newCart];
+    this.notify();
+  }
+
+  // --- Staged / Draft Orders ---
+  getStagedOrders(): StagedOrder[] {
+    const businessId = this.activeUser?.businessId || '';
+    const locId = this.activeLocation?.id;
+    return this.stagedOrders.filter(o => {
+      const matchBiz = !businessId || !o.businessId || o.businessId === businessId;
+      const matchLoc = !locId || !o.locationId || o.locationId === locId;
+      return matchBiz && matchLoc;
+    });
+  }
+
+  stageCurrentOrder(orderData: Omit<StagedOrder, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): StagedOrder {
+    const businessId = this.activeUser?.businessId || '';
+    const now = new Date().toISOString();
+    const existingIdx = orderData.id ? this.stagedOrders.findIndex(o => o.id === orderData.id) : -1;
+
+    let staged: StagedOrder;
+    if (existingIdx >= 0) {
+      staged = {
+        ...this.stagedOrders[existingIdx],
+        ...orderData,
+        businessId,
+        updatedAt: now,
+      };
+      this.stagedOrders[existingIdx] = staged;
+    } else {
+      staged = {
+        ...orderData,
+        id: orderData.id || `stg-${Date.now()}`,
+        businessId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.stagedOrders.unshift(staged);
+    }
+
+    this.notify();
+    return staged;
+  }
+
+  resumeStagedOrder(stagedOrderId: string, keepInDrafts: boolean = false): StagedOrder | null {
+    const found = this.stagedOrders.find(o => o.id === stagedOrderId);
+    if (!found) return null;
+    if (!keepInDrafts) {
+      this.stagedOrders = this.stagedOrders.filter(o => o.id !== stagedOrderId);
+    }
+    this.cart = [...found.items];
+    this.notify();
+    return found;
+  }
+
+  deleteStagedOrder(stagedOrderId: string): void {
+    this.stagedOrders = this.stagedOrders.filter(o => o.id !== stagedOrderId);
+    this.notify();
+  }
+
+  updateStagedOrderLabel(stagedOrderId: string, label: string, notes?: string): boolean {
+    const idx = this.stagedOrders.findIndex(o => o.id === stagedOrderId);
+    if (idx === -1) return false;
+    this.stagedOrders[idx].label = label.trim() || this.stagedOrders[idx].label;
+    if (notes !== undefined) {
+      this.stagedOrders[idx].notes = notes;
+    }
+    this.stagedOrders[idx].updatedAt = new Date().toISOString();
+    this.notify();
+    return true;
   }
 
   // --- Invoices & Sales ---
@@ -1184,6 +1259,173 @@ class MobileStore {
     this.categories = this.categories.filter(c => c.id !== categoryId);
     this.notify();
   }
+
+  // --- Staged / Held Orders (Multi-Tenant & Location Scoped with Cloud DB Sync) ---
+  getStagedOrders(locationId?: string): StagedOrder[] {
+    const activeTenantId = this.businessProfile?.id || this.activeUser?.businessId || '';
+    const targetLocId = locationId || this.activeLocation?.id;
+    return this.stagedOrders.filter(order => {
+      const matchTenant = !order.businessId || order.businessId === activeTenantId;
+      const matchLoc = !targetLocId || targetLocId === 'ALL' || !order.locationId || order.locationId === targetLocId;
+      return matchTenant && matchLoc;
+    });
+  }
+
+  async fetchStagedOrders(locationId?: string): Promise<StagedOrder[]> {
+    const activeTenantId = this.businessProfile?.id || this.activeUser?.businessId || '';
+    const targetLocId = locationId || this.activeLocation?.id;
+    try {
+      const params: Record<string, string> = {};
+      if (targetLocId && targetLocId !== 'ALL') {
+        params.locationId = targetLocId;
+      }
+      const res = await apiClient.get('/staged-orders', { params });
+      if (Array.isArray(res.data)) {
+        const fetched: StagedOrder[] = res.data.map((d: any) => ({
+          id: d._id || d.id,
+          businessId: d.businessId || activeTenantId,
+          locationId: d.locationId,
+          locationName: d.locationName,
+          label: d.label,
+          customerName: d.customerName,
+          customerPhone: d.customerPhone,
+          partyId: d.partyId,
+          cart: d.cart || [],
+          orderDiscountType: d.orderDiscountType,
+          orderDiscountValue: d.orderDiscountValue,
+          paymentMode: d.paymentMode,
+          subtotal: d.subtotal ? Number(d.subtotal) : undefined,
+          taxTotal: d.taxTotal ? Number(d.taxTotal) : undefined,
+          grandTotal: d.grandTotal ? Number(d.grandTotal) : undefined,
+          notes: d.notes,
+          createdAt: d.createdAt || new Date().toISOString(),
+          updatedAt: d.updatedAt || new Date().toISOString(),
+        }));
+
+        const otherOrders = this.stagedOrders.filter(o => 
+          (o.businessId && o.businessId !== activeTenantId) || 
+          (targetLocId && targetLocId !== 'ALL' && o.locationId && o.locationId !== targetLocId)
+        );
+        this.stagedOrders = [...fetched, ...otherOrders];
+        this.notify();
+        return this.getStagedOrders(targetLocId);
+      }
+    } catch (e) {
+      console.warn('Could not fetch remote staged orders in mobile store:', e);
+    }
+    return this.getStagedOrders(targetLocId);
+  }
+
+  async stageCurrentOrder(orderData: {
+    id?: string;
+    label: string;
+    cart: CartItem[];
+    locationId?: string;
+    locationName?: string;
+    customerName?: string;
+    customerPhone?: string;
+    partyId?: string;
+    selectedPartyId?: string;
+    orderDiscountType?: 'PERCENT' | 'FLAT';
+    orderDiscountValue?: string;
+    paymentMode?: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'BANK_TRANSFER';
+    subtotal?: number;
+    taxTotal?: number;
+    grandTotal?: number;
+    notes?: string;
+  }): Promise<StagedOrder> {
+    const activeTenantId = this.businessProfile?.id || this.activeUser?.businessId || '';
+    const locId = orderData.locationId || this.activeLocation?.id;
+    const locName = orderData.locationName || this.activeLocation?.name;
+    const now = new Date().toISOString();
+
+    const existingIdx = orderData.id ? this.stagedOrders.findIndex(o => o.id === orderData.id) : -1;
+    let targetOrder: StagedOrder;
+
+    if (existingIdx >= 0) {
+      targetOrder = {
+        ...this.stagedOrders[existingIdx],
+        ...orderData,
+        partyId: orderData.partyId || orderData.selectedPartyId || this.stagedOrders[existingIdx].partyId,
+        businessId: activeTenantId,
+        locationId: locId,
+        locationName: locName,
+        updatedAt: now,
+      };
+      this.stagedOrders[existingIdx] = targetOrder;
+    } else {
+      targetOrder = {
+        id: orderData.id || `stg_mob_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        businessId: activeTenantId,
+        locationId: locId,
+        locationName: locName,
+        label: orderData.label,
+        cart: orderData.cart,
+        customerName: orderData.customerName,
+        customerPhone: orderData.customerPhone,
+        partyId: orderData.partyId || orderData.selectedPartyId,
+        orderDiscountType: orderData.orderDiscountType,
+        orderDiscountValue: orderData.orderDiscountValue,
+        paymentMode: orderData.paymentMode,
+        subtotal: orderData.subtotal,
+        taxTotal: orderData.taxTotal,
+        grandTotal: orderData.grandTotal,
+        notes: orderData.notes,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.stagedOrders.unshift(targetOrder);
+    }
+
+    this.notify();
+
+    try {
+      const payload = {
+        id: targetOrder.id,
+        label: targetOrder.label,
+        locationId: targetOrder.locationId,
+        locationName: targetOrder.locationName,
+        customerName: targetOrder.customerName,
+        customerPhone: targetOrder.customerPhone,
+        partyId: targetOrder.partyId,
+        cart: targetOrder.cart,
+        orderDiscountType: targetOrder.orderDiscountType,
+        orderDiscountValue: targetOrder.orderDiscountValue,
+        paymentMode: targetOrder.paymentMode,
+        subtotal: targetOrder.subtotal,
+        taxTotal: targetOrder.taxTotal,
+        grandTotal: targetOrder.grandTotal,
+        notes: targetOrder.notes,
+      };
+
+      const res = await apiClient.post('/staged-orders', payload);
+      if (res.data && (res.data._id || res.data.id)) {
+        const syncedId = res.data._id || res.data.id;
+        if (syncedId !== targetOrder.id) {
+          targetOrder.id = syncedId;
+          this.notify();
+        }
+      }
+    } catch (err) {
+      console.warn('Mobile backend staged order sync failed:', err);
+    }
+
+    return targetOrder;
+  }
+
+  async deleteStagedOrder(id: string): Promise<boolean> {
+    this.stagedOrders = this.stagedOrders.filter(o => o.id !== id);
+    this.notify();
+
+    try {
+      await apiClient.delete(`/staged-orders/${id}`);
+      return true;
+    } catch (err) {
+      console.warn('Mobile backend staged order delete failed:', err);
+      return true;
+    }
+  }
 }
+
 
 export const store = new MobileStore();

@@ -21,9 +21,17 @@ import {
   Divide,
   Calculator,
   Scale,
-  QrCode
+  QrCode,
+  Clock,
+  Bookmark,
+  PauseCircle,
+  PlayCircle,
+  Layers,
+  Edit3,
+  AlertCircle,
+  Check
 } from 'lucide-react';
-import { Item, Party, CartItem, Invoice, ItemCategory } from '../types';
+import { Item, Party, CartItem, Invoice, ItemCategory, StagedOrder } from '../types';
 import { store } from '../services/store';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { WebcamScannerModal } from '../components/WebcamScannerModal';
@@ -62,6 +70,35 @@ const parseFractionString = (str: string): number | null => {
   return null;
 };
 
+// Helper for relative timestamps on drafts
+const formatTimeAgo = (isoString: string): string => {
+  try {
+    const diffSec = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+    if (diffSec < 60) return 'Just now';
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${Math.floor(diffHours / 24)}d ago`;
+  } catch {
+    return '';
+  }
+};
+
+const QUICK_STAGE_PRESETS = [
+  'Table 1',
+  'Table 2',
+  'Table 3',
+  'Table 4',
+  'Table 5',
+  'Table 6',
+  'Takeaway',
+  'Token #1',
+  'Token #2',
+  'Drive-Thru',
+  'Phone Order'
+];
+
 interface PosBillingViewProps {
   onInvoiceCreated: (invoice: Invoice) => void;
 }
@@ -88,6 +125,29 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const [cart, setCart] = useState<CartItem[]>(store.getPosCart());
   // Map of raw typed input string per item to allow typing "0.", "0.0", "0.01", "4/30" without React resetting mid-keystroke
   const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({});
+
+  // Staged Orders / Multi-Drafts State
+  const [stagedOrders, setStagedOrders] = useState<StagedOrder[]>(() => store.getStagedOrders(store.getActiveLocation().id));
+  const [activeStagedOrderId, setActiveStagedOrderId] = useState<string | null>(null);
+  const [isStageModalOpen, setIsStageModalOpen] = useState<boolean>(false);
+  const [stageSaveMode, setStageSaveMode] = useState<'UPDATE' | 'NEW'>('NEW');
+  const [stageLabelInput, setStageLabelInput] = useState<string>('');
+  const [stageNotesInput, setStageNotesInput] = useState<string>('');
+  const [isDraftsDrawerOpen, setIsDraftsDrawerOpen] = useState<boolean>(false);
+  const [draftSearch, setDraftSearch] = useState<string>('');
+  const [conflictDraftToResume, setConflictDraftToResume] = useState<StagedOrder | null>(null);
+  const [isEditingLabelId, setIsEditingLabelId] = useState<string | null>(null);
+  const [editLabelText, setEditLabelText] = useState<string>('');
+
+  // Confirmation Dialog Modal State (for Discard / Delete / Clear Cart actions)
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    confirmVariant?: 'danger' | 'warning' | 'primary';
+    onConfirm: () => void;
+  } | null>(null);
 
   // Fraction / Parts Calculator Modal State (Strictly for parts-enabled items)
   const [fractionModal, setFractionModal] = useState<{
@@ -210,6 +270,11 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   useEffect(() => {
     refreshData();
+    // Initial fetch of cloud staged orders on load or branch switch
+    store.fetchStagedOrders(selectedLocationId).then(orders => {
+      setStagedOrders(orders);
+    }).catch(() => {});
+
     const interval = setInterval(() => {
       const currentLocId = store.getActiveLocation().id;
       if (currentLocId !== selectedLocationId) {
@@ -218,8 +283,52 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         refreshData();
       }
     }, 400);
-    return () => clearInterval(interval);
+
+    let lastFocusFetch = 0;
+    const onFocus = () => {
+      const now = Date.now();
+      // Fetch only if at least 15s elapsed since last tab focus
+      if (now - lastFocusFetch > 15000) {
+        lastFocusFetch = now;
+        store.fetchStagedOrders(store.getActiveLocation().id).then(orders => {
+          setStagedOrders(orders);
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [selectedLocationId]);
+
+  // Global Keyboard Shortcuts (Alt+H for Hold, Alt+S for Save Order, Alt+D for Drafts)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && (e.key === 'h' || e.key === 'H')) {
+        e.preventDefault();
+        if (cart.length > 0) {
+          if (activeStagedOrderId) {
+            handleQuickSaveActiveDraft();
+          } else {
+            handleOpenStageModal();
+          }
+        }
+      } else if (e.altKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        if (cart.length > 0 && activeStagedOrderId) {
+          handleQuickSaveActiveDraft();
+        }
+      } else if (e.altKey && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        setIsDraftsDrawerOpen(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cart, activeStagedOrderId, stagedOrders]);
 
   const activeLocation = store.getActiveLocation();
 
@@ -592,6 +701,211 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const effectivePaid = paidAmountInput !== '' ? Number(paidAmountInput) : (paymentMode === 'CREDIT' ? 0 : grandTotal);
   const balance = Math.max(0, grandTotal - effectivePaid);
 
+  // Staged Orders / Multi-Draft Actions
+  const handleOpenStageModal = () => {
+    if (cart.length === 0) return;
+    const activeDraft = activeStagedOrderId ? stagedOrders.find(o => o.id === activeStagedOrderId) : null;
+    if (activeDraft) {
+      setStageSaveMode('UPDATE');
+      setStageLabelInput(activeDraft.label);
+      setStageNotesInput(activeDraft.notes || notes || '');
+    } else {
+      setStageSaveMode('NEW');
+      const count = stagedOrders.length + 1;
+      let defaultLabel = customerName.trim();
+      if (!defaultLabel || defaultLabel.startsWith('Customer ') || defaultLabel === 'Walk-in Retail Customer') {
+        defaultLabel = `Order #${count}`;
+      }
+      setStageLabelInput(defaultLabel);
+      setStageNotesInput(notes || '');
+    }
+    setIsStageModalOpen(true);
+  };
+
+  const handleQuickSaveActiveDraft = () => {
+    if (cart.length === 0 || !activeStagedOrderId) return;
+    const activeDraft = stagedOrders.find(o => o.id === activeStagedOrderId);
+    const count = stagedOrders.length + 1;
+    const label = activeDraft?.label || customerName.trim() || `Order #${count}`;
+    store.stageCurrentOrder({
+      id: activeStagedOrderId,
+      label,
+      cart,
+      customerName: customerName.trim() || undefined,
+      customerPhone: customerPhone.trim() || undefined,
+      selectedPartyId: selectedPartyId || undefined,
+      orderDiscountType,
+      orderDiscountValue,
+      paymentMode,
+      notes: notes || activeDraft?.notes || undefined,
+      locationId: activeLocation.id,
+    });
+
+    const updated = store.getStagedOrders(activeLocation.id);
+    setStagedOrders(updated);
+    setActiveStagedOrderId(null);
+
+    // Clear active cart & customer inputs
+    updateCart([]);
+    setCustomerName('');
+    setCustomerPhone('');
+    setSelectedPartyId('');
+    setShowDiscount(false);
+    setOrderDiscountValue('0');
+    setPaidAmountInput('');
+    setNotes('');
+  };
+
+  const handleConfirmStageOrder = (overrideMode?: 'UPDATE' | 'NEW') => {
+    if (cart.length === 0) return;
+    const mode = overrideMode || stageSaveMode;
+    const count = stagedOrders.length + 1;
+    const finalLabel = stageLabelInput.trim() || `Order #${count}`;
+    const targetId = (mode === 'UPDATE' && activeStagedOrderId) ? activeStagedOrderId : undefined;
+
+    store.stageCurrentOrder({
+      id: targetId,
+      label: finalLabel,
+      cart,
+      customerName: customerName.trim() || undefined,
+      customerPhone: customerPhone.trim() || undefined,
+      selectedPartyId: selectedPartyId || undefined,
+      orderDiscountType,
+      orderDiscountValue,
+      paymentMode,
+      notes: stageNotesInput.trim() || notes || undefined,
+      locationId: activeLocation.id,
+    });
+
+    const updated = store.getStagedOrders(activeLocation.id);
+    setStagedOrders(updated);
+    setActiveStagedOrderId(null);
+
+    // Clear active cart & customer inputs
+    updateCart([]);
+    setCustomerName('');
+    setCustomerPhone('');
+    setSelectedPartyId('');
+    setShowDiscount(false);
+    setOrderDiscountValue('0');
+    setPaidAmountInput('');
+    setNotes('');
+    setIsStageModalOpen(false);
+  };
+
+  const doResumeOrder = (order: StagedOrder) => {
+    updateCart(order.cart);
+    setCustomerName(order.customerName || '');
+    setCustomerPhone(order.customerPhone || '');
+    setSelectedPartyId(order.selectedPartyId || '');
+    setOrderDiscountType(order.orderDiscountType || 'PERCENT');
+    setOrderDiscountValue(order.orderDiscountValue || '0');
+    if (order.orderDiscountValue && Number(order.orderDiscountValue) > 0) {
+      setShowDiscount(true);
+    } else {
+      setShowDiscount(false);
+    }
+    const mode = order.paymentMode;
+    if (mode === 'CASH' || mode === 'UPI' || mode === 'CARD' || mode === 'CREDIT') {
+      setPaymentMode(mode);
+    } else {
+      setPaymentMode('CASH');
+    }
+    setNotes(order.notes || '');
+    setActiveStagedOrderId(order.id);
+    setIsDraftsDrawerOpen(false);
+    setConflictDraftToResume(null);
+  };
+
+  const handleResumeStagedOrder = (order: StagedOrder) => {
+    if (cart.length > 0 && activeStagedOrderId !== order.id) {
+      setConflictDraftToResume(order);
+      return;
+    }
+    doResumeOrder(order);
+  };
+
+  const handleResolveConflict = (action: 'stage' | 'discard') => {
+    if (!conflictDraftToResume) return;
+
+    if (action === 'stage') {
+      const count = stagedOrders.length + 1;
+      let label = customerName.trim();
+      if (!label || label.startsWith('Customer ') || label === 'Walk-in Retail Customer') {
+        label = `Order #${count}`;
+      }
+      store.stageCurrentOrder({
+        label,
+        cart,
+        customerName: customerName.trim() || undefined,
+        customerPhone: customerPhone.trim() || undefined,
+        selectedPartyId: selectedPartyId || undefined,
+        orderDiscountType,
+        orderDiscountValue,
+        paymentMode,
+        notes: notes || undefined,
+        locationId: activeLocation.id,
+      });
+    }
+
+    doResumeOrder(conflictDraftToResume);
+    setStagedOrders(store.getStagedOrders(activeLocation.id));
+  };
+
+  const handlePromptClearCart = () => {
+    if (cart.length === 0) return;
+    const activeDraft = activeStagedOrderId ? stagedOrders.find(o => o.id === activeStagedOrderId) : null;
+    setConfirmModal({
+      isOpen: true,
+      title: activeDraft ? 'Discard Changes & Clear Cart?' : 'Clear Active Cart?',
+      message: activeDraft 
+        ? `You are currently editing held order "${activeDraft.label}". Are you sure you want to discard your unsaved changes and clear the cart?`
+        : `Are you sure you want to clear all ${cart.length} item(s) (₹${grandTotal.toFixed(2)}) from the cart?`,
+      confirmLabel: 'Yes, Clear Cart',
+      confirmVariant: 'danger',
+      onConfirm: () => {
+        updateCart([]);
+        setQtyInputMap({});
+        setActiveStagedOrderId(null);
+        setConfirmModal(null);
+      }
+    });
+  };
+
+  const handleDeleteStagedOrder = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const draft = stagedOrders.find(o => o.id === id);
+    const draftLabel = draft?.label || 'Held Order';
+    const draftTotal = draft?.cart?.reduce((s, c) => s + (Number(c.unitPrice || 0) * Number(c.quantity || 0)), 0) || 0;
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Discard & Delete Held Order?',
+      message: `Are you sure you want to permanently delete held draft "${draftLabel}" (${draft?.cart?.length || 0} items • ₹${draftTotal.toFixed(2)})? This cannot be undone.`,
+      confirmLabel: 'Yes, Delete Order',
+      confirmVariant: 'danger',
+      onConfirm: () => {
+        store.deleteStagedOrder(id);
+        setStagedOrders(store.getStagedOrders(activeLocation.id));
+        if (activeStagedOrderId === id) {
+          setActiveStagedOrderId(null);
+          updateCart([]);
+          setQtyInputMap({});
+        }
+        setConfirmModal(null);
+      }
+    });
+  };
+
+  const handleSaveDraftLabel = (id: string) => {
+    if (editLabelText.trim()) {
+      store.updateStagedOrderLabel(id, editLabelText.trim());
+      setStagedOrders(store.getStagedOrders(activeLocation.id));
+    }
+    setIsEditingLabelId(null);
+    setEditLabelText('');
+  };
+
   // Open Checkout / Customer Confirmation Modal post item selection
   const handleOpenCheckoutModal = () => {
     if (cart.length === 0) return;
@@ -709,6 +1023,13 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       notes,
     });
 
+    // Auto-purge active staged order if billed
+    if (activeStagedOrderId) {
+      store.deleteStagedOrder(activeStagedOrderId);
+      setActiveStagedOrderId(null);
+      setStagedOrders(store.getStagedOrders(activeLocation.id));
+    }
+
     // Reset State
     updateCart([]);
     setPaidAmountInput('');
@@ -772,6 +1093,163 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                 <RotateCw size={13} style={{ animation: isRefreshing ? 'spin 0.75s linear infinite' : 'none' }} />
                 <span>{isRefreshing ? 'Refreshing...' : 'Refresh Stocks'}</span>
               </button>
+            </div>
+
+            {/* Staged Orders / Multi-Drafts Quick Ribbon */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: stagedOrders.length > 0 ? '#fffbeb' : '#f8fafc',
+              border: `1px solid ${stagedOrders.length > 0 ? '#fde68a' : '#e2e8f0'}`,
+              borderRadius: 'var(--radius-md, 8px)',
+              padding: '6px 10px',
+              marginBottom: 10,
+              gap: 8,
+              flexWrap: 'wrap',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsDraftsDrawerOpen(true)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    backgroundColor: stagedOrders.length > 0 ? '#d97706' : '#64748b',
+                    color: '#ffffff',
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    fontSize: '0.74rem',
+                    fontWeight: 700,
+                    border: 'none',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.08)'
+                  }}
+                  title="View all held orders / drafts (Alt+D)"
+                >
+                  <Layers size={13} />
+                  <span>Drafts ({stagedOrders.length})</span>
+                </button>
+
+                {stagedOrders.length === 0 ? (
+                  <span style={{ fontSize: '0.73rem', color: 'var(--neutral-500)' }}>
+                    No orders on hold. Use <strong>Alt+H</strong> or click "Hold Order" to stage the current cart.
+                  </span>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
+                    {stagedOrders.slice(0, 5).map((draft) => {
+                      const isActive = activeStagedOrderId === draft.id;
+                      const draftTotal = draft.cart.reduce((s, c) => s + (c.unitPrice * c.quantity), 0);
+                      return (
+                        <div
+                          key={draft.id}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            backgroundColor: isActive ? '#fef3c7' : '#ffffff',
+                            border: `1.5px solid ${isActive ? '#d97706' : '#cbd5e1'}`,
+                            padding: '3px 8px',
+                            borderRadius: 16,
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color: isActive ? '#92400e' : '#334155',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleResumeStagedOrder(draft)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'inherit',
+                              font: 'inherit',
+                              fontWeight: 'inherit',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: 0
+                            }}
+                            title={`Click to resume draft: ${draft.label} (${formatTimeAgo(draft.createdAt)})`}
+                          >
+                            <Bookmark size={11} color={isActive ? '#d97706' : '#64748b'} />
+                            <span>{draft.label}</span>
+                            <span style={{ color: '#059669', fontWeight: 800 }}>₹{draftTotal.toFixed(0)}</span>
+                            <span style={{ fontSize: '0.64rem', color: '#94a3b8' }}>({draft.cart.length})</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteStagedOrder(draft.id, e)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#94a3b8',
+                              cursor: 'pointer',
+                              padding: '0 2px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              fontSize: '0.70rem',
+                              lineHeight: 1
+                            }}
+                            title="Discard this draft"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {stagedOrders.length > 5 && (
+                      <button
+                        type="button"
+                        onClick={() => setIsDraftsDrawerOpen(true)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#d97706',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        +{stagedOrders.length - 5} more...
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {cart.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleOpenStageModal}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    backgroundColor: '#fef3c7',
+                    border: '1px solid #fde68a',
+                    color: '#b45309',
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    fontSize: '0.73rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                  }}
+                  title="Stage / Hold active cart items (Alt+H)"
+                >
+                  <PauseCircle size={13} />
+                  <span>Hold Active (Alt+H)</span>
+                </button>
+              )}
             </div>
 
             {/* Search Input & Multi-Select Category Dropdown */}
@@ -1309,29 +1787,80 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         {/* Right Column: Active Cart & Billing Actions */}
         <div className="pos-cart-panel" style={{ height: '100%', maxHeight: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Cart Header */}
-          <div className="card-header" style={{ padding: '12px 14px', borderBottom: '1px solid var(--surface-border)', flexShrink: 0 }}>
+          <div className="card-header" style={{ padding: '10px 14px', borderBottom: '1px solid var(--surface-border)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <ShoppingBag size={17} color="var(--primary-500)" />
-              <span className="card-title" style={{ fontSize: '0.92rem' }}>
-                Cart ({cart.reduce((s, c) => s + (c.quantity || 0), 0).toLocaleString(undefined, { maximumFractionDigits: 3 })} {cart.length === 1 ? 'item' : 'items'})
+              <span className="card-title" style={{ fontSize: '0.90rem', fontWeight: 800 }}>
+                Cart ({cart.reduce((s, c) => s + (c.quantity || 0), 0).toLocaleString(undefined, { maximumFractionDigits: 3 })})
               </span>
             </div>
-            {cart.length > 0 && (
-              <button 
-                className="btn btn-secondary btn-sm" 
-                style={{ fontSize: '0.72rem', padding: '3px 8px' }}
-                onClick={() => {
-                  updateCart([]);
-                  setQtyInputMap({});
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{
+                  fontSize: '0.70rem',
+                  padding: '3px 8px',
+                  backgroundColor: stagedOrders.length > 0 ? '#fffbeb' : undefined,
+                  borderColor: stagedOrders.length > 0 ? '#fde68a' : undefined,
+                  color: stagedOrders.length > 0 ? '#b45309' : undefined,
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4
                 }}
+                onClick={() => setIsDraftsDrawerOpen(true)}
+                title="View all staged orders / drafts (Alt+D)"
               >
-                Clear Cart
+                <Layers size={11} />
+                <span>Drafts ({stagedOrders.length})</span>
               </button>
-            )}
+
+              {cart.length > 0 && (
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  style={{ fontSize: '0.70rem', padding: '3px 8px' }}
+                  onClick={handlePromptClearCart}
+                  title="Clear active cart / discard items"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Cart Items List with Independent Scroll */}
           <div className="pos-cart-items" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', padding: '10px 12px', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            
+            {/* Active Draft Banner */}
+            {activeStagedOrderId && (() => {
+              const currentDraft = stagedOrders.find(o => o.id === activeStagedOrderId);
+              return (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '7px 10px',
+                  backgroundColor: '#fffbeb',
+                  borderRadius: 8,
+                  border: '1.5px solid #fde68a',
+                  color: '#92400e',
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                  gap: 8,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Bookmark size={13} color="#d97706" />
+                    <span>Editing Held Order: <strong>{currentDraft?.label || 'Held Order'}</strong></span>
+                  </div>
+                  <span style={{ fontSize: '0.66rem', backgroundColor: '#fef3c7', color: '#b45309', padding: '2px 7px', borderRadius: 4, border: '1px solid #fde68a' }}>
+                    Auto-clears on Bill
+                  </span>
+                </div>
+              );
+            })()}
+
             {cart.length === 0 ? (
               <div style={{ textAlign: 'center', margin: 'auto', color: 'var(--neutral-400)', padding: 24 }}>
                 <ShoppingBag size={38} style={{ margin: '0 auto 8px', opacity: 0.3 }} />
@@ -1577,7 +2106,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
             )}
           </div>
 
-          {/* Cart Bottom: Calculations & Proceed to Billing Action */}
+          {/* Cart Bottom: Calculations & Billing Actions */}
           {cart.length > 0 && (
             <div style={{ padding: 12, borderTop: '1px solid var(--surface-border)', backgroundColor: '#ffffff', flexShrink: 0 }}>
               
@@ -1599,15 +2128,69 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                 </div>
               </div>
 
-              {/* Proceed to Bill Generation Button */}
-              <button 
-                className="btn btn-primary" 
-                style={{ width: '100%', padding: '11px', fontSize: '0.92rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-                onClick={handleOpenCheckoutModal}
-              >
-                <span>Proceed to Bill (₹{grandTotal.toFixed(2)})</span>
-                <ArrowRight size={16} />
-              </button>
+              {/* Action Buttons: Hold / Save Order & Proceed to Bill */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.7fr', gap: 8 }}>
+                {activeStagedOrderId ? (
+                  <button
+                    type="button"
+                    onClick={handleQuickSaveActiveDraft}
+                    style={{
+                      padding: '10px 8px',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      border: '1.5px solid #86efac',
+                      backgroundColor: '#f0fdf4',
+                      color: '#15803d',
+                      fontSize: '0.80rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      transition: 'all 0.15s ease',
+                      boxShadow: '0 1px 3px rgba(21, 128, 61, 0.12)'
+                    }}
+                    title="Save updated order to hold & sync across devices (Alt+S)"
+                  >
+                    <span>💾 Save Order (Alt+S)</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleOpenStageModal}
+                    style={{
+                      padding: '10px 8px',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      border: '1.5px solid #fde68a',
+                      backgroundColor: '#fffbeb',
+                      color: '#b45309',
+                      fontSize: '0.80rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 5,
+                      transition: 'all 0.15s ease',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                    }}
+                    title="Stage / Hold this order with a label (Alt+H)"
+                  >
+                    <PauseCircle size={15} />
+                    <span>Hold (Alt+H)</span>
+                  </button>
+                )}
+
+
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '10px 12px', fontSize: '0.88rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                  onClick={handleOpenCheckoutModal}
+                >
+                  <span>Bill ₹{grandTotal.toFixed(2)}</span>
+                  <ArrowRight size={15} />
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -2446,6 +3029,691 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           </div>
         );
       })()}
+
+      {/* Modal 1: Hold / Stage Current Order Prompt */}
+      {isStageModalOpen && (
+        <div className="modal-overlay">
+          <div 
+            className="modal-content" 
+            style={{ maxWidth: 460, width: '100%', borderRadius: 'var(--radius-lg, 12px)', overflow: 'hidden', backgroundColor: '#ffffff' }}
+          >
+            {/* Header */}
+            <div className="card-header" style={{ padding: '14px 18px', borderBottom: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fffbeb' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <PauseCircle size={18} color="#d97706" />
+                <span className="card-title" style={{ fontSize: '1rem', fontWeight: 800, color: '#92400e' }}>
+                  Hold / Stage Order
+                </span>
+              </div>
+              <button 
+                type="button"
+                className="btn btn-secondary btn-icon btn-sm" 
+                onClick={() => setIsStageModalOpen(false)}
+                title="Cancel"
+                style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="card-body" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              
+              {/* If editing an active resumed draft, show mode selector */}
+              {activeStagedOrderId && (() => {
+                const currentDraft = stagedOrders.find(o => o.id === activeStagedOrderId);
+                return (
+                  <div style={{
+                    padding: '8px 10px',
+                    backgroundColor: '#fffbeb',
+                    borderRadius: 8,
+                    border: '1px solid #fde68a',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6
+                  }}>
+                    <div style={{ fontSize: '0.72rem', color: '#92400e', fontWeight: 700 }}>
+                      Currently editing resumed draft: <strong>{currentDraft?.label || 'Held Order'}</strong>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStageSaveMode('UPDATE');
+                          if (currentDraft?.label) setStageLabelInput(currentDraft.label);
+                        }}
+                        style={{
+                          padding: '6px 8px',
+                          borderRadius: 6,
+                          border: `1.5px solid ${stageSaveMode === 'UPDATE' ? '#d97706' : '#cbd5e1'}`,
+                          backgroundColor: stageSaveMode === 'UPDATE' ? '#fef3c7' : '#ffffff',
+                          color: stageSaveMode === 'UPDATE' ? '#92400e' : '#475569',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 4
+                        }}
+                      >
+                        <span>🔄 Update Existing</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStageSaveMode('NEW');
+                          setStageLabelInput(`Order #${stagedOrders.length + 1}`);
+                        }}
+                        style={{
+                          padding: '6px 8px',
+                          borderRadius: 6,
+                          border: `1.5px solid ${stageSaveMode === 'NEW' ? '#d97706' : '#cbd5e1'}`,
+                          backgroundColor: stageSaveMode === 'NEW' ? '#fef3c7' : '#ffffff',
+                          color: stageSaveMode === 'NEW' ? '#92400e' : '#475569',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 4
+                        }}
+                      >
+                        <span>➕ Save as New</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Cart Summary Banner */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 12px',
+                backgroundColor: '#f8fafc',
+                borderRadius: 8,
+                border: '1px solid #e2e8f0'
+              }}>
+                <div>
+                  <div style={{ fontSize: '0.80rem', fontWeight: 700, color: '#0f172a' }}>
+                    Holding {cart.length} item{cart.length > 1 ? 's' : ''} ({cart.reduce((s, c) => s + (c.quantity || 0), 0)} units)
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                    {customerName.trim() ? `Customer: ${customerName}` : 'Walk-in Customer'}
+                  </div>
+                </div>
+                <div style={{ fontSize: '1.10rem', fontWeight: 800, color: '#059669' }}>
+                  ₹{grandTotal.toFixed(2)}
+                </div>
+              </div>
+
+              {/* Quick Label Preset Chips */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--neutral-600)', marginBottom: 6, fontWeight: 700 }}>
+                  Quick Label Presets (Café / Retail)
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {QUICK_STAGE_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setStageLabelInput(preset)}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: 6,
+                        border: `1px solid ${stageLabelInput === preset ? '#d97706' : '#e2e8f0'}`,
+                        backgroundColor: stageLabelInput === preset ? '#fef3c7' : '#ffffff',
+                        color: stageLabelInput === preset ? '#92400e' : '#475569',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.12s ease'
+                      }}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom Order Label Input */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--neutral-700)', marginBottom: 4, fontWeight: 700 }}>
+                  Order Label / Identifier <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Table 4, Rohan Takeaway, Token #12"
+                  value={stageLabelInput}
+                  onChange={(e) => setStageLabelInput(e.target.value)}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleConfirmStageOrder();
+                    }
+                  }}
+                  style={{ width: '100%', fontSize: '0.86rem', padding: '8px 10px', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Optional Notes */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--neutral-600)', marginBottom: 4, fontWeight: 600 }}>
+                  Hold Notes (Optional)
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Waiting for friend, pay by UPI later..."
+                  value={stageNotesInput}
+                  onChange={(e) => setStageNotesInput(e.target.value)}
+                  style={{ width: '100%', fontSize: '0.82rem', padding: '6px 10px', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '12px 18px',
+              borderTop: '1px solid var(--neutral-200)',
+              backgroundColor: 'var(--neutral-50)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 8
+            }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsStageModalOpen(false)}
+                style={{ fontSize: '0.80rem', padding: '6px 14px' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmStageOrder()}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: 6,
+                  border: 'none',
+                  backgroundColor: '#d97706',
+                  color: '#ffffff',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  boxShadow: '0 2px 6px rgba(217, 119, 6, 0.3)'
+                }}
+              >
+                <PauseCircle size={14} />
+                <span>
+                  {activeStagedOrderId && stageSaveMode === 'UPDATE' 
+                    ? `Update & Re-Hold (${stageLabelInput || 'Draft'})`
+                    : 'Hold & Clear Cart'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Staged Orders / Multi-Drafts Drawer Modal */}
+      {isDraftsDrawerOpen && (
+        <div className="modal-overlay" onClick={() => setIsDraftsDrawerOpen(false)}>
+          <div 
+            className="modal-content" 
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 640, width: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', borderRadius: 'var(--radius-lg, 12px)', overflow: 'hidden', backgroundColor: '#ffffff' }}
+          >
+            {/* Header */}
+            <div className="card-header" style={{ padding: '14px 20px', borderBottom: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f8fafc' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Layers size={18} color="#d97706" />
+                <div>
+                  <span className="card-title" style={{ fontSize: '1.02rem', fontWeight: 800 }}>
+                    Held Orders & Drafts
+                  </span>
+                  <span style={{ fontSize: '0.72rem', color: '#64748b', marginLeft: 8, fontWeight: 600 }}>
+                    ({stagedOrders.length} staged at {activeLocation.name})
+                  </span>
+                </div>
+              </div>
+              <button 
+                type="button"
+                className="btn btn-secondary btn-icon btn-sm" 
+                onClick={() => setIsDraftsDrawerOpen(false)}
+                title="Close"
+                style={{ width: 30, height: 30, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Filter Search */}
+            {stagedOrders.length > 0 && (
+              <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--neutral-200)', backgroundColor: '#ffffff' }}>
+                <div style={{ position: 'relative' }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--neutral-400)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search drafts by label, customer, or items..."
+                    value={draftSearch}
+                    onChange={(e) => setDraftSearch(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', paddingLeft: 30, paddingRight: 10, paddingTop: 6, paddingBottom: 6, fontSize: '0.80rem', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Body: Drafts List */}
+            <div className="card-body" style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', flex: 1, backgroundColor: '#f8fafc' }}>
+              {stagedOrders.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--neutral-400)' }}>
+                  <Layers size={42} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                  <h4 style={{ fontSize: '0.96rem', fontWeight: 700, color: 'var(--neutral-700)', margin: 0 }}>No orders currently on hold</h4>
+                  <p style={{ fontSize: '0.78rem', marginTop: 4, color: 'var(--neutral-500)' }}>
+                    When a customer asks to wait, click <strong>"Hold (Alt+H)"</strong> to store their cart and serve the next customer.
+                  </p>
+                </div>
+              ) : (
+                stagedOrders
+                  .filter(d => {
+                    if (!draftSearch.trim()) return true;
+                    const q = draftSearch.toLowerCase();
+                    return (
+                      d.label.toLowerCase().includes(q) ||
+                      (d.customerName && d.customerName.toLowerCase().includes(q)) ||
+                      (d.customerPhone && d.customerPhone.toLowerCase().includes(q)) ||
+                      (d.notes && d.notes.toLowerCase().includes(q)) ||
+                      d.cart.some(c => c.item.name.toLowerCase().includes(q))
+                    );
+                  })
+                  .map((draft) => {
+                    const isActive = activeStagedOrderId === draft.id;
+                    const draftTotal = draft.cart.reduce((s, c) => s + (c.unitPrice * c.quantity), 0);
+                    const isEditing = isEditingLabelId === draft.id;
+
+                    return (
+                      <div
+                        key={draft.id}
+                        style={{
+                          backgroundColor: '#ffffff',
+                          borderRadius: 10,
+                          border: `1.5px solid ${isActive ? '#d97706' : '#e2e8f0'}`,
+                          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                          padding: '12px 14px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8,
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        {/* Top: Label + Time + Status */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                            {isEditing ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                                <input
+                                  type="text"
+                                  value={editLabelText}
+                                  onChange={(e) => setEditLabelText(e.target.value)}
+                                  className="form-input"
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSaveDraftLabel(draft.id);
+                                    if (e.key === 'Escape') setIsEditingLabelId(null);
+                                  }}
+                                  style={{ padding: '3px 6px', fontSize: '0.82rem', height: 28 }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveDraftLabel(draft.id)}
+                                  style={{ padding: '3px 8px', borderRadius: 4, backgroundColor: '#059669', color: '#fff', border: 'none', fontSize: '0.72rem', cursor: 'pointer', fontWeight: 700 }}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsEditingLabelId(null)}
+                                  style={{ padding: '3px 6px', borderRadius: 4, backgroundColor: '#e2e8f0', color: '#475569', border: 'none', fontSize: '0.72rem', cursor: 'pointer' }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontWeight: 800, fontSize: '0.92rem', color: '#0f172a' }}>
+                                  {draft.label}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsEditingLabelId(draft.id);
+                                    setEditLabelText(draft.label);
+                                  }}
+                                  style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 2 }}
+                                  title="Rename label"
+                                >
+                                  <Edit3 size={12} />
+                                </button>
+                                {isActive && (
+                                  <span style={{ fontSize: '0.64rem', padding: '1px 6px', borderRadius: 4, backgroundColor: '#fef3c7', color: '#92400e', fontWeight: 800, border: '1px solid #fde68a' }}>
+                                    ACTIVE CART
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, fontSize: '0.70rem', color: '#64748b', fontWeight: 600 }}>
+                            <Clock size={12} />
+                            <span>{formatTimeAgo(draft.createdAt)}</span>
+                          </div>
+                        </div>
+
+                        {/* Middle: Customer & Items Preview */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {draft.customerName && (
+                            <div style={{ fontSize: '0.74rem', color: '#475569', display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <User size={12} color="#64748b" />
+                              <span>{draft.customerName}</span>
+                              {draft.customerPhone && <span style={{ color: '#94a3b8' }}>({draft.customerPhone})</span>}
+                            </div>
+                          )}
+
+                          {/* Items summary */}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+                            {draft.cart.map((c, idx) => (
+                              <span
+                                key={idx}
+                                style={{
+                                  fontSize: '0.68rem',
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  backgroundColor: '#f1f5f9',
+                                  color: '#334155',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {c.quantity}x {c.item.name}
+                              </span>
+                            ))}
+                          </div>
+
+                          {draft.notes && (
+                            <div style={{ fontSize: '0.70rem', color: '#94a3b8', fontStyle: 'italic', marginTop: 2 }}>
+                              Note: {draft.notes}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Bottom: Total & Action Buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #f1f5f9', paddingTop: 8, marginTop: 2 }}>
+                          <div style={{ fontSize: '0.98rem', fontWeight: 800, color: '#0f172a' }}>
+                            ₹{draftTotal.toFixed(2)}
+                            <span style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 500, marginLeft: 6 }}>
+                              ({draft.cart.length} item{draft.cart.length > 1 ? 's' : ''})
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteStagedOrder(draft.id, e)}
+                              style={{
+                                padding: '5px 8px',
+                                borderRadius: 6,
+                                border: '1px solid #fecaca',
+                                backgroundColor: '#fef2f2',
+                                color: '#ef4444',
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4
+                              }}
+                              title="Discard this staged draft"
+                            >
+                              <Trash2 size={12} />
+                              <span>Discard</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleResumeStagedOrder(draft)}
+                              style={{
+                                padding: '5px 12px',
+                                borderRadius: 6,
+                                border: 'none',
+                                backgroundColor: '#4f46e5',
+                                color: '#ffffff',
+                                fontSize: '0.74rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                boxShadow: '0 1px 3px rgba(79, 70, 229, 0.25)'
+                              }}
+                            >
+                              <PlayCircle size={13} />
+                              <span>Resume Order</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '10px 20px', borderTop: '1px solid var(--neutral-200)', backgroundColor: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: 'var(--neutral-500)' }}>
+              <span>Shortcut: <strong>Alt+H</strong> to Hold, <strong>Alt+D</strong> to Drafts</span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setIsDraftsDrawerOpen(false)}
+                style={{ fontSize: '0.75rem', padding: '4px 12px' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 3: Cart Conflict Resolution Modal */}
+      {conflictDraftToResume && (
+        <div className="modal-overlay">
+          <div 
+            className="modal-content" 
+            style={{ maxWidth: 460, width: '100%', borderRadius: 'var(--radius-lg, 12px)', overflow: 'hidden', backgroundColor: '#ffffff' }}
+          >
+            {/* Header */}
+            <div className="card-header" style={{ padding: '14px 18px', borderBottom: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fef3c7' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertCircle size={18} color="#d97706" />
+                <span className="card-title" style={{ fontSize: '1rem', fontWeight: 800, color: '#92400e' }}>
+                  Hold Active Cart First?
+                </span>
+              </div>
+              <button 
+                type="button"
+                className="btn btn-secondary btn-icon btn-sm" 
+                onClick={() => setConflictDraftToResume(null)}
+                title="Cancel"
+                style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="card-body" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: '0.84rem', color: '#334155', margin: 0, lineHeight: 1.4 }}>
+                Your current cart contains <strong>{cart.length} item(s) (₹{grandTotal.toFixed(2)})</strong>.
+              </p>
+              <p style={{ fontSize: '0.80rem', color: '#64748b', margin: 0 }}>
+                Before opening <strong>"{conflictDraftToResume.label}"</strong>, what would you like to do with the current items?
+              </p>
+            </div>
+
+            {/* Footer Actions */}
+            <div style={{
+              padding: '12px 18px',
+              borderTop: '1px solid var(--neutral-200)',
+              backgroundColor: 'var(--neutral-50)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8
+            }}>
+              <button
+                type="button"
+                onClick={() => handleResolveConflict('stage')}
+                style={{
+                  padding: '9px 14px',
+                  borderRadius: 6,
+                  border: 'none',
+                  backgroundColor: '#d97706',
+                  color: '#ffffff',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  boxShadow: '0 2px 4px rgba(217, 119, 6, 0.25)'
+                }}
+              >
+                <PauseCircle size={15} />
+                <span>Auto-Hold Current & Open Draft (Recommended)</span>
+              </button>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => handleResolveConflict('discard')}
+                  style={{
+                    flex: 1,
+                    padding: '7px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #fecaca',
+                    backgroundColor: '#fef2f2',
+                    color: '#ef4444',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Discard Current & Open
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setConflictDraftToResume(null)}
+                  style={{
+                    flex: 1,
+                    padding: '7px 12px',
+                    borderRadius: 6,
+                    border: '1px solid var(--neutral-300)',
+                    backgroundColor: '#ffffff',
+                    color: 'var(--neutral-700)',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 4: Confirmation Dialog Modal (Clear Cart & Discard Actions) */}
+      {confirmModal && confirmModal.isOpen && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }}>
+          <div 
+            className="modal-content" 
+            style={{ maxWidth: 440, width: '100%', borderRadius: 'var(--radius-lg, 12px)', overflow: 'hidden', backgroundColor: '#ffffff', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}
+          >
+            {/* Header */}
+            <div className="card-header" style={{ padding: '14px 18px', borderBottom: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: confirmModal.confirmVariant === 'danger' ? '#fef2f2' : 'var(--neutral-50)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertCircle size={18} color={confirmModal.confirmVariant === 'danger' ? '#ef4444' : '#d97706'} />
+                <span className="card-title" style={{ fontSize: '1rem', fontWeight: 800, color: confirmModal.confirmVariant === 'danger' ? '#991b1b' : 'var(--neutral-900)' }}>
+                  {confirmModal.title}
+                </span>
+              </div>
+              <button 
+                type="button"
+                className="btn btn-secondary btn-icon btn-sm" 
+                onClick={() => setConfirmModal(null)}
+                title="Cancel"
+                style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="card-body" style={{ padding: '16px 18px' }}>
+              <p style={{ fontSize: '0.86rem', color: '#334155', margin: 0, lineHeight: 1.5 }}>
+                {confirmModal.message}
+              </p>
+            </div>
+
+            {/* Footer Actions */}
+            <div style={{
+              padding: '12px 18px',
+              borderTop: '1px solid var(--neutral-200)',
+              backgroundColor: 'var(--neutral-50)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 8
+            }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setConfirmModal(null)}
+                style={{ padding: '7px 14px', fontSize: '0.82rem', fontWeight: 600 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmModal.onConfirm}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: 6,
+                  border: 'none',
+                  backgroundColor: confirmModal.confirmVariant === 'danger' ? '#dc2626' : '#d97706',
+                  color: '#ffffff',
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  boxShadow: confirmModal.confirmVariant === 'danger' ? '0 2px 4px rgba(220, 38, 38, 0.25)' : '0 2px 4px rgba(217, 119, 6, 0.25)',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {confirmModal.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <WebcamScannerModal
         isOpen={isWebcamOpen}
