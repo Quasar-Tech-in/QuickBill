@@ -29,6 +29,7 @@ import {
 import { PurchaseOrder, PurchaseOrderStatus, Party, Item, StoreLocation } from '../types';
 import { store } from '../services/store';
 import { Pagination } from '../components/Pagination';
+import { DateRangePicker, DateRangeValue, formatIsoToDisplay } from '../components/DateRangePicker';
 
 export const PurchaseOrdersView: React.FC = () => {
   const currentUser = store.getCurrentUser();
@@ -43,6 +44,11 @@ export const PurchaseOrdersView: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Filters & Pagination State
+  const [dateRange, setDateRange] = useState<DateRangeValue>({
+    preset: 'ALL',
+    fromDate: '',
+    toDate: '',
+  });
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -150,7 +156,7 @@ export const PurchaseOrdersView: React.FC = () => {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch, statusFilter, locationFilter, supplierFilter]);
+  }, [debouncedSearch, statusFilter, locationFilter, supplierFilter, dateRange]);
 
   // Load PO List
   const loadData = useCallback(async () => {
@@ -164,6 +170,8 @@ export const PurchaseOrdersView: React.FC = () => {
         status: statusFilter,
         location_id: locationFilter,
         supplier_id: supplierFilter,
+        fromDate: dateRange.fromDate || undefined,
+        toDate: dateRange.toDate || undefined,
         page: currentPage,
         page_size: pageSize,
       });
@@ -175,7 +183,7 @@ export const PurchaseOrdersView: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch, statusFilter, locationFilter, supplierFilter, currentPage, pageSize]);
+  }, [debouncedSearch, statusFilter, locationFilter, supplierFilter, dateRange, currentPage, pageSize]);
 
   useEffect(() => {
     loadData();
@@ -525,7 +533,11 @@ export const PurchaseOrdersView: React.FC = () => {
   };
 
   // KPI Calculations
-  const allPOs = store.getPurchaseOrders(locationFilter);
+  const allPOs = store.getPurchaseOrders(locationFilter).filter(p => {
+    if (dateRange.fromDate && p.orderDate < dateRange.fromDate) return false;
+    if (dateRange.toDate && p.orderDate > dateRange.toDate) return false;
+    return true;
+  });
   const totalCount = allPOs.length;
   const pendingCount = allPOs.filter(p => p.status === 'ORDERED' || p.status === 'PARTIALLY_RECEIVED').length;
   const receivedCount = allPOs.filter(p => p.status === 'RECEIVED' || p.status === 'FULLY_RECEIVED').length;
@@ -699,8 +711,10 @@ export const PurchaseOrdersView: React.FC = () => {
             )}
           </div>
 
-          {/* Location & Supplier Filters */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {/* Location & Supplier Filters & Date Range */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <DateRangePicker value={dateRange} onChange={setDateRange} compact={true} />
+
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <MapPin size={15} color="var(--primary-600)" />
               <select
@@ -821,9 +835,9 @@ export const PurchaseOrdersView: React.FC = () => {
                         </div>
                         <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
                           <Calendar size={12} color="var(--neutral-400)" />
-                          <span>{po.orderDate}</span>
+                          <span>{formatIsoToDisplay(po.orderDate)}</span>
                           {po.expectedDeliveryDate && (
-                            <span style={{ color: 'var(--neutral-400)' }}>• Exp: {po.expectedDeliveryDate}</span>
+                            <span style={{ color: 'var(--neutral-400)' }}>• Exp: {formatIsoToDisplay(po.expectedDeliveryDate)}</span>
                           )}
                         </div>
                       </td>
@@ -1750,9 +1764,9 @@ export const PurchaseOrdersView: React.FC = () => {
                   <div style={{ fontSize: '1.15rem', fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--neutral-900)', marginTop: 6 }}>
                     {selectedPO.poNumber}
                   </div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>Date: {selectedPO.orderDate}</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>Date: {formatIsoToDisplay(selectedPO.orderDate)}</div>
                   {selectedPO.expectedDeliveryDate && (
-                    <div style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>Expected: {selectedPO.expectedDeliveryDate}</div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--neutral-500)' }}>Expected: {formatIsoToDisplay(selectedPO.expectedDeliveryDate)}</div>
                   )}
                 </div>
               </div>

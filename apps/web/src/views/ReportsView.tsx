@@ -18,6 +18,7 @@ import {
   XCircle,
   RefreshCw
 } from 'lucide-react';
+import { DateRangePicker, DateRangeValue, calculatePresetDates, formatIsoToDisplay } from '../components/DateRangePicker';
 import { store } from '../services/store';
 import { Invoice, Item, Expense, StoreLocation } from '../types';
 
@@ -43,6 +44,10 @@ export const ReportsView: React.FC = () => {
     setSearchParams({ type: newType });
   };
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => ({
+    preset: 'THIS_MONTH',
+    ...calculatePresetDates('THIS_MONTH'),
+  }));
   const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices(selectedLocationId));
   const [items, setItems] = useState<Item[]>(store.getItems(selectedLocationId, true));
   const [expenses, setExpenses] = useState<Expense[]>(() => store.getExpenses(selectedLocationId));
@@ -87,13 +92,34 @@ export const ReportsView: React.FC = () => {
     loadData();
   }, [selectedLocationId]);
 
+  // --- Filter Invoices and Expenses by Date Range ---
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter(inv => {
+      const invDate = inv.date || (inv.createdAt ? inv.createdAt.split('T')[0] : '');
+      if (dateRange.preset === 'ALL') return true;
+      if (dateRange.fromDate && invDate < dateRange.fromDate) return false;
+      if (dateRange.toDate && invDate > dateRange.toDate) return false;
+      return true;
+    });
+  }, [invoices, dateRange]);
+
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter(exp => {
+      const expDate = exp.expenseDate || (exp.createdAt ? exp.createdAt.split('T')[0] : '');
+      if (dateRange.preset === 'ALL') return true;
+      if (dateRange.fromDate && expDate < dateRange.fromDate) return false;
+      if (dateRange.toDate && expDate > dateRange.toDate) return false;
+      return true;
+    });
+  }, [expenses, dateRange]);
+
   // --- Accurate GST & Financial Metrics (Tax-Inclusive Rates Reconciliation) ---
-  const totalRevenue = invoices.reduce((s, i) => s + (Number(i.grandTotal) || 0), 0);
-  const totalTaxCollected = invoices.reduce((s, i) => s + (Number(i.taxTotal) || 0), 0);
-  const totalSalesReturns = invoices.reduce((s, i) => s + (Number(i.returnTotal) || 0), 0);
+  const totalRevenue = filteredInvoices.reduce((s, i) => s + (Number(i.grandTotal) || 0), 0);
+  const totalTaxCollected = filteredInvoices.reduce((s, i) => s + (Number(i.taxTotal) || 0), 0);
+  const totalSalesReturns = filteredInvoices.reduce((s, i) => s + (Number(i.returnTotal) || 0), 0);
   
   // Tax-Exclusive Net Turnover (Subtotal is already the tax-exclusive base when rates are tax-inclusive)
-  const totalNetSales = Math.max(0, invoices.reduce((s, i) => {
+  const totalNetSales = Math.max(0, filteredInvoices.reduce((s, i) => {
     const base = i.subtotal !== undefined ? Number(i.subtotal) : (Number(i.grandTotal || 0) - Number(i.taxTotal || 0));
     return s + base;
   }, 0) - totalSalesReturns);
@@ -101,7 +127,7 @@ export const ReportsView: React.FC = () => {
   // Accurate Cost of Goods Sold (COGS) from inventory purchase prices
   const actualCOGS = useMemo(() => {
     let cogs = 0;
-    invoices.forEach(inv => {
+    filteredInvoices.forEach(inv => {
       if (inv.type === 'SALE' && inv.status !== 'CANCELLED') {
         inv.items?.forEach(line => {
           const catItem = items.find(it => it.id === line.itemId || it.publicItemId === line.itemId);
@@ -114,10 +140,10 @@ export const ReportsView: React.FC = () => {
       }
     });
     return Number(cogs.toFixed(2));
-  }, [invoices, items]);
+  }, [filteredInvoices, items]);
 
   const grossProfit = Math.max(0, totalNetSales - actualCOGS);
-  const operatingExpenses = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const operatingExpenses = filteredExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const netProfit = grossProfit - operatingExpenses;
 
   // GST Slabs Breakdown (Output Tax Liability by Rate)
@@ -130,7 +156,7 @@ export const ReportsView: React.FC = () => {
       '28': { rate: 28, taxable: 0, cgst: 0, sgst: 0, totalTax: 0 },
     };
 
-    invoices.forEach(inv => {
+    filteredInvoices.forEach(inv => {
       if (inv.type === 'SALE' && inv.status !== 'CANCELLED') {
         inv.items?.forEach(line => {
           const rateKey = String(Math.round(Number(line.taxRate || 0)));
@@ -150,7 +176,7 @@ export const ReportsView: React.FC = () => {
     });
 
     return Object.values(slabs).filter(s => s.taxable > 0 || s.totalTax > 0);
-  }, [invoices]);
+  }, [filteredInvoices]);
 
   // Filtered Stock Items for Valuation Tab
   const filteredItems = useMemo(() => {
@@ -239,7 +265,10 @@ export const ReportsView: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          {/* Universal Date Range Filter (DD-MM-YYYY) */}
+          <DateRangePicker value={dateRange} onChange={setDateRange} />
+
           {/* Branch Location Scope Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <MapPin size={16} color="var(--primary-600)" />
@@ -271,10 +300,15 @@ export const ReportsView: React.FC = () => {
       </div>
 
       {/* Scope Pill */}
-      <div style={{ marginBottom: 16, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: 'var(--neutral-100)', borderRadius: 20, fontSize: '0.78rem', color: 'var(--neutral-700)', fontWeight: 600 }}>
+      <div style={{ marginBottom: 16, display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, padding: '5px 14px', background: 'var(--neutral-100)', borderRadius: 20, fontSize: '0.78rem', color: 'var(--neutral-700)', fontWeight: 600 }}>
         <span>Analytics Filter:</span>
         <span style={{ color: 'var(--primary-700)' }}>
-          {selectedLocationId === 'ALL' ? '🌐 All Store Branches (Consolidated Total)' : `📍 ${activeLocObj?.name} (${activeLocObj?.code})`}
+          {selectedLocationId === 'ALL' ? '🌐 All Store Branches' : `📍 ${activeLocObj?.name} (${activeLocObj?.code})`}
+        </span>
+        <span>•</span>
+        <span style={{ color: 'var(--primary-700)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Calendar size={13} />
+          {dateRange.preset === 'ALL' ? 'All-Time Period' : `${formatIsoToDisplay(dateRange.fromDate)} to ${formatIsoToDisplay(dateRange.toDate)}`}
         </span>
       </div>
 
@@ -746,16 +780,16 @@ export const ReportsView: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {invoices.length === 0 ? (
+                {filteredInvoices.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ textAlign: 'center', padding: 20, color: 'var(--neutral-400)' }}>
-                      No transactions found for the selected branch.
+                      No transactions found for the selected period and branch.
                     </td>
                   </tr>
                 ) : (
-                  invoices.map((inv) => (
+                  filteredInvoices.map((inv) => (
                     <tr key={inv.id}>
-                      <td>{inv.date}</td>
+                      <td>{formatIsoToDisplay(inv.date || '') || inv.date}</td>
                       <td style={{ fontFamily: 'var(--font-mono)' }}>{inv.invoiceNumber}</td>
                       <td>
                         <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 10, background: 'var(--neutral-100)', color: 'var(--neutral-700)' }}>

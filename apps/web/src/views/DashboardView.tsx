@@ -27,6 +27,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { MetricCard } from '../components/MetricCard';
 import { StatusBadge } from '../components/StatusBadge';
+import { DateRangePicker, DateRangeValue, calculatePresetDates, formatIsoToDisplay } from '../components/DateRangePicker';
 import { store } from '../services/store';
 import { Invoice, Item, Party, StoreLocation } from '../types';
 
@@ -34,8 +35,6 @@ interface DashboardViewProps {
   onNavigate?: (tab: string) => void;
   onViewInvoice: (invoice: Invoice) => void;
 }
-
-type TimeRange = 'TODAY' | 'YESTERDAY' | 'LAST_7_DAYS' | 'THIS_MONTH' | 'ALL';
 
 interface TopItemStat {
   itemId: string;
@@ -61,7 +60,10 @@ interface BranchSalesStat {
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onViewInvoice }) => {
   const navigate = useNavigate();
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
-  const [timeRange, setTimeRange] = useState<TimeRange>('TODAY');
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => ({
+    preset: 'TODAY',
+    ...calculatePresetDates('TODAY'),
+  }));
   const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices(selectedLocationId));
   const [items, setItems] = useState<Item[]>(selectedLocationId === 'ALL' ? store.getItems(undefined, true) : store.getItems(selectedLocationId, true));
   const [parties, setParties] = useState<Party[]>(selectedLocationId === 'ALL' ? store.getParties() : store.getParties(selectedLocationId));
@@ -96,32 +98,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
     }
   };
 
-  // --- Filter Invoices by Date Range & Type ---
+  // --- Filter Invoices by Custom Date Range & Type ---
   const filteredSalesInvoices = useMemo(() => {
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-    const sevenDaysAgo = new Date(today);
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
-
-    const currentYearMonth = todayStr.substring(0, 7);
-
     return invoices.filter(inv => {
       if (inv.type !== 'SALE') return false;
-      const invDate = inv.date;
+      const invDate = inv.date || (inv.createdAt ? inv.createdAt.split('T')[0] : '');
 
-      if (timeRange === 'TODAY') return invDate === todayStr;
-      if (timeRange === 'YESTERDAY') return invDate === yesterdayStr;
-      if (timeRange === 'LAST_7_DAYS') return invDate >= sevenDaysAgoStr && invDate <= todayStr;
-      if (timeRange === 'THIS_MONTH') return invDate.startsWith(currentYearMonth);
-      return true; // 'ALL'
+      if (dateRange.preset === 'ALL') return true;
+      if (dateRange.fromDate && invDate < dateRange.fromDate) return false;
+      if (dateRange.toDate && invDate > dateRange.toDate) return false;
+
+      return true;
     });
-  }, [invoices, timeRange]);
+  }, [invoices, dateRange]);
 
   // --- Financial & Operational Metrics ---
   const totalRevenue = useMemo(() => {
@@ -388,39 +377,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
 
         {/* Action Controls & Selectors */}
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-          {/* Time Range Filter */}
-          <div style={{ display: 'flex', alignItems: 'center', background: 'var(--neutral-100)', borderRadius: 'var(--radius-md)', padding: 3, border: '1px solid var(--neutral-200)' }}>
-            {(['TODAY', 'YESTERDAY', 'LAST_7_DAYS', 'THIS_MONTH', 'ALL'] as TimeRange[]).map((range) => {
-              const labels: Record<TimeRange, string> = {
-                TODAY: 'Today',
-                YESTERDAY: 'Yesterday',
-                LAST_7_DAYS: '7 Days',
-                THIS_MONTH: 'This Month',
-                ALL: 'All Time'
-              };
-              const isSelected = timeRange === range;
-              return (
-                <button
-                  key={range}
-                  onClick={() => setTimeRange(range)}
-                  style={{
-                    border: 'none',
-                    padding: '6px 12px',
-                    fontSize: '0.78rem',
-                    fontWeight: isSelected ? 700 : 500,
-                    borderRadius: 'var(--radius-sm)',
-                    cursor: 'pointer',
-                    background: isSelected ? 'var(--surface-card)' : 'transparent',
-                    color: isSelected ? 'var(--primary-600)' : 'var(--neutral-600)',
-                    boxShadow: isSelected ? 'var(--shadow-sm)' : 'none',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  {labels[range]}
-                </button>
-              );
-            })}
-          </div>
+          {/* Universal Date Range Filter (DD-MM-YYYY) */}
+          <DateRangePicker value={dateRange} onChange={setDateRange} />
 
           {/* Location Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -461,7 +419,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
         }}
       >
         <MetricCard
-          title={`${timeRange === 'TODAY' ? "Today's" : "Selected"} Sales`}
+          title={dateRange.preset === 'TODAY' ? "Today's Sales" : dateRange.preset === 'ALL' ? "All-Time Sales" : "Period Sales"}
           value={`₹${totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           subtitle={`${totalTransactions} bills processed`}
           variant="primary"
@@ -526,7 +484,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
               <div>
                 <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Top Fast-Selling Products</h3>
                 <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', marginTop: 1 }}>
-                  Ranked by sales velocity and unit movement ({timeRange.toLowerCase().replace('_', ' ')})
+                  Ranked by sales velocity and unit movement ({dateRange.preset === 'CUSTOM' ? `${formatIsoToDisplay(dateRange.fromDate)} to ${formatIsoToDisplay(dateRange.toDate)}` : dateRange.preset.toLowerCase().replace(/_/g, ' ')})
                 </p>
               </div>
             </div>

@@ -28,6 +28,7 @@ import {
   Smartphone,
   Banknote
 } from 'lucide-react';
+import { DateRangePicker, DateRangeValue, calculatePresetDates, formatIsoToDisplay } from '../components/DateRangePicker';
 import { store } from '../services/store';
 import { Expense, ExpenseCategory, LedgerEntry, Party, Payment } from '../types';
 import { Pagination } from '../components/Pagination';
@@ -41,6 +42,11 @@ export const LedgerView: React.FC = () => {
   const activeLoc = store.getActiveLocation();
 
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
+  const [dateRange, setDateRange] = useState<DateRangeValue>({
+    preset: 'ALL',
+    fromDate: '',
+    toDate: '',
+  });
   const [parties, setParties] = useState<Party[]>(store.getParties());
   const [expenses, setExpenses] = useState<Expense[]>(store.getExpenses());
   const [categories, setCategories] = useState<ExpenseCategory[]>(store.getExpenseCategories());
@@ -65,10 +71,10 @@ export const LedgerView: React.FC = () => {
   const [pageSize, setPageSize] = useState<number>(25);
   const [totalItems, setTotalItems] = useState<number>(0);
 
-  // Reset pagination when filters change
+  // Reset pagination when filters or date range change
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch, filterType, filterCategory, selectedLocationId]);
+  }, [debouncedSearch, filterType, filterCategory, selectedLocationId, dateRange]);
 
   // Modals
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
@@ -132,6 +138,8 @@ export const LedgerView: React.FC = () => {
           search: debouncedSearch.trim() || undefined,
           category: filterCategory !== 'ALL' ? filterCategory : undefined,
           locationId: loc,
+          fromDate: dateRange.fromDate || undefined,
+          toDate: dateRange.toDate || undefined,
         });
         setExpenses(res.data);
         setTotalItems(res.total);
@@ -158,6 +166,8 @@ export const LedgerView: React.FC = () => {
         const filtered = entries.filter(entry => {
           if (filterType !== 'ALL' && entry.type !== filterType) return false;
           if (filterCategory !== 'ALL' && entry.category !== filterCategory) return false;
+          if (dateRange.fromDate && (entry.date || '') < dateRange.fromDate) return false;
+          if (dateRange.toDate && (entry.date || '') > dateRange.toDate) return false;
           if (debouncedSearch) {
             const q = debouncedSearch.toLowerCase();
             const matchParty = entry.partyOrPayee.toLowerCase().includes(q);
@@ -174,19 +184,30 @@ export const LedgerView: React.FC = () => {
       setCategories(store.getExpenseCategories());
     } catch (e) {
       console.error('Error refreshing ledger data:', e);
-      const entries = store.getLedgerEntries(loc);
+      let entries = store.getLedgerEntries(loc);
+      if (dateRange.fromDate) {
+        entries = entries.filter(e => (e.date || '') >= dateRange.fromDate);
+      }
+      if (dateRange.toDate) {
+        entries = entries.filter(e => (e.date || '') <= dateRange.toDate);
+      }
       setTotalItems(entries.length);
       setLedgerEntries(entries.slice((currentPage - 1) * pageSize, currentPage * pageSize));
     }
-  }, [currentPage, pageSize, selectedLocationId, filterType, filterCategory, debouncedSearch]);
+  }, [currentPage, pageSize, selectedLocationId, filterType, filterCategory, debouncedSearch, dateRange]);
 
   useEffect(() => {
     refreshData();
   }, [refreshData]);
 
-  // Derived Financial Calculations
+  // Derived Financial Calculations respecting dateRange
   const loc = selectedLocationId === 'ALL' ? undefined : selectedLocationId;
-  const currentEntries = store.getLedgerEntries(loc);
+  const rawEntries = store.getLedgerEntries(loc);
+  const currentEntries = rawEntries.filter(e => {
+    if (dateRange.fromDate && (e.date || '') < dateRange.fromDate) return false;
+    if (dateRange.toDate && (e.date || '') > dateRange.toDate) return false;
+    return true;
+  });
 
   const totalInflow = currentEntries
     .filter(e => e.type === 'PAYMENT_IN')
@@ -583,6 +604,9 @@ export const LedgerView: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {/* Custom Date Range Picker */}
+            <DateRangePicker value={dateRange} onChange={setDateRange} compact={true} />
+
             {/* Location Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <MapPin size={15} color="var(--primary-600)" />
@@ -672,7 +696,7 @@ export const LedgerView: React.FC = () => {
                   return (
                     <tr key={entry.id}>
                       <td>
-                        <div style={{ fontWeight: 600, color: 'var(--neutral-900)' }}>{entry.date}</div>
+                        <div style={{ fontWeight: 600, color: 'var(--neutral-900)' }}>{formatIsoToDisplay(entry.date)}</div>
                         {entry.locationName && (
                           <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>
                             📍 {entry.locationName}

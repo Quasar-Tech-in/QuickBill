@@ -3619,7 +3619,7 @@ class StoreService {
     return list.filter(po => po.locationId === locationId);
   }
 
-  async fetchPurchaseOrders(params: { search?: string; status?: string; supplier_id?: string; location_id?: string; page?: number; page_size?: number } = {}): Promise<PaginatedApiResponse<PurchaseOrder>> {
+  async fetchPurchaseOrders(params: { search?: string; status?: string; supplier_id?: string; location_id?: string; fromDate?: string; toDate?: string; from_date?: string; to_date?: string; page?: number; page_size?: number } = {}): Promise<PaginatedApiResponse<PurchaseOrder>> {
     const page = params.page || 1;
     const pageSize = params.page_size || 20;
 
@@ -3629,6 +3629,8 @@ class StoreService {
       if (params.status && params.status !== 'ALL') qParams.status = params.status;
       if (params.supplier_id && params.supplier_id !== 'ALL') qParams.supplier_id = params.supplier_id;
       if (params.location_id && params.location_id !== 'ALL') qParams.location_id = params.location_id;
+      if (params.fromDate || params.from_date) qParams.fromDate = params.fromDate || params.from_date;
+      if (params.toDate || params.to_date) qParams.toDate = params.toDate || params.to_date;
 
       const res = await apiClient.get('/purchase-orders', { params: qParams });
       if (res.data && Array.isArray(res.data.data)) {
@@ -3652,6 +3654,8 @@ class StoreService {
 
     // Local fallback filter
     const all = this.getPurchaseOrders(params.location_id);
+    const fromDate = params.fromDate || params.from_date;
+    const toDate = params.toDate || params.to_date;
     const filtered = all.filter(po => {
       if (params.status && params.status !== 'ALL') {
         const queryStatus = params.status === 'FULLY_RECEIVED' ? 'RECEIVED' : params.status;
@@ -3659,6 +3663,8 @@ class StoreService {
         if (currentStatus !== queryStatus) return false;
       }
       if (params.supplier_id && params.supplier_id !== 'ALL' && po.supplierId !== params.supplier_id) return false;
+      if (fromDate && po.orderDate < fromDate) return false;
+      if (toDate && po.orderDate > toDate) return false;
       if (params.search && params.search.trim()) {
         const q = params.search.toLowerCase();
         const m = (po.poNumber && po.poNumber.toLowerCase().includes(q)) ||

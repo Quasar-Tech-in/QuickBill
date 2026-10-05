@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.schemas.report import DashboardSummaryResponse, ProfitAndLossResponse, StockSummaryResponse, StockSummaryItem
@@ -8,12 +8,27 @@ class ReportService:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
 
-    async def get_dashboard_summary(self, business_id: str) -> DashboardSummaryResponse:
+    def _build_date_query(self, field_name: str, from_date: Optional[str], to_date: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not from_date and not to_date:
+            return None
+        cond: Dict[str, Any] = {}
+        if from_date:
+            cond["$gte"] = from_date
+        if to_date:
+            cond["$lte"] = f"{to_date}T23:59:59.999Z" if "T" not in to_date else to_date
+        return {field_name: cond}
+
+    async def get_dashboard_summary(self, business_id: str, from_date: Optional[str] = None, to_date: Optional[str] = None) -> DashboardSummaryResponse:
         b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
 
         # 1. Total Sales
+        sales_match: Dict[str, Any] = {"businessId": b_oid, "status": "CONFIRMED"}
+        date_q = self._build_date_query("createdAt", from_date, to_date)
+        if date_q:
+            sales_match.update(date_q)
+
         sales_cursor = self.db.invoices.aggregate([
-            {"$match": {"businessId": b_oid, "status": "CONFIRMED"}},
+            {"$match": sales_match},
             {"$group": {"_id": None, "total": {"$sum": "$grandTotal"}, "count": {"$sum": 1}}}
         ])
         sales_res = await sales_cursor.to_list(length=1)
@@ -21,15 +36,21 @@ class ReportService:
         total_orders = sales_res[0]["count"] if sales_res else 0
 
         # 2. Money In / Out
+        pay_in_match: Dict[str, Any] = {"businessId": b_oid, "direction": "IN"}
+        if date_q:
+            pay_in_match.update(date_q)
         money_in_cursor = self.db.payments.aggregate([
-            {"$match": {"businessId": b_oid, "direction": "IN"}},
+            {"$match": pay_in_match},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
         ])
         money_in_res = await money_in_cursor.to_list(length=1)
         money_in = Decimal(str(money_in_res[0]["total"])) if money_in_res else Decimal("0.00")
 
+        pay_out_match: Dict[str, Any] = {"businessId": b_oid, "direction": "OUT"}
+        if date_q:
+            pay_out_match.update(date_q)
         money_out_cursor = self.db.payments.aggregate([
-            {"$match": {"businessId": b_oid, "direction": "OUT"}},
+            {"$match": pay_out_match},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
         ])
         money_out_res = await money_out_cursor.to_list(length=1)
@@ -69,12 +90,17 @@ class ReportService:
             total_customers_count=total_customers
         )
 
-    async def get_profit_and_loss(self, business_id: str) -> ProfitAndLossResponse:
+    async def get_profit_and_loss(self, business_id: str, from_date: Optional[str] = None, to_date: Optional[str] = None) -> ProfitAndLossResponse:
         b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
+
+        inv_match: Dict[str, Any] = {"businessId": b_oid, "status": "CONFIRMED"}
+        date_q = self._build_date_query("createdAt", from_date, to_date)
+        if date_q:
+            inv_match.update(date_q)
 
         # 1. Aggregate Invoices for Gross Sales, Taxable Base (Net Sales), and GST
         inv_pipeline = [
-            {"$match": {"businessId": b_oid, "status": "CONFIRMED"}},
+            {"$match": inv_match},
             {
                 "$group": {
                     "_id": None,
@@ -93,7 +119,7 @@ class ReportService:
 
         # 2. Aggregate COGS from inventory ledger / item purchase prices
         cogs_pipeline = [
-            {"$match": {"businessId": b_oid, "status": "CONFIRMED"}},
+            {"$match": inv_match},
             {"$unwind": "$items"},
             {
                 "$lookup": {
@@ -148,8 +174,11 @@ class ReportService:
             cogs = net_sales * Decimal("0.70")
 
         # 3. Aggregate operating expenses
+        exp_match: Dict[str, Any] = {"businessId": b_oid}
+        if date_q:
+            exp_match.update(date_q)
         exp_res = await self.db.expenses.aggregate([
-            {"$match": {"businessId": b_oid}},
+            {"$match": exp_match},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
         ]).to_list(length=1)
         expenses = Decimal(str(exp_res[0]["total"])) if exp_res else Decimal("0.00")

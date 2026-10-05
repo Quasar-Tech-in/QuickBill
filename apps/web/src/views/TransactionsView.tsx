@@ -12,13 +12,15 @@ import {
   Eye,
   CheckCircle2,
   RotateCcw,
-  Edit3
+  Edit3,
+  Calendar
 } from 'lucide-react';
 import { Invoice } from '../types';
 import { store } from '../services/store';
 import { StatusBadge } from '../components/StatusBadge';
 import { Pagination } from '../components/Pagination';
 import { InvoiceUpdateModal } from '../components/InvoiceUpdateModal';
+import { DateRangePicker, DateRangeValue, formatIsoToDisplay } from '../components/DateRangePicker';
 
 interface TransactionsViewProps {
   onViewInvoice: (invoice: Invoice) => void;
@@ -27,6 +29,11 @@ interface TransactionsViewProps {
 export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoice }) => {
   const locations = store.getAllLocations();
   const [selectedLocationId, setSelectedLocationId] = useState<string>('ALL');
+  const [dateRange, setDateRange] = useState<DateRangeValue>({
+    preset: 'ALL',
+    fromDate: '',
+    toDate: '',
+  });
   const [invoices, setInvoices] = useState<Invoice[]>(store.getInvoices());
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,7 +61,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
     size: number = pageSize,
     locId: string = selectedLocationId,
     search: string = debouncedSearch,
-    status: string = statusFilter
+    status: string = statusFilter,
+    range: DateRangeValue = dateRange
   ) => {
     setIsLoading(true);
     try {
@@ -64,38 +72,46 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
         search: search.trim() || undefined,
         status: status !== 'ALL' ? status : undefined,
         locationId: locId !== 'ALL' ? locId : undefined,
+        fromDate: range.fromDate || undefined,
+        toDate: range.toDate || undefined,
       });
       setInvoices(res.data);
       setTotalItems(res.total);
     } catch (e) {
       console.error('Error fetching paginated invoices:', e);
-      const local = store.getInvoices(locId !== 'ALL' ? locId : undefined);
+      let local = store.getInvoices(locId !== 'ALL' ? locId : undefined);
+      if (range.fromDate) {
+        local = local.filter(i => (i.date || '') >= range.fromDate);
+      }
+      if (range.toDate) {
+        local = local.filter(i => (i.date || '') <= range.toDate);
+      }
       setInvoices(local.slice((page - 1) * size, page * size));
       setTotalItems(local.length);
     } finally {
       setIsLoading(false);
     }
-  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter]);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, dateRange]);
 
-  // When filters or search query change, reset page to 1
+  // When filters, date range, or search query change, reset page to 1
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch, statusFilter, selectedLocationId, currentTenantId]);
+  }, [debouncedSearch, statusFilter, selectedLocationId, dateRange, currentTenantId]);
 
-  // Fetch when page, size, filters, or tenant change
+  // Fetch when page, size, filters, date range, or tenant change
   useEffect(() => {
-    loadInvoices(currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter);
-  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, currentTenantId, loadInvoices]);
+    loadInvoices(currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, dateRange);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, dateRange, currentTenantId, loadInvoices]);
 
   // Subscribe to store events (e.g. tenant switched, new invoice created)
   useEffect(() => {
     const unsubscribe = store.subscribe(() => {
-      loadInvoices(currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter);
+      loadInvoices(currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, dateRange);
     });
     return () => {
       unsubscribe();
     };
-  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, loadInvoices]);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, dateRange, loadInvoices]);
 
   // Calculate summary stats
   const totalSalesAmount = invoices.reduce((sum, i) => sum + i.grandTotal, 0);
@@ -205,8 +221,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
             />
           </div>
 
-          {/* Location & Status Filters */}
+          {/* Date, Location & Status Filters */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {/* Universal Date Range Filter (DD-MM-YYYY) */}
+            <DateRangePicker value={dateRange} onChange={setDateRange} compact={true} />
+
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <MapPin size={14} color="var(--primary-600)" />
               <select
@@ -288,7 +307,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
                           {inv.invoiceNumber}
                         </span>
                         <span className="invoice-date-sub" style={{ justifyContent: 'center' }}>
-                          📅 {inv.date}
+                          📅 {formatIsoToDisplay(inv.date || '') || inv.date}
                         </span>
                       </div>
                     </td>
