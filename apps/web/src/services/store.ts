@@ -64,8 +64,13 @@ class StoreService {
 
   private setupAxiosInterceptors() {
     apiClient.interceptors.request.use((config) => {
-      if (this.currentTenant?.id) {
-        config.headers['X-Business-ID'] = this.currentTenant.id;
+      const activeTenant = this.getActiveTenant();
+      const targetBusinessId = this.isSuperAdmin()
+        ? (this.currentTenant?.id || this.currentUser?.businessId)
+        : (this.currentUser?.businessId || activeTenant?.id);
+
+      if (targetBusinessId) {
+        config.headers['X-Business-ID'] = targetBusinessId;
       }
       if (this.currentUser?.token) {
         config.headers['Authorization'] = `Bearer ${this.currentUser.token}`;
@@ -120,6 +125,13 @@ class StoreService {
         }
       } else {
         this.currentUser = null;
+      }
+
+      if (this.currentUser?.businessId) {
+        const matched = this.tenants.find(t => t.id === this.currentUser!.businessId);
+        if (matched) {
+          this.currentTenant = matched;
+        }
       }
 
       const savedPOs = localStorage.getItem('qb_purchase_orders');
@@ -223,6 +235,15 @@ class StoreService {
 
         this.currentUser = authenticatedUser;
         this.isSuperAdminMode = userRole === 'SUPER_ADMIN';
+
+        if (authenticatedUser.businessId) {
+          const matchedTenant = this.tenants.find(t => t.id === authenticatedUser.businessId);
+          if (matchedTenant) {
+            this.currentTenant = matchedTenant;
+          }
+        }
+        // Invalidate old session in-memory invoices
+        this.invoices = [];
 
         // Match active location to user's assigned locations
         if (authenticatedUser.assignedLocationIds && authenticatedUser.assignedLocationIds.length > 0) {
@@ -1528,7 +1549,15 @@ class StoreService {
     const found = this.tenants.find(t => t.id === tenantId);
     if (!found) return null;
     this.currentTenant = found;
+    // Invalidate old tenant in-memory records so new tenant data is loaded freshly
+    this.invoices = [];
+    this.items = [];
+    this.payments = [];
+    this.parties = [];
+    this.locations = [];
+    this.activeLocation = null;
     this.saveToStorage();
+    this.notifyListeners();
     return this.currentTenant;
   }
 
@@ -3211,14 +3240,23 @@ class StoreService {
       };
     }
 
-    // Restock returned quantities into local store inventory
+    // Restock returned quantities into local store inventory state (backend already restocked via PUT /sales/{id})
     if (existing) {
       updateData.items.forEach(up => {
         const prevSnap = existing.items.find(i => i.itemId === up.itemId);
         const prevRet = prevSnap?.returnedQuantity || 0;
         const deltaRet = up.returnedQuantity - prevRet;
         if (deltaRet > 0 && up.returnReason !== 'DEFECTIVE_DAMAGED') {
-          this.adjustStock(up.itemId, deltaRet, existing.locationId);
+          const it = this.items.find(i => i.id === up.itemId || i.publicItemId === up.itemId);
+          if (it) {
+            it.currentStock = Number((it.currentStock + deltaRet).toFixed(3));
+            if (it.locations && existing.locationId) {
+              const loc = it.locations.find(l => l.locationId === existing.locationId);
+              if (loc) {
+                loc.currentStock = Number((loc.currentStock + deltaRet).toFixed(3));
+              }
+            }
+          }
         }
       });
 
@@ -3235,8 +3273,12 @@ class StoreService {
   }
 
   getInvoices(locationId?: string): Invoice[] {
-    const activeId = this.currentTenant?.id || '';
-    const list = this.invoices.filter(inv => (inv.businessId || activeId) === activeId);
+    const activeTenant = this.getActiveTenant();
+    const activeId = this.isSuperAdmin() 
+      ? (this.currentTenant?.id || this.currentUser?.businessId || '') 
+      : (this.currentUser?.businessId || activeTenant?.id || '');
+
+    const list = this.invoices.filter(inv => inv.businessId === activeId);
     if (!locationId || locationId === 'ALL') return list;
 
     return list.filter(inv => inv.locationId === locationId);
@@ -3246,7 +3288,7 @@ class StoreService {
     try {
       const params: any = { page: 1, page_size: 100 };
       if (locationId && locationId !== 'ALL') {
-        params.location_id = locationId;
+        params.locationId = locationId;
       }
       const res = await apiClient.get('/sales', { params });
       if (res.data?.data && Array.isArray(res.data.data)) {
@@ -3340,7 +3382,10 @@ class StoreService {
   }
 
   async createInvoice(invoiceData: Omit<Invoice, 'id' | 'invoiceNumber' | 'businessId'>): Promise<Invoice> {
-    const activeId = this.currentTenant?.id || '';
+    const activeTenant = this.getActiveTenant();
+    const activeId = this.isSuperAdmin()
+      ? (this.currentTenant?.id || this.currentUser?.businessId || '')
+      : (this.currentUser?.businessId || activeTenant?.id || '');
     const activeLoc = this.getActiveLocation();
     const currentUser = this.getCurrentUser();
     
@@ -3356,15 +3401,19 @@ class StoreService {
       locationCode: invoiceData.locationCode || activeLoc.code,
       locationAddress: invoiceData.locationAddress || activeLoc.address,
       locationPhone: invoiceData.locationPhone || activeLoc.phone,
+      locationGstin: invoiceData.locationGstin || activeTenant?.gstin || undefined,
       billedById: invoiceData.billedById || currentUser?.id || 'usr_staff',
       billedByName: invoiceData.billedByName || currentUser?.name || 'Store Cashier',
       billedByRole: invoiceData.billedByRole || currentUser?.role || 'CASHIER',
       items: invoiceData.items.map(it => ({
+        itemId: it.itemId,
         item_id: it.itemId,
-        quantity: it.quantity,
-        unit_price: it.unitPrice,
-        discount: it.discountPercent ? ((it.unitPrice * it.quantity) * (it.discountPercent / 100)) : 0,
-        tax_rate: it.taxRate,
+        quantity: Number(it.quantity),
+        unitPrice: Number(it.unitPrice),
+        unit_price: Number(it.unitPrice),
+        discount: it.discountPercent ? Number(((it.unitPrice * it.quantity) * (it.discountPercent / 100)).toFixed(2)) : 0,
+        taxRate: Number(it.taxRate || 0),
+        tax_rate: Number(it.taxRate || 0),
       })),
       invoiceDiscount: Number(invoiceData.discountTotal || 0),
       discountType: invoiceData.discountType,
@@ -3405,9 +3454,18 @@ class StoreService {
       };
     }
 
-    // Adjust local in-memory stocks & party balances
+    // Update in-memory stock cache locally for instantaneous UI response (Backend already decremented stock and logged movements atomically)
     createdInvoice.items.forEach(line => {
-      this.adjustStock(line.itemId, -line.quantity, createdInvoice.locationId);
+      const it = this.items.find(i => i.id === line.itemId || i.publicItemId === line.itemId);
+      if (it) {
+        it.currentStock = Math.max(0, Number((it.currentStock - line.quantity).toFixed(3)));
+        if (it.locations && createdInvoice.locationId) {
+          const loc = it.locations.find(l => l.locationId === createdInvoice.locationId);
+          if (loc) {
+            loc.currentStock = Math.max(0, Number((loc.currentStock - line.quantity).toFixed(3)));
+          }
+        }
+      }
     });
 
     if (createdInvoice.partyId && createdInvoice.balanceAmount > 0) {
@@ -3416,6 +3474,8 @@ class StoreService {
 
     // Update in-memory list (MongoDB backed)
     this.invoices = [createdInvoice, ...this.invoices.filter(inv => inv.id !== createdInvoice.id && inv.invoiceNumber !== createdInvoice.invoiceNumber)];
+    this.saveToStorage();
+    this.notifyListeners();
 
     return createdInvoice;
   }

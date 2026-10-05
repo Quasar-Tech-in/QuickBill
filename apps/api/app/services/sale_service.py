@@ -41,8 +41,6 @@ class SaleService:
                     pass
 
             item_doc = await self.db.items.find_one({"$and": [b_query, {"$or": or_clauses}]})
-            if not item_doc:
-                item_doc = await self.db.items.find_one({"$or": or_clauses})
 
             if not item_doc:
                 # Dynamic catalog fallback registration so bill creation never fails with 404
@@ -81,12 +79,12 @@ class SaleService:
             item_docs[str(item_doc["_id"])] = item_doc
             calc_inputs.append(LineItemCalcInput(
                 item_id=str(item_doc["_id"]),
-                name_snapshot=item_doc["name"],
-                sku_snapshot=item_doc.get("sku", ""),
+                name_snapshot=str(item_doc.get("name") or getattr(it, "name_snapshot", None) or "Item"),
+                sku_snapshot=str(item_doc.get("sku") or item_doc.get("publicItemId") or ""),
                 quantity=it.quantity,
                 unit_price=it.unit_price,
                 discount=it.discount,
-                tax_rate=Decimal(str(item_doc.get("taxRate", "0.0")))
+                tax_rate=Decimal(str(item_doc.get("taxRate", "0.0") if item_doc.get("taxRate") is not None else it.tax_rate))
             ))
 
         # 2. Run authoritative calculation engine
@@ -270,18 +268,18 @@ class SaleService:
                             cogs_cost = sum(q * c for q, c in batch_cogs_accum) / total_priced_qty
 
                     await self.db.items.update_one(
-                        {"_id": target_item_oid},
+                        {"_id": target_item_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
                         {"$set": {"batches": batches}, "$inc": {"currentStock": -qty_sold}}
                     )
                 else:
                     await self.db.items.update_one(
-                        {"_id": target_item_oid},
+                        {"_id": target_item_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
                         {"$inc": {"currentStock": -qty_sold}}
                     )
 
                 if request.location_id:
                     await self.db.items.update_one(
-                        {"_id": target_item_oid, "locations.locationId": request.location_id},
+                        {"_id": target_item_oid, "locations.locationId": request.location_id, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
                         {"$inc": {"locations.$.currentStock": -qty_sold}}
                     )
 
@@ -357,6 +355,7 @@ class SaleService:
 
     async def update_sale_return(self, business_id: str, sale_id: str, user_id: str, request: Any) -> Dict[str, Any]:
         b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
+        b_query = {"$or": [{"businessId": b_oid}, {"businessId": business_id}]}
         s_oid = ObjectId(sale_id) if ObjectId.is_valid(sale_id) else None
         if not s_oid:
             raise HTTPException(status_code=404, detail="Sale invoice not found")
@@ -405,8 +404,8 @@ class SaleService:
             # Calculation input uses active remaining quantity for billing totals
             calc_inputs.append(LineItemCalcInput(
                 item_id=it.item_id,
-                name_snapshot=name_snap,
-                sku_snapshot=sku_snap,
+                name_snapshot=str(name_snap or "Item"),
+                sku_snapshot=str(sku_snap or ""),
                 quantity=active_qty,
                 unit_price=unit_price,
                 discount=discount if active_qty > 0 else Decimal("0.00"),
@@ -464,7 +463,7 @@ class SaleService:
                 if target_item_oid:
                     or_clauses.insert(0, {"_id": target_item_oid})
 
-                item_doc = await self.db.items.find_one({"$or": or_clauses})
+                item_doc = await self.db.items.find_one({"$and": [b_query, {"$or": or_clauses}]})
                 actual_item_oid = item_doc["_id"] if item_doc else (target_item_oid or it.item_id)
                 
                 # Compute unit purchase cost inclusive of tax
@@ -475,12 +474,12 @@ class SaleService:
                 # If item is restockable, increment stock in catalog and location
                 if it.return_reason != "DEFECTIVE_DAMAGED":
                     await self.db.items.update_one(
-                        {"_id": actual_item_oid},
+                        {"_id": actual_item_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
                         {"$inc": {"currentStock": float(delta_ret_qty)}}
                     )
                     if invoice.get("locationId"):
                         await self.db.items.update_one(
-                            {"_id": actual_item_oid, "locations.locationId": invoice["locationId"]},
+                            {"_id": actual_item_oid, "locations.locationId": invoice["locationId"], "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
                             {"$inc": {"locations.$.currentStock": float(delta_ret_qty)}}
                         )
 
@@ -540,7 +539,7 @@ class SaleService:
             update_fields["paymentMode"] = request.payment_mode
 
         await self.db.invoices.update_one(
-            {"_id": s_oid},
+            {"_id": s_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
             {"$set": update_fields}
         )
 
@@ -552,7 +551,7 @@ class SaleService:
                 prev_balance = float(invoice.get("balanceDue", 0.0) or 0.0)
                 reduc = min(delta_return_total, prev_balance)
                 await self.db.customers.update_one(
-                    {"_id": p_oid},
+                    {"_id": p_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
                     {
                         "$inc": {
                             "totalSpent": -float(delta_return_total),
@@ -562,7 +561,7 @@ class SaleService:
                     }
                 )
                 await self.db.parties.update_one(
-                    {"_id": p_oid},
+                    {"_id": p_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
                     {
                         "$inc": {
                             "currentReceivable": -float(reduc)
@@ -570,7 +569,7 @@ class SaleService:
                     }
                 )
 
-        updated_doc = await self.db.invoices.find_one({"_id": s_oid})
+        updated_doc = await self.db.invoices.find_one({"_id": s_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
         updated_doc["_id"] = str(updated_doc["_id"])
         updated_doc["businessId"] = str(updated_doc["businessId"])
         if updated_doc.get("partyId"):

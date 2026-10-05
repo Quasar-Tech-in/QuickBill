@@ -46,6 +46,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
   const [pageSize, setPageSize] = useState<number>(25);
   const [totalItems, setTotalItems] = useState<number>(0);
 
+  const activeTenant = store.getActiveTenant();
+  const currentTenantId = activeTenant?.id || '';
+
   const loadInvoices = useCallback(async (
     page: number = currentPage,
     size: number = pageSize,
@@ -77,11 +80,21 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
   // When filters or search query change, reset page to 1
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch, statusFilter, selectedLocationId]);
+  }, [debouncedSearch, statusFilter, selectedLocationId, currentTenantId]);
 
-  // Fetch when page, size, or filters change
+  // Fetch when page, size, filters, or tenant change
   useEffect(() => {
     loadInvoices(currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter);
+  }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, currentTenantId, loadInvoices]);
+
+  // Subscribe to store events (e.g. tenant switched, new invoice created)
+  useEffect(() => {
+    const unsubscribe = store.subscribe(() => {
+      loadInvoices(currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter);
+    });
+    return () => {
+      unsubscribe();
+    };
   }, [currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, loadInvoices]);
 
   // Calculate summary stats

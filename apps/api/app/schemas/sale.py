@@ -5,11 +5,11 @@ from pydantic import Field
 from app.schemas.common import BaseSchema
 
 class SaleItemInput(BaseSchema):
-    item_id: str
+    item_id: str = Field(..., alias="itemId")
     quantity: Decimal = Field(..., gt=0)
-    unit_price: Decimal = Field(..., ge=0)
+    unit_price: Decimal = Field(..., ge=0, alias="unitPrice")
     discount: Decimal = Field(default=Decimal("0.00"), ge=0)
-    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
+    tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100, alias="taxRate")
 
 class SaleItemSnapshot(BaseSchema):
     item_id: str = Field(..., alias="itemId")

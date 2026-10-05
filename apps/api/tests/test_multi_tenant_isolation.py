@@ -520,6 +520,146 @@ async def test_tenant_current_subscription_endpoint():
         assert data["subscription"]["status"] == "ACTIVE"
 
 
+@pytest.mark.asyncio
+async def test_cross_tenant_invoice_and_sales_isolation(superadmin_token):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        headers_tenant_a = {
+            "Authorization": f"Bearer {superadmin_token}",
+            "X-Business-ID": TENANT_A_ID
+        }
+        headers_tenant_b = {
+            "Authorization": f"Bearer {superadmin_token}",
+            "X-Business-ID": TENANT_B_ID
+        }
+
+        # 1. Create an item in Store A
+        import uuid
+        sku_a = f"SKU-INV-{uuid.uuid4().hex[:6]}"
+        item_res = await ac.post("/api/v1/items", json={
+            "name": "Invoice Isolation Test Item",
+            "sku": sku_a,
+            "unit": "pcs",
+            "purchase_price": "80.00",
+            "sale_price": "120.00",
+            "tax_rate": "18.0",
+            "opening_stock": 50,
+            "min_stock_alert": 5
+        }, headers=headers_tenant_a)
+        assert item_res.status_code == 201
+        item_data = item_res.json()
+        item_id_a = item_data.get("_id") or item_data.get("id")
+
+        # 2. Create a sale invoice in Store A
+        sale_res_a = await ac.post("/api/v1/sales", json={
+            "consumerName": "Store A Customer",
+            "consumerPhone": "+91 9876543210",
+            "items": [{
+                "itemId": item_id_a,
+                "name": "Invoice Isolation Test Item",
+                "quantity": 2,
+                "unitPrice": 120.00,
+                "taxRate": 18.00
+            }],
+            "paymentMode": "CASH",
+            "paidAmount": 283.20,
+            "enableRoundOff": True
+        }, headers=headers_tenant_a)
+        assert sale_res_a.status_code == 201
+        sale_doc_a = sale_res_a.json()
+        invoice_id_a = sale_doc_a.get("_id") or sale_doc_a.get("id")
+        assert invoice_id_a is not None
+        assert sale_doc_a.get("businessId") == TENANT_A_ID
+
+        # 3. Store A can retrieve the invoice directly by ID
+        get_res_a = await ac.get(f"/api/v1/sales/{invoice_id_a}", headers=headers_tenant_a)
+        assert get_res_a.status_code == 200
+        assert get_res_a.json()["consumerName"] == "Store A Customer"
+
+        # 4. Store A sees the invoice in /sales list
+        list_res_a = await ac.get("/api/v1/sales", headers=headers_tenant_a)
+        assert list_res_a.status_code == 200
+        a_invoices = list_res_a.json()["data"]
+        assert any(inv.get("id") == invoice_id_a or inv.get("_id") == invoice_id_a for inv in a_invoices)
+
+        # 5. Store B CANNOT see Store A's invoice in /sales list
+        list_res_b = await ac.get("/api/v1/sales", headers=headers_tenant_b)
+        assert list_res_b.status_code == 200
+        b_invoices = list_res_b.json()["data"]
+        assert not any(inv.get("id") == invoice_id_a or inv.get("_id") == invoice_id_a for inv in b_invoices)
+
+        # 6. Store B CANNOT fetch Store A's invoice by ID (must return 404 Not Found)
+        get_res_b = await ac.get(f"/api/v1/sales/{invoice_id_a}", headers=headers_tenant_b)
+        assert get_res_b.status_code == 404
+
+        # 7. Store B CANNOT return / update Store A's invoice (must return 404 Not Found)
+        put_res_b = await ac.put(f"/api/v1/sales/{invoice_id_a}", json={
+            "items": [{
+                "itemId": item_id_a,
+                "quantity": 2,
+                "returnedQuantity": 1,
+                "returnReason": "DEFECTIVE_DAMAGED"
+            }]
+        }, headers=headers_tenant_b)
+        assert put_res_b.status_code == 404
+
+        # Clean up Store A test item
+        await ac.delete(f"/api/v1/items/{item_id_a}", headers=headers_tenant_a)
+
+
+@pytest.mark.asyncio
+async def test_cross_tenant_stock_integrity_on_sales(superadmin_token):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        headers_tenant_a = {
+            "Authorization": f"Bearer {superadmin_token}",
+            "X-Business-ID": TENANT_A_ID
+        }
+        headers_tenant_b = {
+            "Authorization": f"Bearer {superadmin_token}",
+            "X-Business-ID": TENANT_B_ID
+        }
+
+        # 1. Create item in Store A with stock = 100
+        import uuid
+        sku_val = f"SKU-STOCK-{uuid.uuid4().hex[:6]}"
+        item_res = await ac.post("/api/v1/items", json={
+            "name": "Store A Stock Protected Item",
+            "sku": sku_val,
+            "unit": "pcs",
+            "purchase_price": "100.00",
+            "sale_price": "150.00",
+            "tax_rate": "18.0",
+            "opening_stock": 100,
+            "min_stock_alert": 10
+        }, headers=headers_tenant_a)
+        assert item_res.status_code == 201
+        item_a = item_res.json()
+        item_id_a = item_a.get("_id") or item_a.get("id")
+
+        # 2. Store B creates a sale using Store A's item ID
+        sale_res_b = await ac.post("/api/v1/sales", json={
+            "consumerName": "Store B Buyer",
+            "items": [{
+                "itemId": item_id_a,
+                "name": "Attempting cross tenant deduction",
+                "quantity": 5,
+                "unitPrice": 150.00,
+                "taxRate": 18.00
+            }],
+            "paymentMode": "CASH",
+            "paidAmount": 885.00
+        }, headers=headers_tenant_b)
+        assert sale_res_b.status_code == 201
+
+        # 3. Check Store A's item stock: must STILL be exactly 100!
+        item_check_a = await ac.get(f"/api/v1/items/{item_id_a}", headers=headers_tenant_a)
+        assert item_check_a.status_code == 200
+        assert float(item_check_a.json()["currentStock"]) == 100.0
+
+        # Clean up
+        await ac.delete(f"/api/v1/items/{item_id_a}", headers=headers_tenant_a)
+
+
+
 
 
 

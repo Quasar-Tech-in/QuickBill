@@ -99,7 +99,7 @@ async def get_sale(
     if not s_oid:
         raise HTTPException(status_code=404, detail="Sale invoice not found")
     
-    doc = await db.invoices.find_one({"_id": s_oid, "businessId": b_oid})
+    doc = await db.invoices.find_one({"_id": s_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
     if not doc:
         raise HTTPException(status_code=404, detail="Sale invoice not found")
     

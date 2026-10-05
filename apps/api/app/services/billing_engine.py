@@ -1,5 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 def quantize_currency(val: Decimal) -> Decimal:
@@ -11,8 +11,8 @@ def quantize_qty(val: Decimal) -> Decimal:
 
 class LineItemCalcInput(BaseModel):
     item_id: str
-    name_snapshot: str
-    sku_snapshot: str = ""
+    name_snapshot: Optional[str] = "Item"
+    sku_snapshot: Optional[str] = ""
     quantity: Decimal = Field(..., ge=0)
     unit_price: Decimal = Field(..., ge=0)
     discount: Decimal = Field(default=Decimal("0.00"), ge=0)
@@ -20,8 +20,8 @@ class LineItemCalcInput(BaseModel):
 
 class LineItemCalcOutput(BaseModel):
     item_id: str
-    name_snapshot: str
-    sku_snapshot: str
+    name_snapshot: Optional[str] = "Item"
+    sku_snapshot: Optional[str] = ""
     quantity: Decimal
     unit_price: Decimal
     gross_amount: Decimal
