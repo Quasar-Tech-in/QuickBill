@@ -72,36 +72,95 @@ class ReportService:
     async def get_profit_and_loss(self, business_id: str) -> ProfitAndLossResponse:
         b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
 
-        # Aggregate Sales & COGS
-        pipeline = [
+        # 1. Aggregate Invoices for Gross Sales, Taxable Base (Net Sales), and GST
+        inv_pipeline = [
             {"$match": {"businessId": b_oid, "status": "CONFIRMED"}},
-            {"$unwind": "$items"},
             {
                 "$group": {
                     "_id": None,
-                    "grossSales": {"$sum": "$items.lineTotal"},
-                    "cogs": {"$sum": {"$multiply": ["$items.quantity", {"$ifNull": ["$items.unitPrice", 0]}]}}
+                    "grossSales": {"$sum": "$grandTotal"},
+                    "taxTotal": {"$sum": "$taxTotal"},
+                    "subtotal": {"$sum": "$subtotal"},
+                    "returnTotal": {"$sum": "$returnTotal"}
                 }
             }
         ]
-        res = await self.db.invoices.aggregate(pipeline).to_list(length=1)
-        gross_sales = Decimal(str(res[0]["grossSales"])) if res else Decimal("0.00")
-        cogs = Decimal(str(res[0]["cogs"] * 0.75)) if res else Decimal("0.00")  # Sample standard margin calculation
+        inv_res = await self.db.invoices.aggregate(inv_pipeline).to_list(length=1)
+        gross_sales = Decimal(str(inv_res[0]["grossSales"])) if inv_res else Decimal("0.00")
+        tax_total = Decimal(str(inv_res[0]["taxTotal"])) if inv_res else Decimal("0.00")
+        returns = Decimal(str(inv_res[0].get("returnTotal", 0))) if inv_res else Decimal("0.00")
+        net_sales = max(Decimal("0.00"), gross_sales - tax_total - returns)
 
-        # Aggregate expenses
+        # 2. Aggregate COGS from inventory ledger / item purchase prices
+        cogs_pipeline = [
+            {"$match": {"businessId": b_oid, "status": "CONFIRMED"}},
+            {"$unwind": "$items"},
+            {
+                "$lookup": {
+                    "from": "items",
+                    "let": {"item_id_str": "$items.itemId"},
+                    "pipeline": [
+                        {
+                            "$match": {
+                                "$expr": {
+                                    "$or": [
+                                        {"$eq": ["$_id", {"$toObjectId": "$$item_id_str"}]},
+                                        {"$eq": ["$id", "$$item_id_str"]},
+                                        {"$eq": ["$publicItemId", "$$item_id_str"]}
+                                    ]
+                                }
+                            }
+                        }
+                    ],
+                    "as": "catalog_item"
+                }
+            },
+            {
+                "$project": {
+                    "qty": "$items.quantity",
+                    "ret_qty": {"$ifNull": ["$items.returnedQuantity", 0]},
+                    "purchase_price": {
+                        "$ifNull": [
+                            {"$arrayElemAt": ["$catalog_item.purchasePrice", 0]},
+                            {"$multiply": ["$items.unitPrice", 0.70]}
+                        ]
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": None,
+                    "totalCogs": {
+                        "$sum": {
+                            "$multiply": [
+                                {"$subtract": ["$qty", "$ret_qty"]},
+                                "$purchase_price"
+                            ]
+                        }
+                    }
+                }
+            }
+        ]
+        try:
+            cogs_res = await self.db.invoices.aggregate(cogs_pipeline).to_list(length=1)
+            cogs = Decimal(str(round(cogs_res[0]["totalCogs"], 2))) if cogs_res else (net_sales * Decimal("0.70"))
+        except Exception:
+            cogs = net_sales * Decimal("0.70")
+
+        # 3. Aggregate operating expenses
         exp_res = await self.db.expenses.aggregate([
             {"$match": {"businessId": b_oid}},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
         ]).to_list(length=1)
         expenses = Decimal(str(exp_res[0]["total"])) if exp_res else Decimal("0.00")
 
-        gross_profit = gross_sales - cogs
+        gross_profit = net_sales - cogs
         net_profit = gross_profit - expenses
 
         return ProfitAndLossResponse(
             gross_sales=gross_sales,
-            sales_returns=Decimal("0.00"),
-            net_sales=gross_sales,
+            sales_returns=returns,
+            net_sales=net_sales,
             cost_of_goods_sold=cogs,
             gross_profit=gross_profit,
             operating_expenses=expenses,

@@ -1,21 +1,35 @@
-# QuickBill & Inventory Management System
+# ⚡ QuickBill & Inventory Management System
 
-> **Mobile-first POS billing, inventory tracking, business accounting, and reporting platform for retail & wholesale businesses.**
+> **A high-speed, multi-tenant POS billing, real-time inventory ledger, business accounting, and GST reporting platform for retail & wholesale businesses.**
+
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI_Python_3.11+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/Frontend-React_18_+_Vite-61DAFB.svg?logo=react)](https://vitejs.dev)
+[![React Native](https://img.shields.io/badge/Mobile-React_Native_+_Expo-000020.svg?logo=expo)](https://expo.dev)
+[![MongoDB](https://img.shields.io/badge/Database-MongoDB_7.0+-47A248.svg?logo=mongodb)](https://www.mongodb.com)
+[![TypeScript](https://img.shields.io/badge/Language-TypeScript_Strict-3178C6.svg?logo=typescript)](https://www.typescriptlang.org)
+[![Python](https://img.shields.io/badge/Language-Python_3.8%2B%20%2F%203.11%2B-3776AB.svg?logo=python)](https://www.python.org)
 
 ---
 
-## 📌 Overview
+## 📌 Executive Summary & User Guide
 
-This project is a high-speed, multi-tenant billing and inventory management application designed to empower shop owners and staff to manage their business operations directly from mobile devices and web interfaces.
+For store owners, cashiers, inventory managers, and accountants seeking a complete operational guide and feature walkthrough, please refer to the dedicated:
+👉 **[📖 Complete End-User Manual (`USER_GUIDE.md`)](USER_GUIDE.md)**
 
-### Core Capabilities
-- ⚡ **Rapid Mobile POS Billing**: Sub-15 second invoice creation with automated tax & discounts.
-- 📷 **Integrated QR Engine**: Generate product QR codes (`ITEM:<publicItemId>`) and scan via mobile camera to auto-add items to cart.
-- 📦 **Immutable Stock Movement Ledger**: Complete audit trail for sales, purchases, returns, and manual adjustments.
-- 👥 **Parties & Balance Tracking**: Comprehensive customer receivables and supplier payables with running statement ledgers.
-- 📊 **Financial & Operational Intelligence**: Real-time Day Book, Profit & Loss (COGS vs Net Sales), Simplified Balance Sheet, and Stock Valuation.
-- 📄 **Invoice PDF & Sharing**: One-tap PDF generation (A4 & Thermal POS formats) with direct WhatsApp / Email sharing.
-- 🛡️ **Multi-Tenant Security**: Tenant isolation enforced at the repository layer using `businessId`.
+---
+
+## 🚀 Core Capabilities
+
+- ⚡ **High-Speed POS Billing**: Sub-15 second invoice checkout with barcode scanner support, keyboard shortcuts (`F2`, `F8`, `F9`), and instant calculations.
+- 🛍️ **Cart Staging & Parked Orders**: Hold multiple customer carts in-flight with backend database sync, conflict resolution, and discard confirmations.
+- 🏪 **Multi-Store & Branch Tenancy**: Logical tenant isolation (`businessId`) and branch scoping (`locationId`) with custom store branding, GSTIN, and receipt headers.
+- 📦 **Immutable Inventory Ledger**: Real-time stock levels, movement audit trails (Sales, Purchases, Returns, Adjustments), and location-specific stock visibility.
+- 🔄 **Sales Returns & Defect Auditing**: Partial & full returns with reason classification (`RESTOCKABLE_RETURN` vs. `DEFECTIVE_DAMAGED`) and automated stock replenishment.
+- 🏷️ **Barcode & QR Label Generator**: Generate and print product barcode labels and QR codes (`ITEM:<publicItemId>`) directly to thermal sticker printers.
+- 👥 **Parties & Customer Khata**: Comprehensive customer receivables and supplier payables with running statement ledgers and credit limit enforcement.
+- 📊 **Financial & GST Analytics**: Real-time Day Book, Trading & Profit & Loss Statement (tax-inclusive gross sales, output tax segregation, true catalog COGS), and GSTR-1 Rate Slab Breakdown (0%, 5%, 12%, 18%, 28%).
+- 📄 **Invoice PDF & Multi-Channel Sharing**: Thermal POS (2-inch / 3-inch) receipts, A4 tax invoices, and direct WhatsApp sharing.
+- 🔐 **Enterprise Security**: Two-Factor Authentication (TOTP / 2FA), Argon2/bcrypt password hashing, JWT access & refresh lifecycle, and granular RBAC.
 
 ---
 
@@ -32,7 +46,7 @@ This project is a high-speed, multi-tenant billing and inventory management appl
                                   ┌───────────▼────────────┐
                                   │    FastAPI Backend     │
                                   │  (Python 3.11+ / REST) │
-                                  │  Auth, Engine, RBAC    │
+                                  │  Billing Engine & RBAC │
                                   └─────┬────────────┬─────┘
                                         │            │
                          ┌──────────────▼─────┐    ┌─▼──────────────────┐
@@ -47,150 +61,83 @@ This project is a high-speed, multi-tenant billing and inventory management appl
                                         ▲
                                         │ HTTPS
                                   ┌─────┴──────────────────┐
-                                  │   Web Admin Console    │
-                                  │  (Next.js + TypeScript)│
-                                  │  Bulk Ops & Reporting  │
+                                  │   Web Admin & POS      │
+                                  │ (Vite + React + TS)    │
+                                  │ Multi-Store Operations │
                                   └────────────────────────┘
 ```
 
-> 📖 **Deep-Dive Technical Architecture & Schemas**: See [MONGODB_SCHEMA_AND_INTEGRATION_ARCHITECTURE.md](MONGODB_SCHEMA_AND_INTEGRATION_ARCHITECTURE.md) for complete collection schemas, multi-tenant database routing, root account connectivity, and ACID transactional sequence diagrams.
-
 ---
 
-## 📁 Repository Structure
+## 📁 Monorepo Structure
 
 ```text
 .
-├── .agents/
-│   └── skills/                      # 21 Antigravity workspace skills & runbooks
-│       ├── auth-rbac/               # JWT, password hashing, and role guards
-│       ├── billing-engine/          # Authoritative financial math & tax calculations
-│       ├── devops-ci-cd/            # Docker, CI/CD, and MongoDB backup scripts
-│       ├── fastapi-backend/         # FastAPI clean architecture & schemas
-│       ├── inventory-ledger/        # Immutable stock ledger & adjustment rules
-│       ├── invoice-pdf-print-share/ # PDF rendering & mobile sharing
-│       ├── mobile-react-native/     # React Native + Expo standards
-│       ├── mongodb-data-modeling/   # Schemas, indexes, and Decimal128 handling
-│       ├── multi-tenant-security/   # businessId scoping & IDOR prevention
-│       ├── observability/           # Structured JSON logs & OpenTelemetry
-│       ├── offline-sync/            # Local cache, sync queue, and idempotency
-│       ├── payments-and-ledger/     # Payment In/Out & party ledger
-│       ├── product-requirements/    # Domain rules, workflows & acceptance criteria
-│       ├── qr-billing/              # QR payload formats & camera scanning
-│       ├── reporting-analytics/     # P&L, Balance Sheet, and sales reports
-│       ├── secure-coding/           # OWASP mitigations & NoSQL protection
-│       ├── testing-quality/         # Pytest / Jest test suites & DoD
-│       └── ui-design-system/        # Color tokens, typography, and UI states
+├── apps/
+│   ├── api/                         # FastAPI Python Backend REST Service
+│   │   ├── app/                     # Routers, Services, Models, Repositories
+│   │   ├── tests/                   # Pytest test suite (Unit, Integration, RBAC)
+│   │   └── README.md                # [Backend Developer Guide](apps/api/README.md)
+│   ├── web/                         # Vite + React + TypeScript Web Admin & POS
+│   │   ├── src/                     # Views, Components, Context, Types
+│   │   └── README.md                # [Web Frontend Developer Guide](apps/web/README.md)
+│   └── mobile/                      # React Native / Expo Mobile Application
+│       ├── src/                     # Mobile Screens, Scanner & Offline Hooks
+│       └── README.md                # [Mobile Developer Guide](apps/mobile/README.md)
 │
-├── apps/                            # Application packages (Monorepo)
-│   ├── api/                         # FastAPI Backend REST service
-│   ├── mobile/                      # React Native / Expo Mobile App
-│   └── web/                         # Next.js Web Admin Console
-│
-├── packages/                        # Shared libraries
-│   ├── contracts/                   # Shared TypeScript interfaces & API types
-│   └── design-tokens/               # Centralized design tokens (colors, spacing)
-│
-├── docker/                          # Docker configuration & init scripts
-│   ├── Dockerfile.dev               # API development container
-│   ├── mongo-init.js                # Database initialization & index seeding
-│   └── scripts/                     # Backup and restore utilities
-│
-├── docker-compose.yml               # Local multi-container development environment
-└── README.md                        # Project documentation
+├── .agents/skills/                  # 21 Antigravity workspace skills & specifications
+├── docker/                          # Dockerfiles, MongoDB init scripts, and backup tools
+├── docker-compose.yml               # Local containerized infrastructure
+├── USER_GUIDE.md                    # Complete End-User & Operational Manual
+└── README.md                        # Master repository documentation
 ```
 
 ---
 
-## 🧠 Antigravity Skills Index
-
-This repository includes specialized Antigravity build skills located in `.agents/skills/`:
-
-| Skill | Description | Path |
-| :--- | :--- | :--- |
-| **`product-requirements`** | Product specifications, user roles, and MVP scope | [.agents/skills/product-requirements/SKILL.md](file:///.agents/skills/product-requirements/SKILL.md) |
-| **`mobile-react-native`** | React Native Expo mobile patterns & hardware camera access | [.agents/skills/mobile-react-native/SKILL.md](file:///.agents/skills/mobile-react-native/SKILL.md) |
-| **`qr-billing`** | QR encoding `ITEM:<publicItemId>` and POS scan flows | [.agents/skills/qr-billing/SKILL.md](file:///.agents/skills/qr-billing/SKILL.md) |
-| **`fastapi-backend`** | FastAPI architecture, Pydantic v2 schemas, and DI | [.agents/skills/fastapi-backend/SKILL.md](file:///.agents/skills/fastapi-backend/SKILL.md) |
-| **`mongodb-data-modeling`** | MongoDB schemas, compound indexes, and Decimal128 money | [.agents/skills/mongodb-data-modeling/SKILL.md](file:///.agents/skills/mongodb-data-modeling/SKILL.md) |
-| **`multi-tenant-security`** | Logical tenant isolation and IDOR protection | [.agents/skills/multi-tenant-security/SKILL.md](file:///.agents/skills/multi-tenant-security/SKILL.md) |
-| **`billing-engine`** | Authoritative calculations for subtotals, GST, and round-offs | [.agents/skills/billing-engine/SKILL.md](file:///.agents/skills/billing-engine/SKILL.md) |
-| **`inventory-ledger`** | Immutable stock movements and real-time quantities | [.agents/skills/inventory-ledger/SKILL.md](file:///.agents/skills/inventory-ledger/SKILL.md) |
-| **`payments-and-ledger`** | Payment In/Out allocations and party balances | [.agents/skills/payments-and-ledger/SKILL.md](file:///.agents/skills/payments-and-ledger/SKILL.md) |
-| **`reporting-analytics`** | Profit & Loss, Balance Sheet, and sales reports | [.agents/skills/reporting-analytics/SKILL.md](file:///.agents/skills/reporting-analytics/SKILL.md) |
-| **`invoice-pdf-print-share`**| Invoice PDF generation, thermal printing, and sharing | [.agents/skills/invoice-pdf-print-share/SKILL.md](file:///.agents/skills/invoice-pdf-print-share/SKILL.md) |
-| **`auth-rbac`** | JWT authentication, refresh lifecycles, and RBAC guards | [.agents/skills/auth-rbac/SKILL.md](file:///.agents/skills/auth-rbac/SKILL.md) |
-| **`offline-sync`** | Offline caching, sync queues, and idempotency handling | [.agents/skills/offline-sync/SKILL.md](file:///.agents/skills/offline-sync/SKILL.md) |
-| **`testing-quality`** | Test pyramid (Pytest, Jest), isolation tests, and DoD | [.agents/skills/testing-quality/SKILL.md](file:///.agents/skills/testing-quality/SKILL.md) |
-| **`observability`** | Structured JSON logging and OpenTelemetry tracing | [.agents/skills/observability/SKILL.md](file:///.agents/skills/observability/SKILL.md) |
-| **`secure-coding`** | OWASP Top 10 mitigation and NoSQL protection | [.agents/skills/secure-coding/SKILL.md](file:///.agents/skills/secure-coding/SKILL.md) |
-| **`ui-design-system`** | Mobile and Web design tokens, components, and UX states | [.agents/skills/ui-design-system/SKILL.md](file:///.agents/skills/ui-design-system/SKILL.md) |
-| **`devops-ci-cd`** | Docker configurations, GitHub Actions CI, and backups | [.agents/skills/devops-ci-cd/SKILL.md](file:///.agents/skills/devops-ci-cd/SKILL.md) |
-
----
-
-## 🚀 Getting Started & Local Development
+## 🛠️ Quickstart & Local Development
 
 ### Prerequisites
+- **Python 3.11+** (or Python 3.8+)
+- **Node.js 20+** & **npm**
 - **Docker** & **Docker Compose**
-- **Python 3.11+**
-- **Node.js 20+** & **npm** / **pnpm**
-- **Expo Go App** (on your iOS/Android device for mobile testing)
+- **Expo Go App** (Optional: for mobile device testing)
 
 ---
 
-### Step 1: Start Infrastructure (MongoDB)
+### Step 1: Start Database (MongoDB)
 
-Start the local database service using Docker Compose:
 ```bash
 docker compose up -d mongodb
 ```
-
-- MongoDB running on `localhost:27017`
+- MongoDB connects on: `mongodb://localhost:27017`
 
 ---
 
-### Step 2: Run the FastAPI Backend
+### Step 2: Start FastAPI Backend
 
 ```bash
 cd apps/api
 
-# Create and activate Python virtual environment
+# Create & activate virtual environment
 python -m venv .venv
-# On Windows:
+# Windows:
 .venv\Scripts\activate
-# On macOS/Linux:
+# macOS/Linux:
 source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the development server with live reload
+# Run development server
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- 📖 **Interactive API Documentation (Swagger)**: `http://localhost:8000/docs`
-- 🩺 **Health Check**: `http://localhost:8000/health/ready`
+- 📖 **Interactive Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- 🩺 **Health Check**: [http://localhost:8000/health/ready](http://localhost:8000/health/ready)
 
 ---
 
-### Step 3: Run the Mobile Application (Expo)
-
-```bash
-cd apps/mobile
-
-# Install dependencies
-npm install
-
-# Start the Expo development server
-npx expo start
-```
-
-- Scan the QR code displayed in the terminal using **Expo Go** (Android) or the **Camera App** (iOS).
-
----
-
-### Step 4: Run the Web Admin (Next.js)
+### Step 3: Start Web Admin & POS Console
 
 ```bash
 cd apps/web
@@ -198,11 +145,25 @@ cd apps/web
 # Install dependencies
 npm install
 
-# Start Next.js development server
+# Start Vite development server
 npm run dev
 ```
 
-- Web Admin URL: `http://localhost:3000`
+- 🌐 **Web Admin & POS**: [http://localhost:3000](http://localhost:3000)
+
+---
+
+### Step 4: Start Mobile App (Expo)
+
+```bash
+cd apps/mobile
+
+# Install dependencies
+npm install
+
+# Start Expo dev server
+npx expo start
+```
 
 ---
 
@@ -211,59 +172,32 @@ npm run dev
 ### Run Backend Tests (Pytest)
 ```bash
 cd apps/api
-pytest -v --cov=app tests/
+pytest -v
 ```
 
-### Run Multi-Tenant Security & Isolation Tests
+### Run Multi-Tenant Isolation Tests
 ```bash
 cd apps/api
 pytest tests/test_multi_tenant_isolation.py -v
 ```
 
-### Run Mobile Unit Tests (Jest)
+### Run Frontend Typecheck & Build
 ```bash
-cd apps/mobile
-npm test
-```
-
-### Linting and Type Checking
-```bash
-# Backend (Python)
-ruff check apps/api
-mypy apps/api --strict
-
-# Frontend (TypeScript)
-cd apps/mobile && npx tsc --noEmit
-cd apps/web && npx tsc --noEmit
+cd apps/web
+npm run build
 ```
 
 ---
 
-## 🔄 Recommended Build Sequence
+## 📚 Specialized Documentation Index
 
-When adding new modules or building out the MVP, follow the phased order:
-**01. Project skeleton + architect**
-**02. MongoDB connection + base models**
-**03. Authentication (JWT + refresh)**
-**04. Business tenancy + RBAC**
-**05. Item / Category / Unit master**
-**06. Party / Customer / Supplier master**
-**07. QR generation (`ITEM:<publicItemId>`)**
-**08. Mobile QR scanner + item lookup**
-**09. Billing calculation engine**
-**10. Sales transaction + stock movement**
-**11. Inventory movement engine & stock alerts**
-**12. Purchase transaction**
-**13. Payments In / Out**
-**14. Expenses**
-**15. Invoice PDF / Share**
-**16. Home Dashboard & Quick Actions**
-**17. Reports (P&L, Day Book, Stock Summary)**
-**18. Audit + Observability**
-**19. End-to-end testing**
-**20. Production deployment**
+- **[End-User Operational Manual (`USER_GUIDE.md`)](USER_GUIDE.md)**
+- **[Backend Service Documentation (`apps/api/README.md`)](apps/api/README.md)**
+- **[Web Console Documentation (`apps/web/README.md`)](apps/web/README.md)**
+- **[Mobile Application Documentation (`apps/mobile/README.md`)](apps/mobile/README.md)**
+- **[MongoDB Database Architecture & Schemas (`MONGODB_SCHEMA_AND_INTEGRATION_ARCHITECTURE.md`)](MONGODB_SCHEMA_AND_INTEGRATION_ARCHITECTURE.md)**
 
 ---
 
 ## 📄 License
-Private & Proprietary. All rights reserved.
+Proprietary & Confidential — QuickBill Team.

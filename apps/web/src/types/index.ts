@@ -203,6 +203,7 @@ export interface InvoiceItem {
   discountPercent: number;
   taxRate: number;
   taxAmount: number;
+  taxableAmount?: number;
   total: number;
 }
 

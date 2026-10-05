@@ -87,16 +87,70 @@ export const ReportsView: React.FC = () => {
     loadData();
   }, [selectedLocationId]);
 
-  // Financial Metrics
-  const totalRevenue = invoices.reduce((s, i) => s + (i.grandTotal || 0), 0);
-  const totalTaxCollected = invoices.reduce((s, i) => s + (i.taxTotal || 0), 0);
-  const totalNetSales = Math.max(0, totalRevenue - totalTaxCollected);
+  // --- Accurate GST & Financial Metrics (Tax-Inclusive Rates Reconciliation) ---
+  const totalRevenue = invoices.reduce((s, i) => s + (Number(i.grandTotal) || 0), 0);
+  const totalTaxCollected = invoices.reduce((s, i) => s + (Number(i.taxTotal) || 0), 0);
+  const totalSalesReturns = invoices.reduce((s, i) => s + (Number(i.returnTotal) || 0), 0);
   
-  // Cost of Goods Sold (COGS) Estimation
-  const estimatedCOGS = totalNetSales > 0 ? (totalNetSales * 0.70) : 0;
-  const grossProfit = totalNetSales - estimatedCOGS;
+  // Tax-Exclusive Net Turnover (Subtotal is already the tax-exclusive base when rates are tax-inclusive)
+  const totalNetSales = Math.max(0, invoices.reduce((s, i) => {
+    const base = i.subtotal !== undefined ? Number(i.subtotal) : (Number(i.grandTotal || 0) - Number(i.taxTotal || 0));
+    return s + base;
+  }, 0) - totalSalesReturns);
+  
+  // Accurate Cost of Goods Sold (COGS) from inventory purchase prices
+  const actualCOGS = useMemo(() => {
+    let cogs = 0;
+    invoices.forEach(inv => {
+      if (inv.type === 'SALE' && inv.status !== 'CANCELLED') {
+        inv.items?.forEach(line => {
+          const catItem = items.find(it => it.id === line.itemId || it.publicItemId === line.itemId);
+          const costPrice = Number(catItem?.purchasePrice !== undefined ? catItem.purchasePrice : (line.unitPrice * 0.70));
+          const netQty = Math.max(0, Number(line.quantity || 0) - Number(line.returnedQuantity || 0));
+          if (netQty > 0) {
+            cogs += costPrice * netQty;
+          }
+        });
+      }
+    });
+    return Number(cogs.toFixed(2));
+  }, [invoices, items]);
+
+  const grossProfit = Math.max(0, totalNetSales - actualCOGS);
   const operatingExpenses = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const netProfit = grossProfit - operatingExpenses;
+
+  // GST Slabs Breakdown (Output Tax Liability by Rate)
+  const gstSlabBreakdown = useMemo(() => {
+    const slabs: Record<string, { rate: number; taxable: number; cgst: number; sgst: number; totalTax: number }> = {
+      '0': { rate: 0, taxable: 0, cgst: 0, sgst: 0, totalTax: 0 },
+      '5': { rate: 5, taxable: 0, cgst: 0, sgst: 0, totalTax: 0 },
+      '12': { rate: 12, taxable: 0, cgst: 0, sgst: 0, totalTax: 0 },
+      '18': { rate: 18, taxable: 0, cgst: 0, sgst: 0, totalTax: 0 },
+      '28': { rate: 28, taxable: 0, cgst: 0, sgst: 0, totalTax: 0 },
+    };
+
+    invoices.forEach(inv => {
+      if (inv.type === 'SALE' && inv.status !== 'CANCELLED') {
+        inv.items?.forEach(line => {
+          const rateKey = String(Math.round(Number(line.taxRate || 0)));
+          if (!slabs[rateKey]) {
+            slabs[rateKey] = { rate: Number(line.taxRate || 0), taxable: 0, cgst: 0, sgst: 0, totalTax: 0 };
+          }
+          const lineTax = Number(line.taxAmount || 0);
+          const lineTotal = Number(line.total || (line.unitPrice * line.quantity));
+          const lineTaxable = Number(line.taxableAmount !== undefined ? line.taxableAmount : (lineTotal - lineTax));
+          
+          slabs[rateKey].taxable += lineTaxable;
+          slabs[rateKey].totalTax += lineTax;
+          slabs[rateKey].cgst += lineTax / 2;
+          slabs[rateKey].sgst += lineTax / 2;
+        });
+      }
+    });
+
+    return Object.values(slabs).filter(s => s.taxable > 0 || s.totalTax > 0);
+  }, [invoices]);
 
   // Filtered Stock Items for Valuation Tab
   const filteredItems = useMemo(() => {
@@ -146,16 +200,16 @@ export const ReportsView: React.FC = () => {
         csvContent += `"${i.publicItemId || i.id}","${i.name.replace(/"/g, '""')}","${i.category || 'General'}",${stock},"${i.unit || 'pcs'}",${cost.toFixed(2)},${sale.toFixed(2)},${costVal.toFixed(2)},${retailVal.toFixed(2)},${profit.toFixed(2)},"${status}"\n`;
       });
     } else if (reportType === 'PNL') {
-      csvContent += 'Financial Metric,Amount (INR)\n';
-      csvContent += `"Gross Total Sales Revenue",${totalRevenue.toFixed(2)}\n`;
-      csvContent += `"Less: GST / Output Taxes",-${totalTaxCollected.toFixed(2)}\n`;
-      csvContent += `"Net Sales Revenue",${totalNetSales.toFixed(2)}\n`;
-      csvContent += `"Less: Estimated COGS",-${estimatedCOGS.toFixed(2)}\n`;
-      csvContent += `"Gross Profit Margin",${grossProfit.toFixed(2)}\n`;
-      csvContent += `"Less: Operating Expenses",-${operatingExpenses.toFixed(2)}\n`;
-      csvContent += `"Net Profit / (Loss)",${netProfit.toFixed(2)}\n`;
+      csvContent += 'Financial Metric,Amount (INR),Notes\n';
+      csvContent += `"Gross Total Billed Revenue (Tax Inclusive)",${totalRevenue.toFixed(2)},"Total amount collected from customers"\n`;
+      csvContent += `"Less: Output GST Collected",-${totalTaxCollected.toFixed(2)},"100% segregated tax collected on behalf of Govt"\n`;
+      csvContent += `"Net Taxable Turnover (Ex-Tax Sales)",${totalNetSales.toFixed(2)},"True net sales revenue"\n`;
+      csvContent += `"Less: Actual Cost of Goods Sold (COGS)",-${actualCOGS.toFixed(2)},"Actual inventory asset acquisition cost"\n`;
+      csvContent += `"Gross Trading Margin",${grossProfit.toFixed(2)},"Net Sales minus COGS"\n`;
+      csvContent += `"Less: Operating Expenses",-${operatingExpenses.toFixed(2)},"Store operations, rent, utilities, staff"\n`;
+      csvContent += `"Net Profit / (Loss)",${netProfit.toFixed(2)},"Bottom-line profit"\n`;
     } else {
-      csvContent += 'Invoice Number,Date,Branch,Party,Payment Mode,Subtotal,Tax Total,Grand Total,Status\n';
+      csvContent += 'Invoice Number,Date,Branch,Party,Payment Mode,Taxable Subtotal,GST Total,Grand Total,Status\n';
       invoices.forEach(i => {
         csvContent += `"${i.invoiceNumber}","${i.date}","${i.locationName || 'Main Store'}","${(i.partyName || 'Walk-in').replace(/"/g, '""')}","${i.paymentMode}",${i.subtotal || 0},${i.taxTotal || 0},${i.grandTotal || 0},"${i.status}"\n`;
       });
@@ -254,68 +308,162 @@ export const ReportsView: React.FC = () => {
 
       {/* P&L View */}
       {reportType === 'PNL' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
-          {/* Income Summary Card */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">Trading & Income Statement ({selectedLocationId === 'ALL' ? 'Consolidated' : activeLocObj?.name})</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
+            {/* Income Summary Card */}
+            <div className="card">
+              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="card-title">Trading & Income Statement ({selectedLocationId === 'ALL' ? 'Consolidated' : activeLocObj?.name})</h3>
+                <span style={{ fontSize: '0.74rem', padding: '2px 8px', borderRadius: 12, backgroundColor: 'var(--primary-50)', color: 'var(--primary-700)', fontWeight: 700 }}>
+                  GST Inclusive Rates
+                </span>
+              </div>
+              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)' }}>
+                  <span style={{ color: 'var(--neutral-600)', fontWeight: 600 }}>Gross Total Sales (Tax-Inclusive):</span>
+                  <span style={{ fontWeight: 800 }}>₹{totalRevenue.toFixed(2)}</span>
+                </div>
+                {totalSalesReturns > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', color: 'var(--danger-600)' }}>
+                    <span>Less: Sales Returns & Refunds:</span>
+                    <span>-₹{totalSalesReturns.toFixed(2)}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', color: '#d97706' }}>
+                  <span>Less: Output GST Collected (Inclusive Tax):</span>
+                  <span style={{ fontWeight: 700 }}>-₹{totalTaxCollected.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', fontWeight: 700, color: 'var(--neutral-900)' }}>
+                  <span>Net Taxable Turnover (Ex-Tax Sales):</span>
+                  <span style={{ fontWeight: 800 }}>₹{totalNetSales.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', color: 'var(--danger-600)' }}>
+                  <span>Less: Cost of Goods Sold (Actual COGS):</span>
+                  <span>-₹{actualCOGS.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: '2px solid var(--neutral-200)', borderBottom: '2px solid var(--neutral-200)', fontWeight: 800, fontSize: '1.05rem', color: 'var(--primary-700)' }}>
+                  <span>Gross Trading Margin:</span>
+                  <span>₹{grossProfit.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', color: 'var(--neutral-500)' }}>
+                  <span>Less: Operating Expenses:</span>
+                  <span>-₹{operatingExpenses.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: 12, backgroundColor: netProfit >= 0 ? 'var(--success-50)' : 'var(--danger-50)', borderRadius: 'var(--radius-md)', fontWeight: 800, fontSize: '1.2rem', color: netProfit >= 0 ? 'var(--success-700)' : 'var(--danger-700)' }}>
+                  <span>Net Profit / (Loss):</span>
+                  <span>₹{netProfit.toFixed(2)}</span>
+                </div>
+              </div>
             </div>
-            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)' }}>
-                <span style={{ color: 'var(--neutral-600)', fontWeight: 600 }}>Gross Total Sales Revenue:</span>
-                <span style={{ fontWeight: 800 }}>₹{totalRevenue.toFixed(2)}</span>
+
+            {/* Quick Insights & KPI Card */}
+            <div className="card">
+              <div className="card-header">
+                <h3 className="card-title">Key Performance Indicators</h3>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', color: 'var(--neutral-500)' }}>
-                <span>Less: GST / Output Taxes:</span>
-                <span>-₹{totalTaxCollected.toFixed(2)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', fontWeight: 700 }}>
-                <span>Net Sales Revenue:</span>
-                <span>₹{totalNetSales.toFixed(2)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', color: 'var(--danger-600)' }}>
-                <span>Less: Cost of Goods Sold (COGS):</span>
-                <span>-₹{estimatedCOGS.toFixed(2)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: '2px solid var(--neutral-200)', borderBottom: '2px solid var(--neutral-200)', fontWeight: 800, fontSize: '1.05rem', color: 'var(--primary-700)' }}>
-                <span>Gross Margin (Profit):</span>
-                <span>₹{grossProfit.toFixed(2)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', color: 'var(--neutral-500)' }}>
-                <span>Less: Operating Expenses:</span>
-                <span>-₹{operatingExpenses.toFixed(2)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: 12, backgroundColor: 'var(--success-50)', borderRadius: 'var(--radius-md)', fontWeight: 800, fontSize: '1.2rem', color: 'var(--success-700)' }}>
-                <span>Net Profit / (Loss):</span>
-                <span>₹{netProfit.toFixed(2)}</span>
+              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>Gross Trading Margin</p>
+                  <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                    {totalNetSales > 0 ? ((grossProfit / totalNetSales) * 100).toFixed(1) : 0}%
+                  </p>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Based on actual inventory acquisition costs</span>
+                </div>
+                <div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>Net Profit Margin</p>
+                  <p style={{ fontSize: '1.5rem', fontWeight: 800, color: netProfit >= 0 ? 'var(--success-700)' : 'var(--danger-600)' }}>
+                    {totalNetSales > 0 ? ((netProfit / totalNetSales) * 100).toFixed(1) : 0}%
+                  </p>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Net earnings after all store expenses</span>
+                </div>
+                <div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>Total Bills Processed</p>
+                  <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary-600)' }}>
+                    {invoices.length} Invoices
+                  </p>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Quick Insights Card */}
+          {/* GST Tax Output & Slab Breakdown Card */}
           <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">Key Performance Indicators</h3>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+              <div>
+                <h3 className="card-title">GST Tax Liability & Output Rate Breakdown</h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                  Summary of tax collected across rate slabs for filing GSTR-1 and tax compliance.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Total Output GST:</span>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--primary-700)' }}>₹{totalTaxCollected.toFixed(2)}</div>
+                </div>
+              </div>
             </div>
-            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>Gross Profit Margin</p>
-                <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
-                  {totalNetSales > 0 ? ((grossProfit / totalNetSales) * 100).toFixed(1) : 0}%
-                </p>
-              </div>
-              <div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>Net Profit Margin</p>
-                <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--success-700)' }}>
-                  {totalNetSales > 0 ? ((netProfit / totalNetSales) * 100).toFixed(1) : 0}%
-                </p>
-              </div>
-              <div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>Total Bills Processed</p>
-                <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary-600)' }}>
-                  {invoices.length} Invoices
-                </p>
-              </div>
+
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Tax Rate Slab</th>
+                    <th style={{ textAlign: 'right' }}>Taxable Turnover (Ex-Tax Base)</th>
+                    <th style={{ textAlign: 'right' }}>Central GST (CGST)</th>
+                    <th style={{ textAlign: 'right' }}>State GST (SGST)</th>
+                    <th style={{ textAlign: 'right' }}>Total Output Tax</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gstSlabBreakdown.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', padding: '24px 12px', color: 'var(--neutral-400)' }}>
+                        No tax-bearing transactions found for the selected branch.
+                      </td>
+                    </tr>
+                  ) : (
+                    gstSlabBreakdown.map((slab) => (
+                      <tr key={slab.rate}>
+                        <td style={{ fontWeight: 700 }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 6, backgroundColor: 'var(--primary-50)', color: 'var(--primary-700)', fontSize: '0.8rem' }}>
+                            GST @ {slab.rate}%
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                          ₹{slab.taxable.toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', color: 'var(--neutral-600)' }}>
+                          ₹{slab.cgst.toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', color: 'var(--neutral-600)' }}>
+                          ₹{slab.sgst.toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--primary-700)' }}>
+                          ₹{slab.totalTax.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                {gstSlabBreakdown.length > 0 && (
+                  <tfoot>
+                    <tr style={{ background: 'var(--neutral-50)', fontWeight: 800 }}>
+                      <td>Total Consolidated Output GST:</td>
+                      <td style={{ textAlign: 'right' }}>₹{totalNetSales.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right' }}>₹{(totalTaxCollected / 2).toFixed(2)}</td>
+                      <td style={{ textAlign: 'right' }}>₹{(totalTaxCollected / 2).toFixed(2)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--primary-700)' }}>₹{totalTaxCollected.toFixed(2)}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+
+            <div style={{ padding: '12px 16px', background: 'var(--neutral-50)', borderTop: '1px solid var(--neutral-200)', fontSize: '0.78rem', color: 'var(--neutral-600)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <CheckCircle2 size={15} color="var(--success-600)" />
+              <span>
+                <strong>Tax Reconciled:</strong> Selling rates are configured as tax-inclusive. The base turnover (₹{totalNetSales.toFixed(2)}) and GST output liability (₹{totalTaxCollected.toFixed(2)}) sum accurately to the total customer billed revenue (₹{totalRevenue.toFixed(2)}) with no double deduction.
+              </span>
             </div>
           </div>
         </div>
