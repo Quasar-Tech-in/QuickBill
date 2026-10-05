@@ -1054,10 +1054,10 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     <div className="page-container" style={{ paddingBottom: 16 }}>
       <div className="pos-layout">
         {/* Left Column: Product Catalog & Search */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0, overflow: 'visible', position: 'relative' }}>
           
           {/* Top Search & Category Filter Bar */}
-          <div className="card" style={{ padding: '12px 16px', position: 'relative', zIndex: 5, flexShrink: 0 }}>
+          <div className="card" style={{ padding: '12px 16px', position: 'relative', zIndex: 40, flexShrink: 0, overflow: 'visible' }}>
             {/* Active Branch Notice & Manual Refresh */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: 'var(--neutral-700)', fontWeight: 600 }}>
@@ -1314,7 +1314,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
               </button>
 
               {/* Multi-Select Category Dropdown matching InventoryView */}
-              <div style={{ position: 'relative', flexShrink: 0 }} ref={categoryDropdownRef}>
+              <div style={{ position: 'relative', flexShrink: 0, zIndex: 50 }} ref={categoryDropdownRef}>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -1380,12 +1380,13 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                       position: 'absolute',
                       top: 'calc(100% + 6px)',
                       right: 0,
-                      zIndex: 1000,
-                      width: 280,
+                      zIndex: 9999,
+                      width: 290,
+                      maxHeight: 390,
                       backgroundColor: '#ffffff',
                       borderRadius: 'var(--radius-lg, 8px)',
-                      border: '1px solid var(--neutral-200)',
-                      boxShadow: '0 12px 28px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.06)',
+                      border: '1px solid var(--neutral-300)',
+                      boxShadow: '0 16px 36px rgba(0, 0, 0, 0.2), 0 6px 14px rgba(0, 0, 0, 0.08)',
                       padding: '12px',
                       display: 'flex',
                       flexDirection: 'column',
@@ -1558,7 +1559,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           </div>
 
           {/* Fixed-Height Product Items Grid */}
-          <div className="item-catalog-grid" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto' }}>
+          <div className="item-catalog-grid" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', position: 'relative', zIndex: 1 }}>
             {filteredItems.length === 0 ? (
               <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 36, color: 'var(--neutral-400)', backgroundColor: '#ffffff', borderRadius: 'var(--radius-md)', border: '1px dashed var(--neutral-300)' }}>
                 <Package size={38} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
