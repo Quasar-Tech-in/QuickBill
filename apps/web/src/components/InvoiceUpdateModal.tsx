@@ -26,6 +26,9 @@ interface ItemReturnState {
   returnedQty: number;
   unitPrice: number;
   taxRate: number;
+  discountType?: 'PERCENT' | 'FLAT';
+  discountValue?: number;
+  discountAmount?: number;
   discountPercent: number;
   returnReason: 'RESTOCKABLE_RETURN' | 'DEFECTIVE_DAMAGED' | 'EXCHANGE' | 'WRONG_ITEM';
   returnNote: string;
@@ -75,6 +78,9 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
       returnedQty: it.returnedQuantity || 0,
       unitPrice: it.unitPrice,
       taxRate: it.taxRate,
+      discountType: it.discountType,
+      discountValue: it.discountValue,
+      discountAmount: it.discountAmount,
       discountPercent: it.discountPercent || 0,
       returnReason: it.returnReason || 'RESTOCKABLE_RETURN',
       returnNote: it.returnNote || '',
@@ -123,7 +129,11 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
     const activeQty = Math.max(0, Number((it.originalQty - it.returnedQty).toFixed(3)));
     totalReturnedQty += it.returnedQty;
     const gross = activeQty * it.unitPrice;
-    const disc = it.discountPercent ? (gross * (it.discountPercent / 100)) : 0;
+    const originalLineGross = it.originalQty * it.unitPrice;
+    const itemDiscTotal = it.discountAmount !== undefined ? it.discountAmount : (it.discountPercent ? originalLineGross * (it.discountPercent / 100) : 0);
+    const effectiveDiscountRatio = originalLineGross > 0 ? (itemDiscTotal / originalLineGross) : 0;
+
+    const disc = gross * effectiveDiscountRatio;
     const netLineInclusive = Math.max(0, gross - disc);
     
     // Extract taxable base from tax-inclusive amount: Base = Inclusive / (1 + TaxRate/100)
@@ -136,7 +146,7 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
 
     // Return value for returned quantity (tax-inclusive full product price)
     const retGross = it.returnedQty * it.unitPrice;
-    const retDisc = it.discountPercent ? (retGross * (it.discountPercent / 100)) : 0;
+    const retDisc = retGross * effectiveDiscountRatio;
     returnDeduction += Math.max(0, retGross - retDisc);
   });
 
@@ -243,16 +253,22 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
     setErrorMsg(null);
     try {
       const payload = {
-        items: itemsState.map(it => ({
-          itemId: it.itemId,
-          quantity: it.originalQty,
-          returnedQuantity: Number(it.returnedQty.toFixed(3)),
-          returnReason: it.returnedQty > 0 ? it.returnReason : undefined,
-          returnNote: it.returnedQty > 0 ? it.returnNote : undefined,
-          unitPrice: it.unitPrice,
-          taxRate: it.taxRate,
-          discount: it.discountPercent ? ((it.unitPrice * it.originalQty) * (it.discountPercent / 100)) : 0,
-        })),
+        items: itemsState.map(it => {
+          const originalLineGross = it.unitPrice * it.originalQty;
+          const disc = it.discountAmount !== undefined ? it.discountAmount : (it.discountPercent ? (originalLineGross * (it.discountPercent / 100)) : 0);
+          return {
+            itemId: it.itemId,
+            quantity: it.originalQty,
+            returnedQuantity: Number(it.returnedQty.toFixed(3)),
+            returnReason: it.returnedQty > 0 ? it.returnReason : undefined,
+            returnNote: it.returnedQty > 0 ? it.returnNote : undefined,
+            unitPrice: it.unitPrice,
+            taxRate: it.taxRate,
+            discount: disc,
+            discountType: it.discountType,
+            discountValue: it.discountValue,
+          };
+        }),
         returnNotes: returnNotes.trim() || undefined,
       };
 

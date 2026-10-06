@@ -3098,21 +3098,37 @@ class StoreService {
       billedByName: doc.billedByName || doc.billed_by_name || undefined,
       billedByRole: doc.billedByRole || doc.billed_by_role || undefined,
       type: 'SALE',
-      items: (doc.items || []).map((it: any) => ({
-        itemId: it.itemId || it.item_id,
-        name: it.nameSnapshot || it.name_snapshot || it.name || 'Item',
-        quantity: Number(it.quantity || 1),
-        returnedQuantity: Number(it.returnedQuantity !== undefined ? it.returnedQuantity : (it.returned_quantity || 0)),
-        returnReason: it.returnReason || it.return_reason || undefined,
-        returnNote: it.returnNote || it.return_note || undefined,
-        returnDate: it.returnDate || it.return_date || undefined,
-        returnStatus: it.returnStatus || it.return_status || undefined,
-        unitPrice: Number(it.unitPrice !== undefined ? it.unitPrice : (it.unit_price || 0)),
-        discountPercent: Number(it.discount || 0),
-        taxRate: Number(it.taxRate !== undefined ? it.taxRate : (it.tax_rate || 0)),
-        taxAmount: Number(it.taxAmount !== undefined ? it.taxAmount : (it.tax_amount || 0)),
-        total: Number(it.lineTotal !== undefined ? it.lineTotal : (it.line_total !== undefined ? it.line_total : (Number(it.unitPrice || it.unit_price || 0) * Number(it.quantity || 1)))),
-      })),
+      items: (doc.items || []).map((it: any) => {
+        const qty = Number(it.quantity || 1);
+        const price = Number(it.unitPrice !== undefined ? it.unitPrice : (it.unit_price || 0));
+        const gross = qty * price;
+        const discAmt = Number(it.discount !== undefined ? it.discount : (it.discount_amount || 0));
+        const discType = it.discountType || it.discount_type || (it.discountPercent > 0 ? 'PERCENT' : 'FLAT');
+        const discVal = Number(it.discountValue !== undefined ? it.discountValue : (it.discount_value !== undefined ? it.discount_value : (discType === 'PERCENT' ? (it.discountPercent || (gross > 0 ? (discAmt / gross) * 100 : 0)) : discAmt)));
+        const discPct = Number(it.discountPercent !== undefined ? it.discountPercent : (it.discount_percent !== undefined ? it.discount_percent : (discType === 'PERCENT' ? discVal : (gross > 0 ? (discAmt / gross) * 100 : 0))));
+
+        return {
+          itemId: it.itemId || it.item_id,
+          name: it.nameSnapshot || it.name_snapshot || it.name || 'Item',
+          unit: it.unit || it.unit_snapshot || 'pcs',
+          quantity: qty,
+          returnedQuantity: Number(it.returnedQuantity !== undefined ? it.returnedQuantity : (it.returned_quantity || 0)),
+          returnReason: it.returnReason || it.return_reason || undefined,
+          returnNote: it.returnNote || it.return_note || undefined,
+          returnDate: it.returnDate || it.return_date || undefined,
+          returnStatus: it.returnStatus || it.return_status || undefined,
+          unitPrice: price,
+          discountPercent: Number(discPct.toFixed(2)),
+          discountType: discType as 'PERCENT' | 'FLAT',
+          discountValue: Number(discVal.toFixed(2)),
+          discountAmount: Number(discAmt.toFixed(2)),
+          taxRate: Number(it.taxRate !== undefined ? it.taxRate : (it.tax_rate || 0)),
+          taxAmount: Number(it.taxAmount !== undefined ? it.taxAmount : (it.tax_amount || 0)),
+          taxableAmount: it.taxableAmount !== undefined ? Number(it.taxableAmount) : (it.taxable_amount !== undefined ? Number(it.taxable_amount) : undefined),
+          total: Number(it.lineTotal !== undefined ? it.lineTotal : (it.line_total !== undefined ? it.line_total : (gross - discAmt))),
+          originalTotal: Number(gross.toFixed(2)),
+        };
+      }),
       subtotal: Number(rawSubtotal),
       taxTotal: Number(rawTax),
       discountTotal: Number(rawDiscount),
@@ -3405,16 +3421,35 @@ class StoreService {
       billedById: invoiceData.billedById || currentUser?.id || 'usr_staff',
       billedByName: invoiceData.billedByName || currentUser?.name || 'Store Cashier',
       billedByRole: invoiceData.billedByRole || currentUser?.role || 'CASHIER',
-      items: invoiceData.items.map(it => ({
-        itemId: it.itemId,
-        item_id: it.itemId,
-        quantity: Number(it.quantity),
-        unitPrice: Number(it.unitPrice),
-        unit_price: Number(it.unitPrice),
-        discount: it.discountPercent ? Number(((it.unitPrice * it.quantity) * (it.discountPercent / 100)).toFixed(2)) : 0,
-        taxRate: Number(it.taxRate || 0),
-        tax_rate: Number(it.taxRate || 0),
-      })),
+      items: invoiceData.items.map(it => {
+        const qty = Number(it.quantity || 1);
+        const price = Number(it.unitPrice || 0);
+        const gross = qty * price;
+        let discAmount = 0;
+        if (it.discountAmount !== undefined && it.discountAmount > 0) {
+          discAmount = it.discountAmount;
+        } else if (it.discountType === 'PERCENT' && it.discountValue !== undefined) {
+          discAmount = (gross * Math.min(100, it.discountValue)) / 100;
+        } else if (it.discountType === 'FLAT' && it.discountValue !== undefined) {
+          discAmount = Math.min(gross, it.discountValue);
+        } else if (it.discountPercent) {
+          discAmount = (gross * it.discountPercent) / 100;
+        }
+
+        return {
+          itemId: it.itemId,
+          item_id: it.itemId,
+          quantity: qty,
+          unitPrice: price,
+          unit_price: price,
+          discount: Number(discAmount.toFixed(2)),
+          discountType: it.discountType || (it.discountPercent ? 'PERCENT' : 'FLAT'),
+          discountValue: it.discountValue !== undefined ? Number(it.discountValue) : (it.discountPercent || discAmount),
+          discountPercent: it.discountType === 'PERCENT' ? Number(it.discountValue || 0) : Number(it.discountPercent || (gross > 0 ? (discAmount / gross) * 100 : 0)),
+          taxRate: Number(it.taxRate || 0),
+          tax_rate: Number(it.taxRate || 0),
+        };
+      }),
       invoiceDiscount: Number(invoiceData.discountTotal || 0),
       discountType: invoiceData.discountType,
       discountValue: invoiceData.discountValue !== undefined ? Number(invoiceData.discountValue) : undefined,

@@ -125,6 +125,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const [cart, setCart] = useState<CartItem[]>(store.getPosCart());
   // Map of raw typed input string per item to allow typing "0.", "0.0", "0.01", "4/30" without React resetting mid-keystroke
   const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({});
+  // Item-level discount editor state
+  const [editingDiscountItemId, setEditingDiscountItemId] = useState<string | null>(null);
 
   // Staged Orders / Multi-Drafts State
   const [stagedOrders, setStagedOrders] = useState<StagedOrder[]>(() => store.getStagedOrders(store.getActiveLocation().id));
@@ -419,18 +421,69 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     return item.imageUrl || item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url;
   };
 
-  // Add Item to Cart
+  // Helper to re-evaluate a cart item's line total, discounts, and gross
+  const calculateCartLine = (
+    c: CartItem,
+    newQty: number,
+    newPrice?: number,
+    newDiscType?: 'PERCENT' | 'FLAT',
+    newDiscVal?: number
+  ): CartItem => {
+    const price = newPrice !== undefined ? newPrice : Number(c.unitPrice || c.item?.salePrice || 0);
+    const qty = newQty;
+    const gross = price * qty;
+    const discType = newDiscType !== undefined ? newDiscType : (c.discountType || 'PERCENT');
+    let discVal = newDiscVal !== undefined ? newDiscVal : (c.discountValue !== undefined ? c.discountValue : (c.discountPercent || 0));
+
+    let discAmount = 0;
+    let discPct = 0;
+
+    if (discType === 'PERCENT') {
+      discVal = Math.min(100, Math.max(0, discVal));
+      discAmount = (gross * discVal) / 100;
+      discPct = discVal;
+    } else {
+      discVal = Math.min(gross, Math.max(0, discVal));
+      discAmount = discVal;
+      discPct = gross > 0 ? (discAmount / gross) * 100 : 0;
+    }
+
+    const lineTotal = Math.max(0, gross - discAmount);
+
+    return {
+      ...c,
+      unitPrice: price,
+      quantity: qty,
+      discountType: discType,
+      discountValue: Number(discVal.toFixed(2)),
+      discountAmount: Number(discAmount.toFixed(2)),
+      discountPercent: Number(discPct.toFixed(2)),
+      lineTotal: Number(lineTotal.toFixed(2)),
+      originalLineTotal: Number(gross.toFixed(2)),
+    };
+  };
+
+  // Add Item to Cart (Quick Tap on Catalog Card or Barcode Scan)
   const handleAddToCart = (item: Item) => {
     const price = Number(item.salePrice || 0);
-    const mrp = Number(item.mrp || item.salePrice || 0);
     const taxRate = Number(item.taxRate || 0);
-
+    const mrp = Number(item.mrp || 0);
     let itemDiscountPercent = 0;
-    if (item.hasDiscount && item.discountValue && item.discountValue > 0) {
+    let itemDiscountType: 'PERCENT' | 'FLAT' = 'PERCENT';
+    let itemDiscountVal = 0;
+
+    if (item.discountValue && Number(item.discountValue) > 0) {
       if (item.discountType === 'PERCENT') {
         itemDiscountPercent = Number(item.discountValue);
+        itemDiscountType = 'PERCENT';
+        itemDiscountVal = Number(item.discountValue);
       } else if (mrp > 0) {
+        itemDiscountType = 'FLAT';
+        itemDiscountVal = Number(item.discountValue);
         itemDiscountPercent = Number(((Number(item.discountValue) / mrp) * 100).toFixed(1));
+      } else {
+        itemDiscountType = 'FLAT';
+        itemDiscountVal = Number(item.discountValue);
       }
     }
 
@@ -448,27 +501,25 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         const newQty = item.allowParts
           ? Number((currentQty + 1).toFixed(3))
           : currentQty + 1;
-        const lineTotal = Number((newQty * price).toFixed(2));
-        nextCart[existingIdx] = {
-          ...nextCart[existingIdx],
-          quantity: newQty,
-          unitPrice: price,
-          taxRate: taxRate,
-          lineTotal,
-        };
+        nextCart[existingIdx] = calculateCartLine(nextCart[existingIdx], newQty, price);
         return nextCart;
       } else {
+        const initialLine: CartItem = {
+          item,
+          quantity: 1,
+          unitPrice: price,
+          discountPercent: itemDiscountPercent,
+          discountType: itemDiscountType,
+          discountValue: itemDiscountVal,
+          discountAmount: 0,
+          taxRate: taxRate,
+          lineTotal: price,
+          originalLineTotal: price,
+          allowParts: !!item.allowParts,
+        };
         return [
           ...prevCart,
-          {
-            item,
-            quantity: 1,
-            unitPrice: price,
-            discountPercent: itemDiscountPercent,
-            taxRate: taxRate,
-            lineTotal: Number((1 * price).toFixed(2)),
-            allowParts: !!item.allowParts,
-          },
+          calculateCartLine(initialLine, 1, price, itemDiscountType, itemDiscountVal),
         ];
       }
     });
@@ -491,12 +542,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
               ? Number((currentQty + delta).toFixed(3))
               : (currentQty + delta);
             if (nextQty <= 0) return null;
-            return {
-              ...c,
-              quantity: nextQty,
-              unitPrice,
-              lineTotal: Number((nextQty * unitPrice).toFixed(2)),
-            };
+            return calculateCartLine(c, nextQty, unitPrice);
           }
           return c;
         })
@@ -509,8 +555,6 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     const targetItem = cart.find(c => c.item.id === itemId)?.item;
     const isAllowParts = !!targetItem?.allowParts;
 
-    // For parts-enabled: allow digits, decimals, fractions (slash), plus, and spaces (e.g. "4/30", "1 4/12", "0.5")
-    // For non-parts: only allow digits
     if (rawVal !== '') {
       if (isAllowParts) {
         if (!/^[\d\.\/\+\s]*$/.test(rawVal)) return;
@@ -526,7 +570,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         updateCart((prevCart) =>
           prevCart.map((c) =>
             c.item.id === itemId
-              ? { ...c, quantity: 0, lineTotal: 0 }
+              ? { ...c, quantity: 0, lineTotal: 0, discountAmount: 0 }
               : c
           )
         );
@@ -545,11 +589,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
             ? Number(Math.min(val, maxAvailable).toFixed(3))
             : Math.max(1, Math.min(val, maxAvailable));
           const unitPrice = Number(c.unitPrice || c.item?.salePrice || 0);
-          return {
-            ...c,
-            quantity: newQty,
-            lineTotal: Number((newQty * unitPrice).toFixed(2)),
-          };
+          return calculateCartLine(c, newQty, unitPrice);
         }
         return c;
       })
@@ -581,16 +621,24 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         prevCart.map((c) => {
           if (c.item.id === itemId) {
             const unitPrice = Number(c.unitPrice || c.item?.salePrice || 0);
-            return {
-              ...c,
-              quantity: finalVal,
-              lineTotal: Number((finalVal * unitPrice).toFixed(2)),
-            };
+            return calculateCartLine(c, finalVal, unitPrice);
           }
           return c;
         })
       );
     }
+  };
+
+  // Update Item-Level Discount (% or Flat ₹)
+  const handleUpdateItemDiscount = (itemId: string, discountType: 'PERCENT' | 'FLAT', discountValue: number) => {
+    updateCart((prevCart) =>
+      prevCart.map((c) => {
+        if (c.item.id === itemId) {
+          return calculateCartLine(c, c.quantity, c.unitPrice, discountType, discountValue);
+        }
+        return c;
+      })
+    );
   };
 
   // Open Fraction / Loose Parts Calculator (Only for parts-enabled items)
@@ -630,11 +678,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       prevCart.map((c) => {
         if (c.item.id === fractionModal.cartItemId) {
           const unitPrice = Number(c.unitPrice || c.item?.salePrice || 0);
-          return {
-            ...c,
-            quantity: calculatedQty,
-            lineTotal: Number((calculatedQty * unitPrice).toFixed(2)),
-          };
+          return calculateCartLine(c, calculatedQty, unitPrice);
         }
         return c;
       })
@@ -650,36 +694,43 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       delete next[itemId];
       return next;
     });
+    if (editingDiscountItemId === itemId) {
+      setEditingDiscountItemId(null);
+    }
     updateCart(prev => prev.filter(c => c.item.id !== itemId));
   };
 
-  // Financial Calculations with Discounts (% and Flat ₹)
+  // Financial Calculations with Item & Order Discounts (% and Flat ₹)
   const grossSubtotal = cart.reduce((sum, c) => sum + (Number(c.unitPrice || 0) * Number(c.quantity || 0)), 0);
-  
+  const itemDiscountTotal = cart.reduce((sum, c) => sum + (Number(c.discountAmount || 0)), 0);
+  const itemDiscountedSubtotal = Math.max(0, grossSubtotal - itemDiscountTotal);
+
   // Calculate Order Discount (configured in checkout modal)
   const parsedDiscountVal = showDiscount ? Math.max(0, Number(orderDiscountValue) || 0) : 0;
   let orderDiscountAmount = 0;
   if (showDiscount && parsedDiscountVal > 0) {
     if (orderDiscountType === 'PERCENT') {
-      orderDiscountAmount = (grossSubtotal * Math.min(100, parsedDiscountVal)) / 100;
+      orderDiscountAmount = (itemDiscountedSubtotal * Math.min(100, parsedDiscountVal)) / 100;
     } else {
-      orderDiscountAmount = Math.min(grossSubtotal, parsedDiscountVal);
+      orderDiscountAmount = Math.min(itemDiscountedSubtotal, parsedDiscountVal);
     }
   }
   orderDiscountAmount = Number(orderDiscountAmount.toFixed(2));
 
-  // Net subtotal after order discount
-  const netSubtotal = Math.max(0, grossSubtotal - orderDiscountAmount);
+  // Net subtotal after all discounts
+  const netSubtotal = Math.max(0, itemDiscountedSubtotal - orderDiscountAmount);
 
   // Discount factor applied across line items for GST calculation
-  const discountFactor = grossSubtotal > 0 ? (netSubtotal / grossSubtotal) : 1;
+  const discountFactor = itemDiscountedSubtotal > 0 ? (netSubtotal / itemDiscountedSubtotal) : 1;
 
   // Base taxable amount & GST Taxes
   const taxBaseTotal = cart.reduce((sum, c) => {
     const rate = Number(c.taxRate || 0);
     const unitPrice = Number(c.unitPrice || 0);
     const qty = Number(c.quantity || 0);
-    const discountedLinePrice = unitPrice * qty * discountFactor;
+    const lineGross = unitPrice * qty;
+    const lineNetBeforeOrder = Math.max(0, lineGross - (c.discountAmount || 0));
+    const discountedLinePrice = lineNetBeforeOrder * discountFactor;
     const base = rate > 0 ? discountedLinePrice * (100 / (100 + rate)) : discountedLinePrice;
     return sum + base;
   }, 0);
@@ -688,7 +739,9 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     const rate = Number(c.taxRate || 0);
     const unitPrice = Number(c.unitPrice || 0);
     const qty = Number(c.quantity || 0);
-    const discountedLinePrice = unitPrice * qty * discountFactor;
+    const lineGross = unitPrice * qty;
+    const lineNetBeforeOrder = Math.max(0, lineGross - (c.discountAmount || 0));
+    const discountedLinePrice = lineNetBeforeOrder * discountFactor;
     const base = rate > 0 ? discountedLinePrice * (100 / (100 + rate)) : discountedLinePrice;
     return sum + (base * (rate / 100));
   }, 0);
@@ -968,17 +1021,25 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     const finalCustomerPhone = trimmedPhone || undefined;
 
     const invoiceLines = cart.map(c => {
-      const discountedLine = c.unitPrice * c.quantity * discountFactor;
-      const base = discountedLine * (100 / (100 + c.taxRate));
+      const lineGross = c.unitPrice * c.quantity;
+      const lineNetBeforeOrder = Math.max(0, lineGross - (c.discountAmount || 0));
+      const discountedLine = lineNetBeforeOrder * discountFactor;
+      const base = c.taxRate > 0 ? discountedLine * (100 / (100 + c.taxRate)) : discountedLine;
       return {
         itemId: c.item.id,
         name: c.item.name,
+        unit: c.item.unit || 'pcs',
         quantity: c.quantity,
         unitPrice: c.unitPrice,
-        discountPercent: c.discountPercent,
+        discountPercent: c.discountPercent || 0,
+        discountType: c.discountType || (c.discountPercent ? 'PERCENT' : 'FLAT'),
+        discountValue: c.discountValue !== undefined ? c.discountValue : (c.discountPercent || 0),
+        discountAmount: c.discountAmount || 0,
         taxRate: c.taxRate,
         taxAmount: Number((base * (c.taxRate / 100)).toFixed(2)),
-        total: Number((c.unitPrice * c.quantity).toFixed(2)),
+        taxableAmount: Number(base.toFixed(2)),
+        total: Number(lineNetBeforeOrder.toFixed(2)),
+        originalTotal: Number(lineGross.toFixed(2)),
       };
     });
 
@@ -1011,7 +1072,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       items: invoiceLines,
       subtotal: Number(taxBaseTotal.toFixed(2)),
       taxTotal: Number(taxTotal.toFixed(2)),
-      discountTotal: orderDiscountAmount,
+      discountTotal: Number((itemDiscountTotal + orderDiscountAmount).toFixed(2)),
       discountType: orderDiscountType,
       discountValue: parsedDiscountVal,
       roundOff,
@@ -2001,24 +2062,65 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
                     {/* Bottom Row: Unit Rate & Fraction Tools (Left) & Cost with Delete Button (Right) */}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      {/* Left: Unit Cost & Fraction Part Below It */}
+                      {/* Left: Unit Cost & Discount Controls */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                           <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600 }}>
                             ₹{line.unitPrice.toFixed(2)} / {line.item.unit || 'unit'}
                           </span>
-                          {line.discountPercent > 0 && (
-                            <span style={{
-                              fontSize: '0.64rem',
-                              padding: '1px 5px',
-                              borderRadius: 3,
-                              backgroundColor: '#ecfdf5',
-                              color: '#059669',
-                              fontWeight: 700,
-                              border: '1px solid #a7f3d0'
-                            }}>
-                              {line.discountPercent}% OFF
-                            </span>
+                          
+                          {/* Item Discount Trigger Badge / Button */}
+                          {(line.discountAmount && line.discountAmount > 0) ? (
+                            <button
+                              type="button"
+                              onClick={() => setEditingDiscountItemId(editingDiscountItemId === line.item.id ? null : line.item.id)}
+                              style={{
+                                fontSize: '0.66rem',
+                                padding: '1px 6px',
+                                borderRadius: 4,
+                                backgroundColor: '#ecfdf5',
+                                color: '#047857',
+                                fontWeight: 700,
+                                border: '1px solid #a7f3d0',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 3,
+                                transition: 'all 0.12s ease'
+                              }}
+                              title="Click to edit or remove item discount"
+                            >
+                              <Tag size={10} />
+                              <span>
+                                {line.discountType === 'PERCENT'
+                                  ? `${line.discountValue !== undefined ? line.discountValue : line.discountPercent}% OFF`
+                                  : `₹${line.discountValue !== undefined ? line.discountValue : line.discountAmount} OFF`}
+                                {' '}(-₹{(line.discountAmount || 0).toFixed(2)})
+                              </span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setEditingDiscountItemId(editingDiscountItemId === line.item.id ? null : line.item.id)}
+                              style={{
+                                fontSize: '0.64rem',
+                                padding: '1px 5px',
+                                borderRadius: 4,
+                                backgroundColor: editingDiscountItemId === line.item.id ? '#eff6ff' : '#f8fafc',
+                                color: editingDiscountItemId === line.item.id ? '#1d4ed8' : '#64748b',
+                                fontWeight: 600,
+                                border: editingDiscountItemId === line.item.id ? '1px solid #bfdbfe' : '1px dashed #cbd5e1',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 2,
+                                transition: 'all 0.12s ease'
+                              }}
+                              title="Add discount for this specific item"
+                            >
+                              <Tag size={9} />
+                              <span>+ Disc</span>
+                            </button>
                           )}
                         </div>
 
@@ -2073,11 +2175,18 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                         )}
                       </div>
 
-                      {/* Right: Cost (Below Quantity Stepper) & Delete Button */}
+                      {/* Right: Cost with strikethrough gross & Delete Button */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, justifyContent: 'flex-end' }}>
-                        <span style={{ fontWeight: 800, fontSize: '0.96rem', color: '#0f172a', letterSpacing: '-0.01em' }}>
-                          ₹{line.lineTotal.toFixed(2)}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                          {line.discountAmount && line.discountAmount > 0 ? (
+                            <span style={{ fontSize: '0.70rem', textDecoration: 'line-through', color: '#94a3b8', lineHeight: 1 }}>
+                              ₹{(line.originalLineTotal || (line.unitPrice * line.quantity)).toFixed(2)}
+                            </span>
+                          ) : null}
+                          <span style={{ fontWeight: 800, fontSize: '0.96rem', color: line.discountAmount && line.discountAmount > 0 ? '#059669' : '#0f172a', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
+                            ₹{line.lineTotal.toFixed(2)}
+                          </span>
+                        </div>
                         <button 
                           type="button"
                           onClick={() => handleRemoveFromCart(line.item.id)} 
@@ -2101,6 +2210,152 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                         </button>
                       </div>
                     </div>
+
+                    {/* Inline Item Discount Editor Panel */}
+                    {editingDiscountItemId === line.item.id && (
+                      <div style={{
+                        marginTop: 6,
+                        padding: '6px 8px',
+                        backgroundColor: '#f8fafc',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: 6,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 5
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                          <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#334155' }}>Item Discount:</span>
+                          
+                          {/* % or ₹ Toggle */}
+                          <div style={{ display: 'inline-flex', borderRadius: 4, overflow: 'hidden', border: '1px solid #cbd5e1' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateItemDiscount(line.item.id, 'PERCENT', line.discountValue || 0)}
+                              style={{
+                                padding: '2px 7px',
+                                fontSize: '0.66rem',
+                                fontWeight: 700,
+                                border: 'none',
+                                cursor: 'pointer',
+                                backgroundColor: (line.discountType || 'PERCENT') === 'PERCENT' ? '#2563eb' : '#ffffff',
+                                color: (line.discountType || 'PERCENT') === 'PERCENT' ? '#ffffff' : '#64748b',
+                              }}
+                            >
+                              %
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateItemDiscount(line.item.id, 'FLAT', line.discountValue || 0)}
+                              style={{
+                                padding: '2px 7px',
+                                fontSize: '0.66rem',
+                                fontWeight: 700,
+                                border: 'none',
+                                cursor: 'pointer',
+                                backgroundColor: (line.discountType || 'PERCENT') === 'FLAT' ? '#2563eb' : '#ffffff',
+                                color: (line.discountType || 'PERCENT') === 'FLAT' ? '#ffffff' : '#64748b',
+                              }}
+                            >
+                              ₹
+                            </button>
+                          </div>
+
+                          {/* Number Input */}
+                          <input
+                            type="number"
+                            min="0"
+                            step={line.discountType === 'PERCENT' ? "1" : "0.5"}
+                            max={line.discountType === 'PERCENT' ? "100" : String(line.unitPrice * line.quantity)}
+                            value={line.discountValue !== undefined && line.discountValue !== 0 ? line.discountValue : ''}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              handleUpdateItemDiscount(line.item.id, line.discountType || 'PERCENT', val);
+                            }}
+                            placeholder={line.discountType === 'PERCENT' ? 'e.g. 10%' : 'e.g. 50₹'}
+                            style={{
+                              width: 70,
+                              height: 24,
+                              padding: '2px 6px',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              borderRadius: 4,
+                              border: '1px solid #94a3b8',
+                              textAlign: 'right'
+                            }}
+                          />
+
+                          {/* Close / Done Button */}
+                          <button
+                            type="button"
+                            onClick={() => setEditingDiscountItemId(null)}
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: 4,
+                              border: 'none',
+                              backgroundColor: '#e2e8f0',
+                              color: '#334155',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                            title="Done"
+                          >
+                            <Check size={12} strokeWidth={2.5} />
+                          </button>
+                        </div>
+
+                        {/* Quick Presets */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.62rem', color: '#64748b', fontWeight: 600 }}>Quick:</span>
+                          {(line.discountType === 'FLAT'
+                            ? [10, 20, 50, 100]
+                            : [5, 10, 15, 20, 50]
+                          ).map((amt) => {
+                            const isSelected = line.discountValue === amt;
+                            return (
+                              <button
+                                key={amt}
+                                type="button"
+                                onClick={() => handleUpdateItemDiscount(line.item.id, line.discountType || 'PERCENT', amt)}
+                                style={{
+                                  fontSize: '0.63rem',
+                                  padding: '1px 5px',
+                                  borderRadius: 3,
+                                  backgroundColor: isSelected ? '#dbeafe' : '#ffffff',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid #cbd5e1',
+                                  color: isSelected ? '#1d4ed8' : '#475569',
+                                  fontWeight: 600,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                {line.discountType === 'FLAT' ? `₹${amt}` : `${amt}%`}
+                              </button>
+                            );
+                          })}
+                          {(line.discountValue && line.discountValue > 0) ? (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateItemDiscount(line.item.id, 'PERCENT', 0)}
+                              style={{
+                                fontSize: '0.62rem',
+                                padding: '1px 5px',
+                                borderRadius: 3,
+                                backgroundColor: '#fee2e2',
+                                border: '1px solid #fca5a5',
+                                color: '#b91c1c',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                marginLeft: 'auto'
+                              }}
+                            >
+                              Clear
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -2117,6 +2372,20 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                   <span>Gross Subtotal:</span>
                   <span>₹{grossSubtotal.toFixed(2)}</span>
                 </div>
+
+                {itemDiscountTotal > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.76rem', color: '#059669', fontWeight: 600, marginTop: 2 }}>
+                    <span>Item Discounts:</span>
+                    <span>-₹{itemDiscountTotal.toFixed(2)}</span>
+                  </div>
+                )}
+
+                {orderDiscountAmount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.76rem', color: '#059669', fontWeight: 600, marginTop: 2 }}>
+                    <span>Order Discount:</span>
+                    <span>-₹{orderDiscountAmount.toFixed(2)}</span>
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.76rem', color: 'var(--neutral-600)', marginTop: 2 }}>
                   <span>Est. GST Taxes:</span>
@@ -2635,15 +2904,25 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                   <span style={{ fontWeight: 600 }}>{cart.reduce((s, c) => s + c.quantity, 0)} items</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--neutral-600)', marginTop: 2 }}>
-                  <span>Taxable Subtotal & GST:</span>
-                  <span>₹{taxBaseTotal.toFixed(2)} + ₹{taxTotal.toFixed(2)}</span>
+                  <span>Gross Items Subtotal:</span>
+                  <span>₹{grossSubtotal.toFixed(2)}</span>
                 </div>
+                {itemDiscountTotal > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--success-700)', fontWeight: 600, marginTop: 2 }}>
+                    <span>Item Discounts:</span>
+                    <span>-₹{itemDiscountTotal.toFixed(2)}</span>
+                  </div>
+                )}
                 {orderDiscountAmount > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--success-700)', fontWeight: 600, marginTop: 2 }}>
                     <span>Order Discount ({orderDiscountType === 'PERCENT' ? `${parsedDiscountVal}%` : `₹${parsedDiscountVal}`}):</span>
                     <span>-₹{orderDiscountAmount.toFixed(2)}</span>
                   </div>
                 )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--neutral-600)', marginTop: 2 }}>
+                  <span>Taxable Base & GST:</span>
+                  <span>₹{taxBaseTotal.toFixed(2)} + ₹{taxTotal.toFixed(2)}</span>
+                </div>
                 {roundOff !== 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--neutral-400)', marginTop: 2 }}>
                     <span>Round Off:</span>

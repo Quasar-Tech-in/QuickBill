@@ -9,6 +9,9 @@ class SaleItemInput(BaseSchema):
     quantity: Decimal = Field(..., gt=0)
     unit_price: Decimal = Field(..., ge=0, alias="unitPrice")
     discount: Decimal = Field(default=Decimal("0.00"), ge=0)
+    discount_type: Optional[str] = Field(default="FLAT", alias="discountType")
+    discount_value: Optional[Decimal] = Field(default=Decimal("0.00"), alias="discountValue")
+    discount_percent: Optional[Decimal] = Field(default=Decimal("0.00"), alias="discountPercent")
     tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100, alias="taxRate")
 
 class SaleItemSnapshot(BaseSchema):
@@ -24,6 +27,9 @@ class SaleItemSnapshot(BaseSchema):
     return_status: Optional[str] = Field(None, alias="returnStatus")  # NONE, PARTIAL, FULL
     unit_price: Decimal = Field(..., alias="unitPrice")
     discount: Decimal = Field(default=Decimal("0.00"))
+    discount_type: Optional[str] = Field(default="FLAT", alias="discountType")
+    discount_value: Optional[Decimal] = Field(default=Decimal("0.00"), alias="discountValue")
+    discount_percent: Optional[Decimal] = Field(default=Decimal("0.00"), alias="discountPercent")
     taxable_amount: Optional[Decimal] = Field(default=None, alias="taxableAmount")
     tax_rate: Decimal = Field(default=Decimal("0.00"), alias="taxRate")
     tax_amount: Optional[Decimal] = Field(default=Decimal("0.00"), alias="taxAmount")
@@ -63,6 +69,9 @@ class SaleItemReturnInput(BaseSchema):
     return_note: Optional[str] = Field(None, alias="returnNote")
     unit_price: Optional[Decimal] = Field(None, alias="unitPrice")
     discount: Optional[Decimal] = None
+    discount_type: Optional[str] = Field(default=None, alias="discountType")
+    discount_value: Optional[Decimal] = Field(default=None, alias="discountValue")
+    discount_percent: Optional[Decimal] = Field(default=None, alias="discountPercent")
     tax_rate: Optional[Decimal] = Field(None, alias="taxRate")
 
 class SaleUpdateRequest(BaseSchema):

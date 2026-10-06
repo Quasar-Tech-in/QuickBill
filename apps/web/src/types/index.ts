@@ -157,8 +157,10 @@ export interface CartItem {
   discountPercent: number;
   discountType?: 'PERCENT' | 'FLAT';
   discountValue?: number;
+  discountAmount?: number;
   taxRate: number;
   lineTotal: number;
+  originalLineTotal?: number;
   allowParts?: boolean;
 }
 
@@ -201,10 +203,14 @@ export interface InvoiceItem {
   returnStatus?: 'NONE' | 'PARTIAL' | 'FULL';
   unitPrice: number;
   discountPercent: number;
+  discountType?: 'PERCENT' | 'FLAT';
+  discountValue?: number;
+  discountAmount?: number;
   taxRate: number;
   taxAmount: number;
   taxableAmount?: number;
   total: number;
+  originalTotal?: number;
 }
 
 export interface Invoice {

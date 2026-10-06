@@ -16,6 +16,9 @@ class LineItemCalcInput(BaseModel):
     quantity: Decimal = Field(..., ge=0)
     unit_price: Decimal = Field(..., ge=0)
     discount: Decimal = Field(default=Decimal("0.00"), ge=0)
+    discount_type: Optional[str] = "FLAT"  # "PERCENT" or "FLAT"
+    discount_value: Optional[Decimal] = Decimal("0.00")
+    discount_percent: Optional[Decimal] = Decimal("0.00")
     tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
 
 class LineItemCalcOutput(BaseModel):
@@ -26,6 +29,9 @@ class LineItemCalcOutput(BaseModel):
     unit_price: Decimal
     gross_amount: Decimal
     discount: Decimal
+    discount_type: Optional[str] = "FLAT"
+    discount_value: Optional[Decimal] = Decimal("0.00")
+    discount_percent: Optional[Decimal] = Decimal("0.00")
     taxable_amount: Decimal
     tax_rate: Decimal
     tax_amount: Decimal
@@ -61,12 +67,26 @@ class BillingEngine:
         for item in items:
             q_qty = quantize_qty(item.quantity)
             gross = quantize_currency(q_qty * item.unit_price)
-            discount = quantize_currency(min(item.discount, gross))
+
+            # Determine discount based on discount_type
+            disc_type = (item.discount_type or "FLAT").upper()
+            if disc_type == "PERCENT" or (item.discount_percent and item.discount_percent > Decimal("0.00")):
+                pct = item.discount_value if disc_type == "PERCENT" and item.discount_value is not None else item.discount_percent
+                pct = min(Decimal("100.00"), max(Decimal("0.00"), pct or Decimal("0.00")))
+                discount = quantize_currency(gross * (pct / Decimal("100.00")))
+                item_disc_val = pct
+                item_disc_pct = pct
+            else:
+                raw_val = item.discount_value if item.discount_value is not None and item.discount_value > Decimal("0.00") else item.discount
+                discount = quantize_currency(min(raw_val, gross))
+                item_disc_val = discount
+                item_disc_pct = quantize_currency((discount / gross * Decimal("100.00"))) if gross > Decimal("0.00") else Decimal("0.00")
+
             net_line_inclusive = quantize_currency(gross - discount)
             
             gross_total += net_line_inclusive
             item_discount_total += discount
-            item_intermediates.append((item, q_qty, gross, discount, net_line_inclusive))
+            item_intermediates.append((item, q_qty, gross, discount, disc_type, item_disc_val, item_disc_pct, net_line_inclusive))
 
         # 2. Compute proportional order/invoice discount factor
         discount_factor = Decimal("1.00")
@@ -77,7 +97,7 @@ class BillingEngine:
         tax_total = Decimal("0.00")
 
         # 3. Second pass: inclusive tax extraction & line totals
-        for item, q_qty, gross, discount, net_line_inclusive in item_intermediates:
+        for item, q_qty, gross, discount, disc_type, item_disc_val, item_disc_pct, net_line_inclusive in item_intermediates:
             effective_line = quantize_currency(net_line_inclusive * discount_factor)
             
             # Taxable base extracted from inclusive amount: Base = Effective / (1 + Rate/100)
@@ -101,6 +121,9 @@ class BillingEngine:
                 unit_price=item.unit_price,
                 gross_amount=gross,
                 discount=discount,
+                discount_type=disc_type,
+                discount_value=item_disc_val,
+                discount_percent=item_disc_pct,
                 taxable_amount=taxable,
                 tax_rate=item.tax_rate,
                 tax_amount=tax,

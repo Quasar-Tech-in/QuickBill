@@ -84,6 +84,9 @@ class SaleService:
                 quantity=it.quantity,
                 unit_price=it.unit_price,
                 discount=it.discount,
+                discount_type=it.discount_type,
+                discount_value=it.discount_value,
+                discount_percent=it.discount_percent,
                 tax_rate=Decimal(str(item_doc.get("taxRate", "0.0") if item_doc.get("taxRate") is not None else it.tax_rate))
             ))
 
@@ -208,6 +211,9 @@ class SaleService:
                     "quantity": float(it.quantity),
                     "unitPrice": float(it.unit_price),
                     "discount": float(it.discount),
+                    "discountType": it.discount_type,
+                    "discountValue": float(it.discount_value) if it.discount_value is not None else 0.0,
+                    "discountPercent": float(it.discount_percent) if it.discount_percent is not None else 0.0,
                     "taxableAmount": float(it.taxable_amount),
                     "taxRate": float(it.tax_rate),
                     "taxAmount": float(it.tax_amount),
