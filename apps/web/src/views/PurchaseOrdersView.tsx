@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   ShoppingBag, 
   Plus, 
@@ -24,12 +24,24 @@ import {
   MapPin,
   Eye,
   RotateCcw,
-  ArrowRight
+  ArrowRight,
+  Upload,
+  Sparkles,
+  Loader2,
+  Image as ImageIcon,
+  Star,
+  PlusCircle
 } from 'lucide-react';
-import { PurchaseOrder, PurchaseOrderStatus, Party, Item, StoreLocation } from '../types';
+import { PurchaseOrder, PurchaseOrderStatus, Party, Item, StoreLocation, ItemCategory, ItemImage } from '../types';
 import { store } from '../services/store';
 import { Pagination } from '../components/Pagination';
 import { DateRangePicker, DateRangeValue, formatIsoToDisplay } from '../components/DateRangePicker';
+import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
+import { uploadItemImage } from '../services/supabaseStorage';
+
+export interface FormImageItem extends ItemImage {
+  pendingCompressed?: CompressionResult;
+}
 
 export const PurchaseOrdersView: React.FC = () => {
   const currentUser = store.getCurrentUser();
@@ -127,10 +139,18 @@ export const PurchaseOrdersView: React.FC = () => {
     address: '',
   });
 
-  // Quick Add Item Form State
+  // Dynamic Categories & Quick Add Item Form State
+  const [categoriesList, setCategoriesList] = useState<ItemCategory[]>(store.getCategories());
+  const [quickItemImages, setQuickItemImages] = useState<FormImageItem[]>([]);
+  const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
+  const [uploadStatusMsg, setUploadStatusMsg] = useState<string>('');
+  const [isAddingNewCat, setIsAddingNewCat] = useState<boolean>(false);
+  const [newCatNameInput, setNewCatNameInput] = useState<string>('');
+  const quickFileInputRef = useRef<HTMLInputElement>(null);
+
   const [quickItem, setQuickItem] = useState({
     name: '',
-    category: 'General Store',
+    category: store.getCategories()[0]?.name || 'General Store',
     unit: 'pcs',
     purchasePrice: 0,
     salePrice: 0,
@@ -158,12 +178,30 @@ export const PurchaseOrdersView: React.FC = () => {
     setCurrentPage(1);
   }, [debouncedSearch, statusFilter, locationFilter, supplierFilter, dateRange]);
 
+  // Initial category fetch
+  useEffect(() => {
+    store.fetchCategories().then(() => {
+      const cats = store.getCategories();
+      setCategoriesList(cats);
+      if (cats.length > 0) {
+        setQuickItem(prev => ({
+          ...prev,
+          category: prev.category === 'General Store' && !cats.some(c => c.name === 'General Store') ? cats[0].name : prev.category
+        }));
+      }
+    }).catch(() => {});
+  }, []);
+
   // Load PO List
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
       setParties(store.getParties());
       setItems(store.getItems());
+      setCategoriesList(store.getCategories());
+      store.fetchCategories().then(() => {
+        setCategoriesList(store.getCategories());
+      }).catch(() => {});
 
       const res = await store.fetchPurchaseOrders({
         search: debouncedSearch || undefined,
@@ -491,6 +529,85 @@ export const PurchaseOrdersView: React.FC = () => {
     }
   };
 
+  const handleQuickImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingImage(true);
+    const newStagedImages: FormImageItem[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        setUploadStatusMsg(`Compressing ${file.name}...`);
+        const compressed = await compressImage(file, { maxWidth: 1000, maxHeight: 1000, quality: 0.82 });
+
+        const currentIndex = quickItemImages.length + newStagedImages.length;
+        const tempId = `staged_po_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
+
+        newStagedImages.push({
+          id: tempId,
+          url: compressed.dataUrl, // Local in-memory preview with zero network calls
+          order: currentIndex,
+          isPrimary: quickItemImages.length === 0 && newStagedImages.length === 0,
+          name: file.name,
+          sizeBytes: compressed.compressedSizeBytes,
+          originalSizeBytes: compressed.originalSizeBytes,
+          pendingCompressed: compressed,
+        });
+      } catch (err) {
+        console.error('Failed to compress image:', err);
+      }
+    }
+
+    setQuickItemImages(prev => {
+      const combined = [...prev, ...newStagedImages];
+      return combined.map((img, idx) => ({
+        ...img,
+        order: idx,
+        isPrimary: prev.some(p => p.isPrimary) ? img.isPrimary : idx === 0,
+      }));
+    });
+
+    setIsUploadingImage(false);
+    setUploadStatusMsg('');
+    if (quickFileInputRef.current) quickFileInputRef.current.value = '';
+  };
+
+  const handleRemoveQuickImage = (index: number) => {
+    const filtered = quickItemImages.filter((_, idx) => idx !== index);
+    const updated = filtered.map((img, idx) => ({
+      ...img,
+      order: idx,
+      isPrimary: img.isPrimary ? true : (filtered.length > 0 && !filtered.some(f => f.isPrimary) && idx === 0),
+    }));
+    setQuickItemImages(updated);
+  };
+
+  const handleSetPrimaryQuickImage = (index: number) => {
+    setQuickItemImages(quickItemImages.map((img, idx) => ({
+      ...img,
+      isPrimary: idx === index,
+    })));
+  };
+
+  const handleAddNewCategory = async () => {
+    if (!newCatNameInput.trim()) return;
+    try {
+      await store.addCategory({
+        name: newCatNameInput.trim(),
+      });
+      const updatedCats = store.getCategories();
+      setCategoriesList(updatedCats);
+      setQuickItem(prev => ({ ...prev, category: newCatNameInput.trim() }));
+      setNewCatNameInput('');
+      setIsAddingNewCat(false);
+      showNotification('success', `Category "${newCatNameInput.trim()}" created!`);
+    } catch (err: any) {
+      showNotification('error', err?.message || 'Failed to add category');
+    }
+  };
+
   const handleSaveQuickItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickItem.name.trim()) {
@@ -499,16 +616,60 @@ export const PurchaseOrdersView: React.FC = () => {
     }
 
     setIsSaving(true);
+    setUploadStatusMsg('Saving product and processing images...');
     try {
+      const businessId = currentUser?.businessId || '';
+      const tempItemId = `itm_${Date.now()}`;
+
+      // 1. Upload staged images to Supabase storage if present
+      const finalImages: ItemImage[] = [];
+      const sortedImages = [...quickItemImages].sort((a, b) => a.order - b.order);
+
+      for (let i = 0; i < sortedImages.length; i++) {
+        const img = sortedImages[i];
+        if (img.pendingCompressed) {
+          setUploadStatusMsg(`Uploading image #${i + 1} to storage...`);
+          const uploadRes = await uploadItemImage(businessId, tempItemId, img.pendingCompressed, i);
+          finalImages.push({
+            id: uploadRes.id || img.id,
+            url: uploadRes.url,
+            order: i,
+            isPrimary: img.isPrimary,
+            name: img.name,
+            sizeBytes: uploadRes.sizeBytes || img.sizeBytes,
+            originalSizeBytes: uploadRes.originalSizeBytes || img.originalSizeBytes,
+          });
+        } else {
+          finalImages.push({
+            id: img.id,
+            url: img.url,
+            order: i,
+            isPrimary: img.isPrimary,
+            name: img.name,
+            sizeBytes: img.sizeBytes,
+            originalSizeBytes: img.originalSizeBytes,
+          });
+        }
+      }
+
+      if (finalImages.length > 0 && !finalImages.some(img => img.isPrimary)) {
+        finalImages[0].isPrimary = true;
+      }
+
+      const primaryImg = finalImages.find(img => img.isPrimary) || finalImages[0];
+      const primaryImageUrl = primaryImg ? primaryImg.url : undefined;
+
       const created = await store.addItem({
         name: quickItem.name.trim(),
-        category: quickItem.category,
+        category: quickItem.category || categoriesList[0]?.name || 'General',
         unit: quickItem.unit,
         purchasePrice: Number(quickItem.purchasePrice) || 0,
         salePrice: Number(quickItem.salePrice) || Number(quickItem.purchasePrice) * 1.2 || 0,
         taxRate: Number(quickItem.taxRate) || 0,
         currentStock: 0,
         minStockAlert: 5,
+        images: finalImages,
+        imageUrl: primaryImageUrl,
       });
 
       const updatedItems = store.getItems();
@@ -530,12 +691,21 @@ export const PurchaseOrdersView: React.FC = () => {
       setItemSearchQuery('');
       setIsItemSearchFocused(false);
       setIsQuickItemModalOpen(false);
-      setQuickItem({ name: '', category: 'General Store', unit: 'pcs', purchasePrice: 0, salePrice: 0, taxRate: 18 });
+      setQuickItemImages([]);
+      setQuickItem({
+        name: '',
+        category: categoriesList[0]?.name || 'General Store',
+        unit: 'pcs',
+        purchasePrice: 0,
+        salePrice: 0,
+        taxRate: 18
+      });
       showNotification('success', `Product "${created.name}" added to order!`);
     } catch (err: any) {
       showNotification('error', err?.message || 'Failed to create item');
     } finally {
       setIsSaving(false);
+      setUploadStatusMsg('');
     }
   };
 
@@ -1284,6 +1454,7 @@ export const PurchaseOrdersView: React.FC = () => {
 
                           return filteredCatalogItems.map(it => {
                             const isAlreadyAdded = newPO.items.some(line => line.itemId === it.id);
+                            const itemImgUrl = it.imageUrl || (it.images && it.images[0]?.url);
                             return (
                               <div
                                 key={it.id}
@@ -1297,21 +1468,55 @@ export const PurchaseOrdersView: React.FC = () => {
                                   alignItems: 'center',
                                   transition: 'background-color 0.1s ease',
                                   backgroundColor: '#ffffff',
+                                  gap: 10,
                                 }}
                                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--primary-50)')}
                                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#ffffff')}
                               >
-                                <div>
-                                  <div style={{ fontSize: '0.83rem', fontWeight: 700, color: 'var(--neutral-850)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <span>{it.name}</span>
-                                    {it.sku && <span className="badge" style={{ fontSize: '0.68rem', padding: '1px 5px' }}>SKU: {it.sku}</span>}
-                                    {it.category && <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)' }}>• {it.category}</span>}
-                                  </div>
-                                  <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-                                    Unit: {it.unit || 'pcs'} | Cost: ₹{it.purchasePrice || it.salePrice || 0} | Stock: {it.currentStock || 0}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                  {itemImgUrl ? (
+                                    <img
+                                      src={itemImgUrl}
+                                      alt={it.name}
+                                      style={{
+                                        width: 36,
+                                        height: 36,
+                                        borderRadius: 'var(--radius-sm)',
+                                        objectFit: 'cover',
+                                        border: '1px solid var(--neutral-200)',
+                                        flexShrink: 0,
+                                        backgroundColor: '#ffffff'
+                                      }}
+                                    />
+                                  ) : (
+                                    <div
+                                      style={{
+                                        width: 36,
+                                        height: 36,
+                                        borderRadius: 'var(--radius-sm)',
+                                        backgroundColor: 'var(--neutral-100)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        color: 'var(--neutral-400)',
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      <ImageIcon size={18} />
+                                    </div>
+                                  )}
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: '0.83rem', fontWeight: 700, color: 'var(--neutral-850)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                      <span>{it.name}</span>
+                                      {it.sku && <span className="badge" style={{ fontSize: '0.68rem', padding: '1px 5px' }}>SKU: {it.sku}</span>}
+                                      {it.category && <span style={{ fontSize: '0.7rem', color: 'var(--neutral-400)' }}>• {it.category}</span>}
+                                    </div>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                                      Unit: {it.unit || 'pcs'} | Cost: ₹{it.purchasePrice || it.salePrice || 0} | Stock: {it.currentStock || 0}
+                                    </div>
                                   </div>
                                 </div>
-                                <div>
+                                <div style={{ flexShrink: 0 }}>
                                   {isAlreadyAdded ? (
                                     <span className="badge" style={{ backgroundColor: 'var(--primary-100)', color: 'var(--primary-700)', fontSize: '0.72rem' }}>
                                       + Incr Qty
@@ -1355,18 +1560,52 @@ export const PurchaseOrdersView: React.FC = () => {
                             const lineTax = (lineSub * line.taxRate) / 100;
                             const lineTot = lineSub + lineTax;
                             const targetItem = items.find(it => it.id === line.itemId);
+                            const lineImgUrl = targetItem?.imageUrl || (targetItem?.images && targetItem?.images[0]?.url);
 
                             return (
                               <tr key={idx} style={{ borderBottom: '1px solid var(--neutral-100)' }}>
                                 <td style={{ padding: '8px 10px' }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                    <span style={{ fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.83rem' }}>
-                                      {targetItem?.name || 'Catalog Item'}
-                                    </span>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: 'var(--neutral-500)', flexWrap: 'wrap' }}>
-                                      {targetItem?.sku && <span className="badge" style={{ fontSize: '0.66rem', padding: '1px 5px' }}>SKU: {targetItem.sku}</span>}
-                                      <span>Unit: {targetItem?.unit || 'pcs'}</span>
-                                      {targetItem?.category && <span>• {targetItem.category}</span>}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    {lineImgUrl ? (
+                                      <img
+                                        src={lineImgUrl}
+                                        alt={targetItem?.name}
+                                        style={{
+                                          width: 34,
+                                          height: 34,
+                                          borderRadius: 'var(--radius-sm)',
+                                          objectFit: 'cover',
+                                          border: '1px solid var(--neutral-200)',
+                                          flexShrink: 0,
+                                          backgroundColor: '#ffffff'
+                                        }}
+                                      />
+                                    ) : (
+                                      <div
+                                        style={{
+                                          width: 34,
+                                          height: 34,
+                                          borderRadius: 'var(--radius-sm)',
+                                          backgroundColor: 'var(--neutral-100)',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          color: 'var(--neutral-400)',
+                                          flexShrink: 0,
+                                        }}
+                                      >
+                                        <ImageIcon size={16} />
+                                      </div>
+                                    )}
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                                      <span style={{ fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.83rem' }}>
+                                        {targetItem?.name || 'Catalog Item'}
+                                      </span>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: 'var(--neutral-500)', flexWrap: 'wrap' }}>
+                                        {targetItem?.sku && <span className="badge" style={{ fontSize: '0.66rem', padding: '1px 5px' }}>SKU: {targetItem.sku}</span>}
+                                        <span>Unit: {targetItem?.unit || 'pcs'}</span>
+                                        {targetItem?.category && <span>• {targetItem.category}</span>}
+                                      </div>
                                     </div>
                                   </div>
                                 </td>
@@ -1975,7 +2214,7 @@ export const PurchaseOrdersView: React.FC = () => {
       {/* ========================================================================= */}
       {isQuickItemModalOpen && (
         <div className="modal-overlay" style={{ zIndex: 100000 }} onClick={() => !isSaving && setIsQuickItemModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <div className="card-header">
               <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <PackagePlus size={16} color="var(--primary-600)" />
@@ -2001,23 +2240,62 @@ export const PurchaseOrdersView: React.FC = () => {
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 10 }}>
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">Category</label>
-                    <select
-                      className="form-select"
-                      value={quickItem.category}
-                      onChange={(e) => setQuickItem({ ...quickItem, category: e.target.value })}
-                    >
-                      <option value="Grocery">Grocery</option>
-                      <option value="Dairy & Eggs">Dairy &amp; Eggs</option>
-                      <option value="Beverages">Beverages</option>
-                      <option value="Snacks & Sweets">Snacks &amp; Sweets</option>
-                      <option value="Personal Care">Personal Care</option>
-                      <option value="Household & Cleaning">Household &amp; Cleaning</option>
-                      <option value="Electronics & Gadgets">Electronics &amp; Gadgets</option>
-                      <option value="General Store">General Store</option>
-                    </select>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label className="form-label" style={{ margin: 0 }}>Category</label>
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingNewCat(!isAddingNewCat)}
+                        style={{ fontSize: '0.72rem', color: 'var(--primary-600)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, padding: 0 }}
+                      >
+                        {isAddingNewCat ? 'Choose Existing' : '+ New Category'}
+                      </button>
+                    </div>
+
+                    {isAddingNewCat ? (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="New category name..."
+                          value={newCatNameInput}
+                          onChange={(e) => setNewCatNameInput(e.target.value)}
+                          style={{ height: 36, fontSize: '0.82rem' }}
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddNewCategory();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={handleAddNewCategory}
+                          disabled={!newCatNameInput.trim()}
+                          style={{ height: 36, padding: '0 10px', fontSize: '0.78rem' }}
+                        >
+                          Add
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        className="form-select"
+                        value={quickItem.category}
+                        onChange={(e) => setQuickItem({ ...quickItem, category: e.target.value })}
+                      >
+                        {categoriesList.map(cat => (
+                          <option key={cat.id || cat.name} value={cat.name}>
+                            {cat.name}
+                          </option>
+                        ))}
+                        {categoriesList.length === 0 && (
+                          <option value="General Store">General Store</option>
+                        )}
+                      </select>
+                    )}
                   </div>
 
                   <div className="form-group" style={{ margin: 0 }}>
@@ -2079,6 +2357,150 @@ export const PurchaseOrdersView: React.FC = () => {
                       <option value="28">28%</option>
                     </select>
                   </div>
+                </div>
+
+                {/* Product Photos & Image Upload Section */}
+                <div style={{ background: 'var(--neutral-50)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--primary-700)' }}>
+                        Product Photos
+                      </span>
+                      <span style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: 10, backgroundColor: 'var(--primary-100)', color: 'var(--primary-800)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Sparkles size={11} />
+                        Auto-Optimized
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>
+                      {quickItemImages.length} photo{quickItemImages.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+
+                  {/* Hidden File Input */}
+                  <input
+                    type="file"
+                    ref={quickFileInputRef}
+                    onChange={handleQuickImageUpload}
+                    multiple
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                  />
+
+                  {/* Upload Drop Zone Trigger */}
+                  <div
+                    onClick={() => quickFileInputRef.current?.click()}
+                    style={{
+                      border: '1.5px dashed var(--neutral-300)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '14px 12px',
+                      backgroundColor: '#ffffff',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      marginBottom: quickItemImages.length > 0 ? 10 : 0,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--primary-500)';
+                      e.currentTarget.style.backgroundColor = 'var(--primary-50)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--neutral-300)';
+                      e.currentTarget.style.backgroundColor = '#ffffff';
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', backgroundColor: 'var(--primary-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-600)' }}>
+                        <Upload size={16} />
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-800)' }}>
+                        Click to Upload Product Photos
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>
+                        JPG, PNG, WebP (Images are automatically resized &amp; saved to cloud)
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Loading indicator */}
+                  {isUploadingImage && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: 'var(--primary-50)', border: '1px solid var(--primary-200)', borderRadius: 'var(--radius-sm)', marginBottom: 10, fontSize: '0.75rem', color: 'var(--primary-800)', fontWeight: 600 }}>
+                      <Loader2 size={13} className="spin-animation" />
+                      <span>{uploadStatusMsg || 'Processing image...'}</span>
+                    </div>
+                  )}
+
+                  {/* Uploaded Images Gallery */}
+                  {quickItemImages.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
+                      {quickItemImages.map((img, idx) => {
+                        const isPrimary = !!img.isPrimary;
+                        return (
+                          <div
+                            key={img.id || idx}
+                            style={{
+                              borderRadius: 'var(--radius-sm)',
+                              border: `1.5px solid ${isPrimary ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                              backgroundColor: '#ffffff',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              position: 'relative',
+                            }}
+                          >
+                            {isPrimary && (
+                              <div style={{ position: 'absolute', top: 4, left: 4, zIndex: 2, background: 'var(--primary-600)', color: '#fff', fontSize: '0.62rem', fontWeight: 800, padding: '2px 5px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <Star size={10} fill="#fff" /> Cover
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveQuickImage(idx)}
+                              style={{
+                                position: 'absolute',
+                                top: 4,
+                                right: 4,
+                                zIndex: 2,
+                                background: 'rgba(239, 68, 68, 0.85)',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: 20,
+                                height: 20,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                              }}
+                              title="Remove photo"
+                            >
+                              <X size={12} />
+                            </button>
+                            <div style={{ height: 80, backgroundColor: 'var(--neutral-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                              <img
+                                src={img.url}
+                                alt={img.name}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                            </div>
+                            <div style={{ padding: '4px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--neutral-50)', fontSize: '0.68rem' }}>
+                              <span style={{ color: 'var(--neutral-500)', fontSize: '0.65rem' }}>
+                                {formatBytes(img.sizeBytes || 0)}
+                              </span>
+                              {!isPrimary && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetPrimaryQuickImage(idx)}
+                                  style={{ background: 'none', border: 'none', color: 'var(--primary-600)', fontSize: '0.65rem', fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                                >
+                                  Make Cover
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 

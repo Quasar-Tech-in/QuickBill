@@ -3131,6 +3131,8 @@ class StoreService {
       }),
       subtotal: Number(rawSubtotal),
       taxTotal: Number(rawTax),
+      itemDiscountTotal: doc.itemDiscountTotal !== undefined ? Number(doc.itemDiscountTotal) : (doc.item_discount_total !== undefined ? Number(doc.item_discount_total) : undefined),
+      orderDiscountAmount: doc.orderDiscountTotal !== undefined ? Number(doc.orderDiscountTotal) : (doc.invoiceDiscount !== undefined ? Number(doc.invoiceDiscount) : (doc.invoice_discount !== undefined ? Number(doc.invoice_discount) : undefined)),
       discountTotal: Number(rawDiscount),
       discountType: doc.discountType || doc.discount_type || undefined,
       discountValue: doc.discountValue !== undefined ? Number(doc.discountValue) : (doc.discount_value !== undefined ? Number(doc.discount_value) : undefined),
@@ -3450,7 +3452,13 @@ class StoreService {
           tax_rate: Number(it.taxRate || 0),
         };
       }),
-      invoiceDiscount: Number(invoiceData.discountTotal || 0),
+      invoiceDiscount: Number((
+        invoiceData.orderDiscountAmount !== undefined 
+          ? invoiceData.orderDiscountAmount 
+          : (invoiceData.itemDiscountTotal !== undefined
+              ? Math.max(0, Number(invoiceData.discountTotal || 0) - Number(invoiceData.itemDiscountTotal || 0))
+              : Math.max(0, Number(invoiceData.discountTotal || 0) - invoiceData.items.reduce((s, it) => s + (it.discountAmount || 0), 0)))
+      ).toFixed(2)),
       discountType: invoiceData.discountType,
       discountValue: invoiceData.discountValue !== undefined ? Number(invoiceData.discountValue) : undefined,
       paidAmount: Number(invoiceData.paidAmount !== undefined ? invoiceData.paidAmount : (invoiceData.paymentMode === 'CREDIT' ? 0 : invoiceData.grandTotal)),

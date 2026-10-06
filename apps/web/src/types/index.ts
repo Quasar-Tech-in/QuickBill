@@ -236,6 +236,8 @@ export interface Invoice {
   items: InvoiceItem[];
   subtotal: number;
   taxTotal: number;
+  itemDiscountTotal?: number;
+  orderDiscountAmount?: number;
   discountTotal: number;
   discountType?: 'PERCENT' | 'FLAT';
   discountValue?: number;

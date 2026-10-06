@@ -36,7 +36,13 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const branchPhone = invoice.locationPhone || branchLocation?.phone || activeLocation?.phone || '';
   const gstin = invoice.locationGstin || branchLocation?.gstin || (invoice.locationId === activeLocation?.id ? activeLocation?.gstin : undefined) || activeTenant?.gstin || '';
 
-  const itemDiscountsSum = invoice.items.reduce((sum, it) => sum + (it.discountAmount || 0), 0);
+  const itemDiscountsSum = invoice.itemDiscountTotal !== undefined
+    ? invoice.itemDiscountTotal
+    : invoice.items.reduce((sum, it) => sum + (it.discountAmount || 0), 0);
+
+  const orderDiscountAmount = invoice.orderDiscountAmount !== undefined
+    ? invoice.orderDiscountAmount
+    : Math.max(0, (invoice.discountTotal || 0) - itemDiscountsSum);
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
@@ -344,10 +350,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     <span>-₹{itemDiscountsSum.toFixed(2)}</span>
                   </div>
                 )}
-                {invoice.discountTotal > 0 && (
+                {orderDiscountAmount > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#047857' }}>
                     <span>Order Discount:</span>
-                    <span>-₹{invoice.discountTotal.toFixed(2)}</span>
+                    <span>-₹{orderDiscountAmount.toFixed(2)}</span>
                   </div>
                 )}
               </div>
@@ -519,10 +525,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                       <span>-₹{itemDiscountsSum.toFixed(2)}</span>
                     </div>
                   )}
-                  {invoice.discountTotal > 0 && (
+                  {orderDiscountAmount > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: '#047857', fontWeight: 600 }}>
                       <span>Order Discount:</span>
-                      <span>-₹{invoice.discountTotal.toFixed(2)}</span>
+                      <span>-₹{orderDiscountAmount.toFixed(2)}</span>
                     </div>
                   )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '2px solid var(--neutral-900)', borderBottom: '2px solid var(--neutral-900)', marginTop: 4, fontWeight: 800, fontSize: '1rem' }}>

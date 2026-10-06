@@ -223,6 +223,9 @@ class SaleService:
             ],
             "subtotal": float(totals.subtotal),
             "taxTotal": float(totals.tax_total),
+            "itemDiscountTotal": float(totals.item_discount_total),
+            "invoiceDiscount": float(totals.invoice_discount),
+            "orderDiscountTotal": float(totals.invoice_discount),
             "discountTotal": float(totals.item_discount_total + totals.invoice_discount),
             "discountType": request.discount_type,
             "discountValue": float(request.discount_value) if request.discount_value else 0.0,
@@ -419,7 +422,7 @@ class SaleService:
             ))
 
         # Calculate authoritative net financial totals
-        invoice_discount = request.invoice_discount if request.invoice_discount is not None else Decimal(str(invoice.get("discountTotal", "0.00")))
+        invoice_discount = request.invoice_discount if request.invoice_discount is not None else Decimal(str(invoice.get("invoiceDiscount") or invoice.get("orderDiscountTotal") or "0.00"))
         additional_charges = request.additional_charges if request.additional_charges is not None else Decimal(str(invoice.get("additionalCharges", "0.00")))
         paid_amount = request.paid_amount if request.paid_amount is not None else Decimal(str(invoice.get("paidAmount", "0.00")))
 

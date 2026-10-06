@@ -106,4 +106,47 @@ def test_fraction_quantization_three_decimals():
     assert totals.items[0].gross_amount == Decimal("23.94")
     assert totals.grand_total == Decimal("23.94")
 
+def test_item_discount_combined_with_invoice_discount():
+    # Item 1: price ₹100, flat discount ₹20 -> line net = ₹80
+    # Item 2: price ₹100, 10% discount -> line net = ₹90
+    # Gross after item discounts = 80 + 90 = 170.00
+    # Order discount = ₹17.00 (10% invoice discount)
+    # Net Grand Total = 170 - 17 = 153.00
+    items = [
+        LineItemCalcInput(
+            item_id="item-1",
+            name_snapshot="Product 1",
+            quantity=Decimal("1"),
+            unit_price=Decimal("100.00"),
+            discount=Decimal("20.00"),
+            discount_type="FLAT",
+            discount_value=Decimal("20.00"),
+            tax_rate=Decimal("0.0")
+        ),
+        LineItemCalcInput(
+            item_id="item-2",
+            name_snapshot="Product 2",
+            quantity=Decimal("1"),
+            unit_price=Decimal("100.00"),
+            discount=Decimal("0.00"),
+            discount_type="PERCENT",
+            discount_value=Decimal("10.00"),
+            discount_percent=Decimal("10.00"),
+            tax_rate=Decimal("0.0")
+        )
+    ]
+    totals = BillingEngine.calculate(
+        items=items,
+        invoice_discount=Decimal("17.00"),
+        enable_round_off=False
+    )
+    assert totals.items[0].discount == Decimal("20.00")
+    assert totals.items[0].line_total == Decimal("80.00")
+    assert totals.items[1].discount == Decimal("10.00")
+    assert totals.items[1].line_total == Decimal("90.00")
+    assert totals.item_discount_total == Decimal("30.00")
+    assert totals.invoice_discount == Decimal("17.00")
+    assert totals.grand_total == Decimal("153.00")
+
+
 

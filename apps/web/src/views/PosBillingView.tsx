@@ -1072,6 +1072,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       items: invoiceLines,
       subtotal: Number(taxBaseTotal.toFixed(2)),
       taxTotal: Number(taxTotal.toFixed(2)),
+      itemDiscountTotal: Number(itemDiscountTotal.toFixed(2)),
+      orderDiscountAmount: Number(orderDiscountAmount.toFixed(2)),
       discountTotal: Number((itemDiscountTotal + orderDiscountAmount).toFixed(2)),
       discountType: orderDiscountType,
       discountValue: parsedDiscountVal,

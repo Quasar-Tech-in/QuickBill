@@ -68,16 +68,16 @@ class BillingEngine:
             q_qty = quantize_qty(item.quantity)
             gross = quantize_currency(q_qty * item.unit_price)
 
-            # Determine discount based on discount_type
+            # Determine discount based strictly on discount_type
             disc_type = (item.discount_type or "FLAT").upper()
-            if disc_type == "PERCENT" or (item.discount_percent and item.discount_percent > Decimal("0.00")):
-                pct = item.discount_value if disc_type == "PERCENT" and item.discount_value is not None else item.discount_percent
-                pct = min(Decimal("100.00"), max(Decimal("0.00"), pct or Decimal("0.00")))
+            if disc_type == "PERCENT":
+                pct = item.discount_value if item.discount_value is not None else (item.discount_percent or Decimal("0.00"))
+                pct = min(Decimal("100.00"), max(Decimal("0.00"), pct))
                 discount = quantize_currency(gross * (pct / Decimal("100.00")))
                 item_disc_val = pct
                 item_disc_pct = pct
             else:
-                raw_val = item.discount_value if item.discount_value is not None and item.discount_value > Decimal("0.00") else item.discount
+                raw_val = item.discount_value if (item.discount_value is not None and item.discount_value > Decimal("0.00")) else item.discount
                 discount = quantize_currency(min(raw_val, gross))
                 item_disc_val = discount
                 item_disc_pct = quantize_currency((discount / gross * Decimal("100.00"))) if gross > Decimal("0.00") else Decimal("0.00")
@@ -89,9 +89,10 @@ class BillingEngine:
             item_intermediates.append((item, q_qty, gross, discount, disc_type, item_disc_val, item_disc_pct, net_line_inclusive))
 
         # 2. Compute proportional order/invoice discount factor
+        safe_inv_discount = quantize_currency(min(gross_total, max(Decimal("0.00"), invoice_discount)))
         discount_factor = Decimal("1.00")
-        if gross_total > Decimal("0.00") and invoice_discount > Decimal("0.00"):
-            discount_factor = max(Decimal("0.00"), (gross_total - invoice_discount) / gross_total)
+        if gross_total > Decimal("0.00") and safe_inv_discount > Decimal("0.00"):
+            discount_factor = max(Decimal("0.00"), (gross_total - safe_inv_discount) / gross_total)
 
         subtotal = Decimal("0.00")
         tax_total = Decimal("0.00")
@@ -109,7 +110,6 @@ class BillingEngine:
                 taxable = effective_line
                 tax = Decimal("0.00")
 
-            line_total = quantize_currency(taxable + tax)
             subtotal += taxable
             tax_total += tax
 
@@ -127,7 +127,7 @@ class BillingEngine:
                 taxable_amount=taxable,
                 tax_rate=item.tax_rate,
                 tax_amount=tax,
-                line_total=line_total
+                line_total=net_line_inclusive
             ))
 
         total_before_round = subtotal + tax_total + additional_charges
@@ -147,7 +147,7 @@ class BillingEngine:
             subtotal=quantize_currency(subtotal),
             tax_total=quantize_currency(tax_total),
             item_discount_total=quantize_currency(item_discount_total),
-            invoice_discount=quantize_currency(invoice_discount),
+            invoice_discount=safe_inv_discount,
             additional_charges=quantize_currency(additional_charges),
             round_off=round_off,
             grand_total=grand_total,
