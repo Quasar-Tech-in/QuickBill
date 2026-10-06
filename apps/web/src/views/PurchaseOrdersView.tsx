@@ -272,8 +272,8 @@ export const PurchaseOrdersView: React.FC = () => {
     let subtotal = 0;
     let taxTotal = 0;
     newPO.items.forEach(it => {
-      const lineSub = (Number(it.orderedQty) || 0) * (Number(it.unitPrice) || 0);
-      const lineTax = (lineSub * (Number(it.taxRate) || 0)) / 100;
+      const lineSub = (parseFloat(String(it.orderedQty)) || 0) * (parseFloat(String(it.unitPrice)) || 0);
+      const lineTax = (lineSub * (parseFloat(String(it.taxRate)) || 0)) / 100;
       subtotal += lineSub;
       taxTotal += lineTax;
     });
@@ -312,7 +312,14 @@ export const PurchaseOrdersView: React.FC = () => {
       showNotification('error', 'Please add at least one line item to the order.');
       return;
     }
-    for (const line of newPO.items) {
+    const parsedItems = newPO.items.map(it => ({
+      ...it,
+      orderedQty: parseFloat(String(it.orderedQty)) || 0,
+      unitPrice: parseFloat(String(it.unitPrice)) || 0,
+      taxRate: parseFloat(String(it.taxRate)) || 0,
+    }));
+
+    for (const line of parsedItems) {
       if (line.orderedQty <= 0) {
         showNotification('error', 'Item ordered quantity must be greater than 0.');
         return;
@@ -329,7 +336,7 @@ export const PurchaseOrdersView: React.FC = () => {
         supplierId: newPO.supplierId,
         locationId: newPO.locationId,
         expectedDeliveryDate: newPO.expectedDeliveryDate || undefined,
-        items: newPO.items,
+        items: parsedItems,
         notes: newPO.notes || undefined,
         terms: newPO.terms || undefined,
       });
@@ -1371,8 +1378,8 @@ export const PurchaseOrdersView: React.FC = () => {
                                     step="any"
                                     className="form-input"
                                     style={{ height: 32, padding: '4px 8px', fontSize: '0.82rem', fontFamily: 'var(--font-mono)', textAlign: 'right' }}
-                                    value={line.orderedQty}
-                                    onChange={(e) => handleUpdateLineItem(idx, 'orderedQty', parseFloat(e.target.value) || 0)}
+                                    value={line.orderedQty ?? ''}
+                                    onChange={(e) => handleUpdateLineItem(idx, 'orderedQty', e.target.value)}
                                   />
                                 </td>
 
@@ -1383,8 +1390,8 @@ export const PurchaseOrdersView: React.FC = () => {
                                     step="any"
                                     className="form-input"
                                     style={{ height: 32, padding: '4px 8px', fontSize: '0.82rem', fontFamily: 'var(--font-mono)', textAlign: 'right' }}
-                                    value={line.unitPrice}
-                                    onChange={(e) => handleUpdateLineItem(idx, 'unitPrice', parseFloat(e.target.value) || 0)}
+                                    value={line.unitPrice ?? ''}
+                                    onChange={(e) => handleUpdateLineItem(idx, 'unitPrice', e.target.value)}
                                   />
                                 </td>
 
@@ -1568,13 +1575,12 @@ export const PurchaseOrdersView: React.FC = () => {
                                   step="any"
                                   className="form-input"
                                   style={{ height: 30, padding: '4px 8px', fontSize: '0.82rem', fontFamily: 'var(--font-mono)', textAlign: 'right' }}
-                                  value={item.qtyToReceive}
+                                  value={item.qtyToReceive ?? ''}
                                   onChange={(e) => {
-                                    const val = parseFloat(e.target.value) || 0;
-                                    const safeVal = Math.min(Math.max(0, val), remaining);
+                                    const raw = e.target.value;
                                     setReceiveForm(prev => {
                                       const updated = [...prev.items];
-                                      updated[idx] = { ...updated[idx], qtyToReceive: safeVal };
+                                      updated[idx] = { ...updated[idx], qtyToReceive: raw as any };
                                       return { ...prev, items: updated };
                                     });
                                   }}
@@ -1620,8 +1626,8 @@ export const PurchaseOrdersView: React.FC = () => {
                           step="any"
                           className="form-input"
                           style={{ height: 32, fontFamily: 'var(--font-mono)' }}
-                          value={receiveForm.paymentAmount}
-                          onChange={(e) => setReceiveForm({ ...receiveForm, paymentAmount: parseFloat(e.target.value) || 0 })}
+                          value={receiveForm.paymentAmount ?? ''}
+                          onChange={(e) => setReceiveForm({ ...receiveForm, paymentAmount: e.target.value as any })}
                         />
                       </div>
 
@@ -2040,8 +2046,8 @@ export const PurchaseOrdersView: React.FC = () => {
                       step="any"
                       className="form-input"
                       style={{ fontFamily: 'var(--font-mono)', textAlign: 'right' }}
-                      value={quickItem.purchasePrice}
-                      onChange={(e) => setQuickItem({ ...quickItem, purchasePrice: parseFloat(e.target.value) || 0 })}
+                      value={quickItem.purchasePrice ?? ''}
+                      onChange={(e) => setQuickItem({ ...quickItem, purchasePrice: e.target.value as any })}
                     />
                   </div>
 
@@ -2053,8 +2059,8 @@ export const PurchaseOrdersView: React.FC = () => {
                       step="any"
                       className="form-input"
                       style={{ fontFamily: 'var(--font-mono)', textAlign: 'right' }}
-                      value={quickItem.salePrice}
-                      onChange={(e) => setQuickItem({ ...quickItem, salePrice: parseFloat(e.target.value) || 0 })}
+                      value={quickItem.salePrice ?? ''}
+                      onChange={(e) => setQuickItem({ ...quickItem, salePrice: e.target.value as any })}
                     />
                   </div>
 

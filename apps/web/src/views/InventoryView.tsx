@@ -80,7 +80,7 @@ export const InventoryView: React.FC = () => {
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
   const [selectedItemForAdjust, setSelectedItemForAdjust] = useState<Item | null>(null);
   const [adjustLocationId, setAdjustLocationId] = useState<string>(selectedLocationId);
-  const [adjustDelta, setAdjustDelta] = useState<number>(10);
+  const [adjustDelta, setAdjustDelta] = useState<number | string>(10);
   const [adjustType, setAdjustType] = useState<'ADD' | 'REDUCE'>('ADD');
 
   // Branch Catalog Sync Modal State
@@ -452,11 +452,11 @@ export const InventoryView: React.FC = () => {
 
   const calculateEffectiveSalePrice = (locInv?: Partial<ItemLocationInventory> | null): number => {
     if (!locInv) return 0;
-    const baseMrp = Number(locInv.mrp || 0);
-    if (!locInv.hasDiscount || !locInv.discountValue || Number(locInv.discountValue) <= 0) {
+    const baseMrp = parseFloat(String(locInv.mrp || 0)) || 0;
+    if (!locInv.hasDiscount || !locInv.discountValue || parseFloat(String(locInv.discountValue)) <= 0) {
       return baseMrp;
     }
-    const discVal = Number(locInv.discountValue || 0);
+    const discVal = parseFloat(String(locInv.discountValue)) || 0;
     if (locInv.discountType === 'PERCENT') {
       const disc = (baseMrp * discVal) / 100;
       return Math.max(0, Number((baseMrp - disc).toFixed(2)));
@@ -519,15 +519,15 @@ export const InventoryView: React.FC = () => {
       const locArray: ItemLocationInventory[] = Object.values(locationOverrides).map(loc => ({
         locationId: loc.locationId,
         locationName: loc.locationName,
-        mrp: Number(loc.mrp || 0),
+        mrp: parseFloat(String(loc.mrp)) || 0,
         salePrice: calculateEffectiveSalePrice(loc),
-        purchasePrice: Number(loc.purchasePrice || 0),
-        currentStock: Number(loc.currentStock || 0),
-        minStockAlert: Number(loc.minStockAlert ?? 5),
+        purchasePrice: parseFloat(String(loc.purchasePrice)) || 0,
+        currentStock: parseFloat(String(loc.currentStock)) || 0,
+        minStockAlert: parseFloat(String(loc.minStockAlert)) || 5,
         isListed: loc.isListed !== false,
         hasDiscount: !!loc.hasDiscount,
         discountType: loc.discountType || 'PERCENT',
-        discountValue: Number(loc.discountValue || 0),
+        discountValue: parseFloat(String(loc.discountValue)) || 0,
       }));
 
       // Master fallback defaults
@@ -601,7 +601,8 @@ export const InventoryView: React.FC = () => {
   const handleStockAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedItemForAdjust) return;
-    const delta = adjustType === 'ADD' ? Math.abs(adjustDelta) : -Math.abs(adjustDelta);
+    const numDelta = parseFloat(String(adjustDelta)) || 0;
+    const delta = adjustType === 'ADD' ? Math.abs(numDelta) : -Math.abs(numDelta);
     await store.adjustStock(selectedItemForAdjust.id, delta, adjustLocationId);
     await loadPaginatedItems();
     refreshData();
@@ -1644,10 +1645,10 @@ export const InventoryView: React.FC = () => {
                                     min="0"
                                     className="form-input"
                                     placeholder="100.00"
-                                    value={currentLocData.mrp}
+                                    value={currentLocData.mrp ?? ''}
                                     onChange={(e) => {
-                                      const newMrp = Number(e.target.value);
-                                      const updatedLoc = { ...currentLocData, mrp: newMrp };
+                                      const raw = e.target.value;
+                                      const updatedLoc = { ...currentLocData, mrp: raw as any };
                                       updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
                                       setLocationOverrides({
                                         ...locationOverrides,
@@ -1669,13 +1670,14 @@ export const InventoryView: React.FC = () => {
                                     min="0"
                                     className="form-input"
                                     placeholder="80.00"
-                                    value={currentLocData.purchasePrice}
+                                    value={currentLocData.purchasePrice ?? ''}
                                     onChange={(e) => {
+                                      const raw = e.target.value;
                                       setLocationOverrides({
                                         ...locationOverrides,
                                         [loc.id]: {
                                           ...currentLocData,
-                                          purchasePrice: Number(e.target.value),
+                                          purchasePrice: raw as any,
                                         },
                                       });
                                     }}
@@ -1693,13 +1695,14 @@ export const InventoryView: React.FC = () => {
                                     min="0"
                                     className="form-input"
                                     placeholder={formAllowParts ? "10.000" : "10"}
-                                    value={currentLocData.currentStock}
+                                    value={currentLocData.currentStock ?? ''}
                                     onChange={(e) => {
+                                      const raw = e.target.value;
                                       setLocationOverrides({
                                         ...locationOverrides,
                                         [loc.id]: {
                                           ...currentLocData,
-                                          currentStock: Number(e.target.value),
+                                          currentStock: raw as any,
                                         },
                                       });
                                     }}
@@ -1718,13 +1721,14 @@ export const InventoryView: React.FC = () => {
                                     min="0"
                                     className="form-input"
                                     placeholder={formAllowParts ? "5.000" : "5"}
-                                    value={currentLocData.minStockAlert}
+                                    value={currentLocData.minStockAlert ?? ''}
                                     onChange={(e) => {
+                                      const raw = e.target.value;
                                       setLocationOverrides({
                                         ...locationOverrides,
                                         [loc.id]: {
                                           ...currentLocData,
-                                          minStockAlert: Number(e.target.value),
+                                          minStockAlert: raw as any,
                                         },
                                       });
                                     }}
@@ -1803,11 +1807,12 @@ export const InventoryView: React.FC = () => {
                                         min="0"
                                         className="form-input"
                                         placeholder={currentLocData.discountType === 'PERCENT' ? 'e.g. 10 (%)' : 'e.g. 20 (₹)'}
-                                        value={currentLocData.discountValue || ''}
+                                        value={currentLocData.discountValue ?? ''}
                                         onChange={(e) => {
+                                          const raw = e.target.value;
                                           const updatedLoc = {
                                             ...currentLocData,
-                                            discountValue: Number(e.target.value),
+                                            discountValue: raw as any,
                                           };
                                           updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
                                           setLocationOverrides({
@@ -1948,8 +1953,8 @@ export const InventoryView: React.FC = () => {
                     min={selectedItemForAdjust.allowParts ? "0.001" : "1"}
                     required
                     className="form-input"
-                    value={adjustDelta}
-                    onChange={(e) => setAdjustDelta(Number(e.target.value))}
+                    value={adjustDelta ?? ''}
+                    onChange={(e) => setAdjustDelta(e.target.value)}
                   />
                 </div>
               </div>

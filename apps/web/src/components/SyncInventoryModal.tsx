@@ -35,7 +35,7 @@ export const SyncInventoryModal: React.FC<SyncInventoryModalProps> = ({
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
-  const [defaultStock, setDefaultStock] = useState<number>(0);
+  const [defaultStock, setDefaultStock] = useState<number | string>(0);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [successToast, setSuccessToast] = useState<string>('');
@@ -123,10 +123,11 @@ export const SyncInventoryModal: React.FC<SyncInventoryModalProps> = ({
 
     try {
       const payloadItemIds = syncMode === 'SELECTIVE' ? Array.from(selectedItemIds) : undefined;
+      const parsedDefaultStock = Math.max(0, parseFloat(String(defaultStock)) || 0);
       const res = await store.syncLocationInventory(targetLocation.id, {
         mode: syncMode,
         itemIds: payloadItemIds,
-        defaultStock: defaultStock > 0 ? defaultStock : 0,
+        defaultStock: parsedDefaultStock,
       });
 
       if (res.success) {
@@ -594,8 +595,8 @@ export const SyncInventoryModal: React.FC<SyncInventoryModalProps> = ({
                   step="1"
                   className="form-input"
                   style={{ width: 100, textAlign: 'center', fontWeight: 700, height: 36 }}
-                  value={defaultStock}
-                  onChange={(e) => setDefaultStock(Math.max(0, Number(e.target.value) || 0))}
+                  value={defaultStock ?? ''}
+                  onChange={(e) => setDefaultStock(e.target.value)}
                 />
                 <span style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', fontWeight: 600 }}>units</span>
               </div>

@@ -97,9 +97,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     gstin: '',
     address: '',
     plan: 'PROFESSIONAL' as PlanTier,
-    maxUsers: 5,
-    maxLocations: 3,
-    durationDays: 365,
+    maxUsers: 5 as number | string,
+    maxLocations: 3 as number | string,
+    durationDays: 365 as number | string,
     billingCycle: 'ANNUAL' as BillingCycle,
     isolationMode: 'SHARED' as 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER',
     mongodbUri: '',
@@ -113,10 +113,10 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     extendOption: '30_DAYS' as '30_DAYS' | '90_DAYS' | '1_YEAR' | 'CUSTOM_DATE',
     customEndDate: '',
     plan: 'PROFESSIONAL' as PlanTier,
-    maxUsers: 5,
-    maxLocations: 3,
+    maxUsers: 5 as number | string,
+    maxLocations: 3 as number | string,
     billingCycle: 'ANNUAL' as BillingCycle,
-    amount: 2499,
+    amount: 2499 as number | string,
     notes: '',
   });
 
@@ -275,9 +275,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       gstin: newTenant.gstin?.trim(),
       address: newTenant.address?.trim(),
       plan: newTenant.plan,
-      maxUsers: newTenant.maxUsers,
-      maxLocations: newTenant.maxLocations,
-      durationDays: newTenant.durationDays,
+      maxUsers: Math.max(1, parseInt(String(newTenant.maxUsers), 10) || 1),
+      maxLocations: Math.max(1, parseInt(String(newTenant.maxLocations), 10) || 1),
+      durationDays: Math.max(1, parseInt(String(newTenant.durationDays), 10) || 30),
       billingCycle: newTenant.billingCycle,
       databaseConfig: {
         isolationMode: newTenant.isolationMode,
@@ -352,9 +352,9 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       extendDays,
       newEndDate,
       plan: renewalForm.plan,
-      maxUsers: renewalForm.maxUsers,
-      maxLocations: renewalForm.maxLocations,
-      amount: renewalForm.amount,
+      maxUsers: Math.max(1, parseInt(String(renewalForm.maxUsers), 10) || 1),
+      maxLocations: Math.max(1, parseInt(String(renewalForm.maxLocations), 10) || 1),
+      amount: Math.max(0, parseFloat(String(renewalForm.amount)) || 0),
       billingCycle: renewalForm.billingCycle,
       notes: renewalForm.notes || `License renewed via Super Admin panel`,
     });
@@ -1613,8 +1613,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                         type="number"
                         min={1}
                         className="form-input"
-                        value={newTenant.maxUsers}
-                        onChange={(e) => setNewTenant({ ...newTenant, maxUsers: Number(e.target.value) })}
+                        value={newTenant.maxUsers ?? ''}
+                        onChange={(e) => setNewTenant({ ...newTenant, maxUsers: e.target.value })}
                       />
                     </div>
                     <div className="form-group">
@@ -1623,8 +1623,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                         type="number"
                         min={1}
                         className="form-input"
-                        value={newTenant.maxLocations}
-                        onChange={(e) => setNewTenant({ ...newTenant, maxLocations: Number(e.target.value) })}
+                        value={newTenant.maxLocations ?? ''}
+                        onChange={(e) => setNewTenant({ ...newTenant, maxLocations: e.target.value })}
                       />
                     </div>
                   </div>
@@ -1909,8 +1909,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                     <input
                       type="number"
                       className="form-input"
-                      value={renewalForm.amount}
-                      onChange={(e) => setRenewalForm({ ...renewalForm, amount: Number(e.target.value) })}
+                      value={renewalForm.amount ?? ''}
+                      onChange={(e) => setRenewalForm({ ...renewalForm, amount: e.target.value })}
                     />
                   </div>
                 </div>
@@ -1923,8 +1923,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                       type="number"
                       min={1}
                       className="form-input"
-                      value={renewalForm.maxUsers}
-                      onChange={(e) => setRenewalForm({ ...renewalForm, maxUsers: Number(e.target.value) })}
+                      value={renewalForm.maxUsers ?? ''}
+                      onChange={(e) => setRenewalForm({ ...renewalForm, maxUsers: e.target.value })}
                     />
                   </div>
                   <div className="form-group">
@@ -1933,8 +1933,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                       type="number"
                       min={1}
                       className="form-input"
-                      value={renewalForm.maxLocations}
-                      onChange={(e) => setRenewalForm({ ...renewalForm, maxLocations: Number(e.target.value) })}
+                      value={renewalForm.maxLocations ?? ''}
+                      onChange={(e) => setRenewalForm({ ...renewalForm, maxLocations: e.target.value })}
                     />
                   </div>
                 </div>
