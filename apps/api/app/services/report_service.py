@@ -1,8 +1,16 @@
 from decimal import Decimal
 from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from app.schemas.report import DashboardSummaryResponse, ProfitAndLossResponse, StockSummaryResponse, StockSummaryItem
+from app.schemas.report import (
+    DashboardSummaryResponse, 
+    ProfitAndLossResponse, 
+    StockSummaryResponse, 
+    StockSummaryItem,
+    PurchasesSummaryResponse,
+    PurchasesBySupplierItem
+)
 
 class ReportService:
     def __init__(self, db: AsyncIOMotorDatabase):
@@ -35,8 +43,31 @@ class ReportService:
         total_sales = Decimal(str(sales_res[0]["total"])) if sales_res else Decimal("0.00")
         total_orders = sales_res[0]["count"] if sales_res else 0
 
+        # 1.5. Total Purchases (from confirmed / received POs)
+        po_match: Dict[str, Any] = {
+            "$or": [{"businessId": b_oid}, {"businessId": business_id}],
+            "status": {"$in": ["PARTIALLY_RECEIVED", "FULLY_RECEIVED", "RECEIVED", "ORDERED"]}
+        }
+        if date_q:
+            po_match.update(date_q)
+        po_cursor = self.db.purchase_orders.aggregate([
+            {"$match": po_match},
+            {"$group": {
+                "_id": None,
+                "totalReceived": {"$sum": "$totalReceivedAmount"},
+                "totalGrand": {"$sum": "$grandTotal"}
+            }}
+        ])
+        po_res = await po_cursor.to_list(length=1)
+        if po_res:
+            rec_val = float(po_res[0].get("totalReceived", 0.0) or 0.0)
+            grand_val = float(po_res[0].get("totalGrand", 0.0) or 0.0)
+            total_purchases = Decimal(str(round(rec_val if rec_val > 0 else grand_val, 2)))
+        else:
+            total_purchases = Decimal("0.00")
+
         # 2. Money In / Out
-        pay_in_match: Dict[str, Any] = {"businessId": b_oid, "direction": "IN"}
+        pay_in_match: Dict[str, Any] = {"$or": [{"businessId": b_oid}, {"businessId": business_id}], "direction": "IN"}
         if date_q:
             pay_in_match.update(date_q)
         money_in_cursor = self.db.payments.aggregate([
@@ -46,7 +77,7 @@ class ReportService:
         money_in_res = await money_in_cursor.to_list(length=1)
         money_in = Decimal(str(money_in_res[0]["total"])) if money_in_res else Decimal("0.00")
 
-        pay_out_match: Dict[str, Any] = {"businessId": b_oid, "direction": "OUT"}
+        pay_out_match: Dict[str, Any] = {"$or": [{"businessId": b_oid}, {"businessId": business_id}], "direction": "OUT"}
         if date_q:
             pay_out_match.update(date_q)
         money_out_cursor = self.db.payments.aggregate([
@@ -58,29 +89,33 @@ class ReportService:
 
         # 3. Low stock count
         low_stock_count = await self.db.items.count_documents({
-            "businessId": b_oid,
+            "$or": [{"businessId": b_oid}, {"businessId": business_id}],
             "isActive": True,
             "$expr": {"$lte": ["$currentStock", "$minStockAlert"]}
         })
 
         # 4. Total Customers
         total_customers = await self.db.parties.count_documents({
-            "businessId": b_oid,
+            "$or": [{"businessId": b_oid}, {"businessId": business_id}],
             "type": "customer"
         })
 
-        # 5. Total Receivables
+        # 5. Total Receivables & Payables
         rec_cursor = self.db.parties.aggregate([
-            {"$match": {"businessId": b_oid}},
-            {"$group": {"_id": None, "rec": {"$sum": "$currentReceivable"}, "pay": {"$sum": "$currentPayable"}}}
+            {"$match": {"$or": [{"businessId": b_oid}, {"businessId": business_id}]}},
+            {"$group": {
+                "_id": None, 
+                "rec": {"$sum": "$currentReceivable"}, 
+                "pay": {"$sum": {"$ifNull": ["$currentPayable", "$balance"]}}
+            }}
         ])
         rec_res = await rec_cursor.to_list(length=1)
-        receivables = Decimal(str(rec_res[0]["rec"])) if rec_res else Decimal("0.00")
-        payables = Decimal(str(rec_res[0]["pay"])) if rec_res else Decimal("0.00")
+        receivables = Decimal(str(round(rec_res[0]["rec"], 2))) if rec_res and rec_res[0].get("rec") is not None else Decimal("0.00")
+        payables = Decimal(str(round(rec_res[0]["pay"], 2))) if rec_res and rec_res[0].get("pay") is not None else Decimal("0.00")
 
         return DashboardSummaryResponse(
             total_sales=total_sales,
-            total_purchases=Decimal("0.00"),
+            total_purchases=total_purchases,
             money_in=money_in,
             money_out=money_out,
             total_receivables=receivables,
@@ -91,9 +126,9 @@ class ReportService:
         )
 
     async def get_profit_and_loss(self, business_id: str, from_date: Optional[str] = None, to_date: Optional[str] = None) -> ProfitAndLossResponse:
-        b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
+        b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else business_id
 
-        inv_match: Dict[str, Any] = {"businessId": b_oid, "status": "CONFIRMED"}
+        inv_match: Dict[str, Any] = {"$or": [{"businessId": b_oid}, {"businessId": business_id}], "status": "CONFIRMED"}
         date_q = self._build_date_query("createdAt", from_date, to_date)
         if date_q:
             inv_match.update(date_q)
@@ -174,7 +209,7 @@ class ReportService:
             cogs = net_sales * Decimal("0.70")
 
         # 3. Aggregate operating expenses
-        exp_match: Dict[str, Any] = {"businessId": b_oid}
+        exp_match: Dict[str, Any] = {"$or": [{"businessId": b_oid}, {"businessId": business_id}]}
         if date_q:
             exp_match.update(date_q)
         exp_res = await self.db.expenses.aggregate([
@@ -197,8 +232,8 @@ class ReportService:
         )
 
     async def get_stock_summary(self, business_id: str) -> StockSummaryResponse:
-        b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
-        items = await self.db.items.find({"businessId": b_oid, "isActive": True}).to_list(length=500)
+        b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else business_id
+        items = await self.db.items.find({"$or": [{"businessId": b_oid}, {"businessId": business_id}], "isActive": True}).to_list(length=500)
 
         summary_items: List[StockSummaryItem] = []
         total_qty = 0
@@ -229,3 +264,72 @@ class ReportService:
             total_quantity=total_qty,
             total_valuation=total_val
         )
+
+    async def get_purchases_summary(self, business_id: str, from_date: Optional[str] = None, to_date: Optional[str] = None) -> PurchasesSummaryResponse:
+        b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else business_id
+
+        po_match: Dict[str, Any] = {
+            "$or": [{"businessId": b_oid}, {"businessId": business_id}],
+            "status": {"$ne": "CANCELLED"}
+        }
+        date_q = self._build_date_query("createdAt", from_date, to_date)
+        if date_q:
+            po_match.update(date_q)
+
+        pos = await self.db.purchase_orders.find(po_match).to_list(length=1000)
+
+        tot_orders = len(pos)
+        tot_ordered = Decimal("0.00")
+        tot_received = Decimal("0.00")
+        tot_paid = Decimal("0.00")
+        tot_pending = Decimal("0.00")
+        tot_tax = Decimal("0.00")
+
+        by_supplier_map: Dict[str, Dict[str, Any]] = {}
+
+        for po in pos:
+            sup_id = str(po.get("supplierId", "unknown"))
+            sup_name = str(po.get("supplierName", "Supplier"))
+            g_tot = Decimal(str(po.get("grandTotal", 0.0)))
+            r_tot = Decimal(str(po.get("totalReceivedAmount", 0.0)))
+            p_tot = Decimal(str(po.get("totalPaidAmount", 0.0)))
+            t_amt = Decimal(str(po.get("taxAmount", po.get("taxTotal", 0.0))))
+            bal = max(Decimal("0.00"), r_tot - p_tot) if r_tot > 0 else Decimal("0.00")
+
+            tot_ordered += g_tot
+            tot_received += r_tot
+            tot_paid += p_tot
+            tot_pending += bal
+            tot_tax += t_amt
+
+            if sup_id not in by_supplier_map:
+                by_supplier_map[sup_id] = {
+                    "supplier_id": sup_id,
+                    "supplier_name": sup_name,
+                    "orders_count": 0,
+                    "ordered_amount": Decimal("0.00"),
+                    "received_amount": Decimal("0.00"),
+                    "paid_amount": Decimal("0.00"),
+                    "pending_balance": Decimal("0.00")
+                }
+            by_supplier_map[sup_id]["orders_count"] += 1
+            by_supplier_map[sup_id]["ordered_amount"] += g_tot
+            by_supplier_map[sup_id]["received_amount"] += r_tot
+            by_supplier_map[sup_id]["paid_amount"] += p_tot
+            by_supplier_map[sup_id]["pending_balance"] += bal
+
+        by_sup_list = [
+            PurchasesBySupplierItem(**item)
+            for item in by_supplier_map.values()
+        ]
+
+        return PurchasesSummaryResponse(
+            total_orders_count=tot_orders,
+            total_ordered_amount=tot_ordered,
+            total_received_amount=tot_received,
+            total_paid_amount=tot_paid,
+            total_pending_payables=tot_pending,
+            total_tax_input_credit=tot_tax,
+            by_supplier=by_sup_list
+        )
+

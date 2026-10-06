@@ -939,6 +939,19 @@ class MobileStore {
           subtotal: Number(d.subtotal || 0),
           taxTotal: Number(d.taxTotal ?? d.tax_total ?? 0),
           grandTotal: Number(d.grandTotal ?? d.grand_total ?? 0),
+          totalReceivedAmount: Number(d.totalReceivedAmount ?? d.total_received_amount ?? 0),
+          totalPaidAmount: Number(d.totalPaidAmount ?? d.total_paid_amount ?? 0),
+          balanceDue: Number(d.balanceDue ?? d.balance_due ?? 0),
+          paymentStatus: d.paymentStatus || d.payment_status || 'UNPAID',
+          payments: Array.isArray(d.payments) ? d.payments.map((p: any) => ({
+            paymentId: String(p.paymentId || p.payment_id || ''),
+            amount: Number(p.amount || 0),
+            paymentMode: p.paymentMode || p.payment_mode || 'BANK_TRANSFER',
+            referenceNumber: p.referenceNumber || p.reference_number,
+            notes: p.notes,
+            paymentDate: p.paymentDate || p.payment_date || new Date().toISOString(),
+            recordedBy: p.recordedBy || p.recorded_by,
+          })) : [],
           notes: d.notes,
           createdAt: d.createdAt || new Date().toISOString(),
         }));
@@ -981,27 +994,66 @@ class MobileStore {
     return newPO;
   }
 
-  async receivePurchaseOrder(poId: string) {
+  async receivePurchaseOrder(poId: string, options?: { payment?: { amount: number; paymentMode: string; referenceNumber?: string; notes?: string }; notes?: string }) {
+    const po = this.purchaseOrders.find(p => p.id === poId);
+    const itemsToReceive = po?.items.map(i => ({
+      itemId: i.itemId,
+      qty: Math.max(0, i.orderedQty - (i.receivedQty || 0))
+    })).filter(i => i.qty > 0) || [];
+
     try {
       await apiClient.post(`/purchase-orders/${poId}/receive-goods`, {
-        receipts: this.purchaseOrders.find(p => p.id === poId)?.items.map(i => ({
-          itemId: i.itemId,
-          qty: i.orderedQty - (i.receivedQty || 0)
-        })) || []
+        items: itemsToReceive,
+        notes: options?.notes,
+        payment: options?.payment,
       });
     } catch (err) {
       console.warn('Receive PO API failed, applying locally:', err);
     }
 
-    const po = this.purchaseOrders.find(p => p.id === poId);
     if (po && po.status !== 'RECEIVED' && po.status !== 'FULLY_RECEIVED') {
       po.status = 'RECEIVED';
+      po.totalReceivedAmount = po.grandTotal;
+      if (options?.payment && options.payment.amount > 0) {
+        po.totalPaidAmount = (po.totalPaidAmount || 0) + options.payment.amount;
+        po.balanceDue = Math.max(0, po.grandTotal - (po.totalPaidAmount || 0));
+        po.paymentStatus = po.balanceDue === 0 ? 'PAID' : 'PARTIALLY_PAID';
+      } else {
+        po.balanceDue = Math.max(0, po.grandTotal - (po.totalPaidAmount || 0));
+        po.paymentStatus = (po.totalPaidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
+      }
       po.items.forEach(poItem => {
         poItem.receivedQty = poItem.orderedQty;
         const item = this.items.find(i => i.id === poItem.itemId || i.name === poItem.name);
         if (item) {
           item.currentStock = Number((item.currentStock + poItem.orderedQty).toFixed(3));
         }
+      });
+      this.notify();
+    }
+  }
+
+  async recordPurchaseOrderPayment(poId: string, paymentData: { amount: number; paymentMode: string; referenceNumber?: string; notes?: string }) {
+    try {
+      await apiClient.post(`/purchase-orders/${poId}/payments`, paymentData);
+    } catch (err) {
+      console.warn('Record PO payment API failed, applying locally:', err);
+    }
+
+    const po = this.purchaseOrders.find(p => p.id === poId);
+    if (po) {
+      po.totalPaidAmount = (po.totalPaidAmount || 0) + paymentData.amount;
+      const effectiveReceived = po.totalReceivedAmount !== undefined ? po.totalReceivedAmount : po.grandTotal;
+      po.balanceDue = Math.max(0, effectiveReceived - po.totalPaidAmount);
+      po.paymentStatus = po.balanceDue === 0 ? 'PAID' : 'PARTIALLY_PAID';
+      if (!po.payments) po.payments = [];
+      po.payments.push({
+        paymentId: `pmt-${Date.now()}`,
+        amount: paymentData.amount,
+        paymentMode: paymentData.paymentMode,
+        referenceNumber: paymentData.referenceNumber,
+        notes: paymentData.notes,
+        paymentDate: new Date().toISOString(),
       });
       this.notify();
     }

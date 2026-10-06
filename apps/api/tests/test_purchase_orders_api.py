@@ -145,6 +145,105 @@ async def test_purchase_order_lifecycle(auth_headers):
         assert item_check2.status_code == 200
         assert float(item_check2.json()["currentStock"]) == 30.0
 
+        # Check PO payments and balance
+        po_final = await client.get(f"/api/v1/purchase-orders/{po_id}", headers=auth_headers)
+        assert po_final.status_code == 200
+        po_final_data = po_final.json()
+        assert po_final_data["totalReceivedAmount"] > 0
+        assert po_final_data["totalPaidAmount"] == 3024.0
+        assert len(po_final_data["payments"]) == 2
+
+@pytest.mark.asyncio
+async def test_purchase_order_standalone_payment_and_date_filtering(auth_headers):
+    import secrets
+    sku = f"TEA-GRN-{secrets.token_hex(4)}"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Create item
+        item_payload = {
+            "name": "Darjeeling Green Tea 250g",
+            "sku": sku,
+            "category": "Beverages",
+            "unit": "pcs",
+            "purchase_price": 150.0,
+            "sale_price": 250.0,
+            "tax_rate": 5.0,
+            "current_stock": 5.0
+        }
+        item_res = await client.post("/api/v1/items", headers=auth_headers, json=item_payload)
+        item_id = str(item_res.json().get("_id") or item_res.json().get("id"))
+
+        # 2. Create PO with past expected delivery date and custom orderDate
+        po_payload = {
+            "supplierId": "65f2a1b9a000000000000301",
+            "supplierName": "Himalayan Organic Farms",
+            "locationId": "65f2a1b9a000000000000101",
+            "orderDate": "2026-10-01",
+            "expectedDeliveryDate": "2026-09-25",  # Past date
+            "items": [
+                {
+                    "itemId": item_id,
+                    "itemName": "Darjeeling Green Tea 250g",
+                    "orderedQuantity": 10.0,
+                    "unitCost": 150.0,
+                    "taxRate": 5.0
+                }
+            ]
+        }
+        po_res = await client.post("/api/v1/purchase-orders", headers=auth_headers, json=po_payload)
+        assert po_res.status_code == 201
+        po_data = po_res.json()
+        po_id = po_data["id"]
+        assert po_data["orderDate"] == "2026-10-01"
+        assert po_data["expectedDeliveryDate"] == "2026-09-25"
+
+        # 3. Test Date Filtering on list endpoint
+        list_filter_res = await client.get("/api/v1/purchase-orders?fromDate=2026-10-01&toDate=2026-10-31", headers=auth_headers)
+        assert list_filter_res.status_code == 200
+        assert any(p["id"] == po_id for p in list_filter_res.json()["data"])
+
+        # 4. Receive goods without immediate payment (Credit / Unpaid)
+        rec_res = await client.post(
+            f"/api/v1/purchase-orders/{po_id}/receive",
+            headers=auth_headers,
+            json={
+                "receivedItems": [{"itemId": item_id, "quantityReceived": 10.0, "unitCost": 150.0}],
+                "paymentDetails": {"amountPaid": 0.0, "paymentMode": "CREDIT"}
+            }
+        )
+        assert rec_res.status_code == 200
+        rec_data = rec_res.json()
+        assert rec_data["status"] == "FULLY_RECEIVED"
+        assert rec_data["paymentStatus"] == "UNPAID"
+        assert rec_data["totalReceivedAmount"] == 1575.0  # (10 * 150) * 1.05
+        assert rec_data["balanceDue"] == 1575.0
+
+        # 5. Record Standalone Payment towards PO
+        pay_res = await client.post(
+            f"/api/v1/purchase-orders/{po_id}/payments",
+            headers=auth_headers,
+            json={
+                "amount": 1575.0,
+                "paymentMode": "BANK_TRANSFER",
+                "referenceNumber": "NEFT/8392193821",
+                "notes": "Full settlement for green tea restock"
+            }
+        )
+        assert pay_res.status_code == 200
+        pay_data = pay_res.json()
+        assert pay_data["paymentStatus"] == "PAID"
+        assert pay_data["totalPaidAmount"] == 1575.0
+        assert pay_data["balanceDue"] == 0.0
+        assert len(pay_data["payments"]) == 1
+        assert pay_data["payments"][0]["referenceNumber"] == "NEFT/8392193821"
+
+        # 6. Verify Purchases Summary Report
+        rep_res = await client.get("/api/v1/reports/purchases", headers=auth_headers)
+        assert rep_res.status_code == 200
+        rep_data = rep_res.json()
+        assert rep_data["total_orders_count"] >= 1
+        assert float(rep_data["total_received_amount"]) >= 1575.0
+
 @pytest.mark.asyncio
 async def test_purchase_order_cancellation(auth_headers):
     transport = ASGITransport(app=app)
@@ -177,3 +276,4 @@ async def test_purchase_order_cancellation(auth_headers):
         assert cancel_res.status_code == 200
         assert cancel_res.json()["status"] == "CANCELLED"
         assert cancel_res.json()["cancellationReason"] == "Vendor out of stock for this SKU"
+

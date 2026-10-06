@@ -79,6 +79,16 @@ class CancelPORequest(BaseModel):
     cancellation_reason: Optional[str] = None
     reason: Optional[str] = None
 
+class RecordPOPaymentRequest(BaseModel):
+    amount: float
+    paymentMode: Optional[str] = "BANK_TRANSFER"
+    payment_mode: Optional[str] = None
+    referenceNumber: Optional[str] = None
+    reference_number: Optional[str] = None
+    notes: Optional[str] = None
+    paidAt: Optional[str] = None
+    paid_at: Optional[str] = None
+
 class PurchaseOrderCreate(BaseModel):
     supplierId: Optional[str] = None
     supplier_id: Optional[str] = None
@@ -90,6 +100,8 @@ class PurchaseOrderCreate(BaseModel):
     location_id: Optional[str] = None
     locationName: Optional[str] = None
     location_name: Optional[str] = None
+    orderDate: Optional[str] = None
+    order_date: Optional[str] = None
     expectedDeliveryDate: Optional[str] = None
     expected_delivery_date: Optional[str] = None
     notes: Optional[str] = None
@@ -103,6 +115,8 @@ class PurchaseOrderUpdate(BaseModel):
     supplierPhone: Optional[str] = None
     locationId: Optional[str] = None
     locationName: Optional[str] = None
+    orderDate: Optional[str] = None
+    order_date: Optional[str] = None
     expectedDeliveryDate: Optional[str] = None
     notes: Optional[str] = None
     terms: Optional[str] = None
@@ -119,6 +133,16 @@ class PurchaseReceiptHistoryRecord(BaseModel):
     totalAmountReceived: float = 0.0
     amountPaid: float = 0.0
     paymentMode: Optional[str] = None
+    referenceNumber: Optional[str] = None
+
+class PurchaseOrderPaymentRecord(BaseModel):
+    paymentId: Optional[str] = None
+    paymentNumber: Optional[str] = None
+    amount: float
+    paymentMode: str = "BANK_TRANSFER"
+    referenceNumber: Optional[str] = None
+    notes: Optional[str] = None
+    paidAt: str
 
 class PurchaseOrderResponse(BaseModel):
     id: str
@@ -130,6 +154,7 @@ class PurchaseOrderResponse(BaseModel):
     locationId: str
     locationName: str
     status: str
+    orderDate: Optional[str] = None
     expectedDeliveryDate: Optional[str] = None
     notes: Optional[str] = None
     terms: Optional[str] = None
@@ -140,7 +165,11 @@ class PurchaseOrderResponse(BaseModel):
     taxTotal: Optional[float] = None
     grandTotal: float = 0.0
     totalReceivedAmount: float = 0.0
+    totalPaidAmount: float = 0.0
+    balanceDue: float = 0.0
+    paymentStatus: str = "UNPAID"
     receipts: List[PurchaseReceiptHistoryRecord] = []
+    payments: List[PurchaseOrderPaymentRecord] = []
     createdByUserId: Optional[str] = None
     createdByName: Optional[str] = None
     createdAt: str

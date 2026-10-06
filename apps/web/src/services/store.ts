@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -3582,6 +3582,20 @@ class StoreService {
   // --- Purchase Orders Management ---
   private mapPoDocToPurchaseOrder(doc: any): PurchaseOrder {
     const rawItems = doc.items || doc.orderItems || [];
+    const createdAtStr = doc.createdAt ? String(doc.createdAt) : new Date().toISOString();
+    const orderDateStr = doc.orderDate || doc.order_date || (createdAtStr ? createdAtStr.split('T')[0] : new Date().toISOString().split('T')[0]);
+    const totRec = Number(doc.totalReceivedAmount ?? doc.total_received_amount ?? 0);
+    const totPaid = Number(doc.totalPaidAmount ?? doc.total_paid_amount ?? 0);
+    const balDue = Number(doc.balanceDue ?? doc.balance_due ?? Math.max(0, totRec - totPaid));
+
+    let pmtStatus = doc.paymentStatus || doc.payment_status;
+    if (!pmtStatus) {
+      if (totRec <= 0) pmtStatus = 'NO_DUES';
+      else if (totPaid >= (totRec - 0.01)) pmtStatus = 'PAID';
+      else if (totPaid > 0) pmtStatus = 'PARTIALLY_PAID';
+      else pmtStatus = 'UNPAID';
+    }
+
     return {
       id: String(doc.id || doc._id || ''),
       poNumber: doc.poNumber || doc.po_number || '',
@@ -3593,7 +3607,7 @@ class StoreService {
       supplierAddress: doc.supplierAddress || doc.supplier_address,
       locationId: String(doc.locationId || doc.location_id || ''),
       locationName: doc.locationName || doc.location_name,
-      orderDate: doc.orderDate || doc.order_date || (doc.createdAt ? String(doc.createdAt).split('T')[0] : new Date().toISOString().split('T')[0]),
+      orderDate: orderDateStr,
       expectedDeliveryDate: doc.expectedDeliveryDate || doc.expected_delivery_date,
       status: (doc.status === 'FULLY_RECEIVED' ? 'RECEIVED' : (doc.status || 'ORDERED')),
       items: Array.isArray(rawItems) ? rawItems.map((it: any) => {
@@ -3626,6 +3640,10 @@ class StoreService {
       subtotal: Number(doc.subtotal || 0),
       taxTotal: Number(doc.taxTotal ?? doc.tax_total ?? doc.taxAmount ?? doc.tax_amount ?? 0),
       grandTotal: Number(doc.grandTotal ?? doc.grand_total ?? 0),
+      totalReceivedAmount: totRec,
+      totalPaidAmount: totPaid,
+      balanceDue: balDue,
+      paymentStatus: pmtStatus,
       notes: doc.notes,
       terms: doc.terms,
       cancellationReason: doc.cancellationReason || doc.cancellation_reason,
@@ -3648,7 +3666,16 @@ class StoreService {
           referenceNumber: (rh.paymentRecorded || rh.payment_recorded)?.referenceNumber || (rh.paymentRecorded || rh.payment_recorded)?.reference_number,
         } : undefined,
       })) : [],
-      createdAt: doc.createdAt || doc.created_at || new Date().toISOString(),
+      payments: Array.isArray(doc.payments) ? doc.payments.map((p: any) => ({
+        paymentId: p.paymentId || p.payment_id || p.id,
+        paymentNumber: p.paymentNumber || p.payment_number,
+        amount: Number(p.amount || 0),
+        paymentMode: p.paymentMode || p.payment_mode || 'BANK_TRANSFER',
+        referenceNumber: p.referenceNumber || p.reference_number,
+        notes: p.notes,
+        paidAt: p.paidAt || p.paid_at || new Date().toISOString(),
+      })) : [],
+      createdAt: createdAtStr,
       updatedAt: doc.updatedAt || doc.updated_at,
       createdBy: doc.createdBy || doc.created_by || doc.createdByUserId,
       createdByName: doc.createdByName || doc.created_by_name,
@@ -3706,8 +3733,9 @@ class StoreService {
         if (currentStatus !== queryStatus) return false;
       }
       if (params.supplier_id && params.supplier_id !== 'ALL' && po.supplierId !== params.supplier_id) return false;
-      if (fromDate && po.orderDate < fromDate) return false;
-      if (toDate && po.orderDate > toDate) return false;
+      const poDate = po.orderDate || (po.createdAt ? po.createdAt.split('T')[0] : '');
+      if (fromDate && poDate && poDate < fromDate) return false;
+      if (toDate && poDate && poDate > toDate) return false;
       if (params.search && params.search.trim()) {
         const q = params.search.toLowerCase();
         const m = (po.poNumber && po.poNumber.toLowerCase().includes(q)) ||
@@ -3750,6 +3778,7 @@ class StoreService {
   async createPurchaseOrder(poData: {
     supplierId: string;
     locationId: string;
+    orderDate?: string;
     expectedDeliveryDate?: string;
     items: { itemId: string; orderedQty: number; unitPrice: number; taxRate?: number; updateItemPurchasePrice?: boolean }[];
     notes?: string;
@@ -3757,6 +3786,7 @@ class StoreService {
   }): Promise<PurchaseOrder> {
     const activeLoc = this.locations.find(l => l.id === poData.locationId) || this.activeLocation;
     const supplier = this.parties.find(p => p.id === poData.supplierId);
+    const orderDate = poData.orderDate || new Date().toISOString().split('T')[0];
 
     const payload = {
       supplierId: poData.supplierId,
@@ -3766,6 +3796,8 @@ class StoreService {
       locationId: poData.locationId || activeLoc?.id,
       location_id: poData.locationId || activeLoc?.id,
       locationName: activeLoc?.name,
+      orderDate: orderDate,
+      order_date: orderDate,
       expectedDeliveryDate: poData.expectedDeliveryDate || undefined,
       expected_delivery_date: poData.expectedDeliveryDate || undefined,
       items: poData.items.map(it => {
@@ -3849,16 +3881,21 @@ class StoreService {
       supplierAddress: supplier?.address,
       locationId: activeLoc?.id || 'loc_default',
       locationName: activeLoc?.name || 'Main Branch',
-      orderDate: new Date().toISOString().split('T')[0],
+      orderDate: orderDate,
       expectedDeliveryDate: poData.expectedDeliveryDate,
       status: 'ORDERED',
       items,
       subtotal: Number(subtotal.toFixed(2)),
       taxTotal: Number(taxTotal.toFixed(2)),
       grandTotal: Number((subtotal + taxTotal).toFixed(2)),
+      totalReceivedAmount: 0,
+      totalPaidAmount: 0,
+      balanceDue: 0,
+      paymentStatus: 'NO_DUES',
       notes: poData.notes,
       terms: poData.terms,
       receiptHistory: [],
+      payments: [],
       createdAt: new Date().toISOString(),
       createdBy: this.currentUser?.id,
       createdByName: this.currentUser?.name,
@@ -3867,6 +3904,142 @@ class StoreService {
     this.purchaseOrders = [localPO, ...this.purchaseOrders];
     try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
     return localPO;
+  }
+
+  async recordPurchaseOrderPayment(poId: string, paymentData: {
+    amount: number;
+    paymentMode?: string;
+    referenceNumber?: string;
+    notes?: string;
+    paidAt?: string;
+  }): Promise<PurchaseOrder> {
+    const payload = {
+      amount: Number(paymentData.amount),
+      paymentMode: paymentData.paymentMode || 'BANK_TRANSFER',
+      payment_mode: paymentData.paymentMode || 'BANK_TRANSFER',
+      referenceNumber: paymentData.referenceNumber || undefined,
+      reference_number: paymentData.referenceNumber || undefined,
+      notes: paymentData.notes || undefined,
+      paidAt: paymentData.paidAt || undefined,
+      paid_at: paymentData.paidAt || undefined,
+    };
+
+    try {
+      const res = await apiClient.post(`/purchase-orders/${poId}/payments`, payload);
+      if (res.data) {
+        const updatedPO = this.mapPoDocToPurchaseOrder(res.data);
+        this.purchaseOrders = this.purchaseOrders.map(p => p.id === poId ? updatedPO : p);
+        try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+        this.fetchParties().catch(() => {});
+        return updatedPO;
+      }
+    } catch (err: any) {
+      console.error('Backend PO payment failed:', err?.response?.data || err);
+      if (err?.response?.data?.detail) {
+        const detailMsg = typeof err.response.data.detail === 'string'
+          ? err.response.data.detail
+          : JSON.stringify(err.response.data.detail);
+        throw new Error(`Payment Error: ${detailMsg}`);
+      }
+    }
+
+    // Local fallback
+    const po = this.purchaseOrders.find(p => p.id === poId);
+    if (!po) throw new Error('Purchase order not found');
+
+    const payAmount = Number(paymentData.amount);
+    const newPaid = Number(((po.totalPaidAmount || 0) + payAmount).toFixed(2));
+    const recAmount = Number(po.totalReceivedAmount || (po.status === 'RECEIVED' || po.status === 'FULLY_RECEIVED' ? po.grandTotal : 0));
+    const balDue = Math.max(0, Number((recAmount - newPaid).toFixed(2)));
+
+    po.totalPaidAmount = newPaid;
+    po.balanceDue = balDue;
+    po.paymentStatus = balDue <= 0 ? 'PAID' : (newPaid > 0 ? 'PARTIALLY_PAID' : 'UNPAID');
+    po.payments = po.payments || [];
+    po.payments.push({
+      paymentId: `pay_${Date.now()}`,
+      paymentNumber: `PAY-${Date.now().toString().slice(-6)}`,
+      amount: payAmount,
+      paymentMode: paymentData.paymentMode || 'BANK_TRANSFER',
+      referenceNumber: paymentData.referenceNumber,
+      notes: paymentData.notes,
+      paidAt: paymentData.paidAt || new Date().toISOString(),
+    });
+
+    try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+    return po;
+  }
+
+  async fetchPurchasesSummaryReport(params: { fromDate?: string; toDate?: string } = {}): Promise<PurchasesSummaryReport> {
+    try {
+      const qParams: Record<string, any> = {};
+      if (params.fromDate) qParams.fromDate = params.fromDate;
+      if (params.toDate) qParams.toDate = params.toDate;
+      const res = await apiClient.get('/reports/purchases', { params: qParams });
+      if (res.data) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch purchases summary report from API:', err);
+    }
+
+    // Local calculation fallback
+    const fromDate = params.fromDate;
+    const toDate = params.toDate;
+    const pos = this.purchaseOrders.filter(p => {
+      if (p.status === 'CANCELLED') return false;
+      const poDate = p.orderDate || (p.createdAt ? p.createdAt.split('T')[0] : '');
+      if (fromDate && poDate && poDate < fromDate) return false;
+      if (toDate && poDate && poDate > toDate) return false;
+      return true;
+    });
+
+    let totOrd = 0;
+    let totRec = 0;
+    let totPaid = 0;
+    let totPending = 0;
+    let totTax = 0;
+    const supMap = new Map<string, PurchasesBySupplierItem>();
+
+    pos.forEach(po => {
+      const g = Number(po.grandTotal || 0);
+      const r = Number(po.totalReceivedAmount || (po.status === 'RECEIVED' || po.status === 'FULLY_RECEIVED' ? po.grandTotal : 0));
+      const p = Number(po.totalPaidAmount || 0);
+      const bal = Math.max(0, r - p);
+      const tx = Number(po.taxTotal || 0);
+
+      totOrd += g;
+      totRec += r;
+      totPaid += p;
+      totPending += bal;
+      totTax += tx;
+
+      const sup = supMap.get(po.supplierId) || {
+        supplier_id: po.supplierId,
+        supplier_name: po.supplierName,
+        orders_count: 0,
+        ordered_amount: 0,
+        received_amount: 0,
+        paid_amount: 0,
+        pending_balance: 0,
+      };
+      sup.orders_count += 1;
+      sup.ordered_amount += g;
+      sup.received_amount += r;
+      sup.paid_amount += p;
+      sup.pending_balance += bal;
+      supMap.set(po.supplierId, sup);
+    });
+
+    return {
+      total_orders_count: pos.length,
+      total_ordered_amount: Number(totOrd.toFixed(2)),
+      total_received_amount: Number(totRec.toFixed(2)),
+      total_paid_amount: Number(totPaid.toFixed(2)),
+      total_pending_payables: Number(totPending.toFixed(2)),
+      total_tax_input_credit: Number(totTax.toFixed(2)),
+      by_supplier: Array.from(supMap.values()),
+    };
   }
 
   async receivePurchaseOrder(id: string, receiveData: {

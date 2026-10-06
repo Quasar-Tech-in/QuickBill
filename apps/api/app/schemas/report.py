@@ -38,3 +38,22 @@ class StockSummaryResponse(BaseSchema):
     total_items: int
     total_quantity: int
     total_valuation: Decimal
+
+class PurchasesBySupplierItem(BaseSchema):
+    supplier_id: str
+    supplier_name: str
+    orders_count: int
+    ordered_amount: Decimal
+    received_amount: Decimal
+    paid_amount: Decimal
+    pending_balance: Decimal
+
+class PurchasesSummaryResponse(BaseSchema):
+    total_orders_count: int
+    total_ordered_amount: Decimal
+    total_received_amount: Decimal
+    total_paid_amount: Decimal
+    total_pending_payables: Decimal
+    total_tax_input_credit: Decimal
+    by_supplier: List[PurchasesBySupplierItem] = []
+

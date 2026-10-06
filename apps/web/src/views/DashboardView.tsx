@@ -149,7 +149,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
   }, [parties]);
 
   const totalPayables = useMemo(() => {
-    return parties.filter(p => p.currentBalance < 0).reduce((s, p) => s + Math.abs(p.currentBalance), 0);
+    return parties.reduce((s, p) => {
+      if (p.currentPayable && p.currentPayable > 0) return s + p.currentPayable;
+      if (p.currentBalance && p.currentBalance < 0) return s + Math.abs(p.currentBalance);
+      if (p.balance && p.balance < 0) return s + Math.abs(p.balance);
+      return s;
+    }, 0);
   }, [parties]);
 
   // --- Top-Selling Products Aggregation ---

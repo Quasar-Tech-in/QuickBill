@@ -125,6 +125,8 @@ export interface Party {
   gstin?: string;
   address?: string;
   currentBalance: number; // Positive = Receivable, Negative = Payable
+  currentPayable?: number;
+  balance?: number;
   locationIds?: string[]; // Assigned locations (empty/null means Global / All Locations)
   locationId?: string;
   locationName?: string;
@@ -424,7 +426,7 @@ export interface PurchaseReceiptRecord {
   receivedAt: string;
   receivedBy: string;
   receivedByName?: string;
-  locationId: string;
+  locationId?: string;
   locationName?: string;
   notes?: string;
   itemsReceived: {
@@ -437,6 +439,17 @@ export interface PurchaseReceiptRecord {
     paymentMode: string;
     referenceNumber?: string;
   };
+}
+
+export interface PurchaseOrderPaymentRecord {
+  paymentId?: string;
+  paymentNumber?: string;
+  amount: number;
+  paymentMode: string;
+  referenceNumber?: string;
+  notes?: string;
+  paidAt: string;
+  paymentDate?: string;
 }
 
 export interface PurchaseOrder {
@@ -457,15 +470,41 @@ export interface PurchaseOrder {
   subtotal: number;
   taxTotal: number;
   grandTotal: number;
+  totalReceivedAmount?: number;
+  totalPaidAmount?: number;
+  balanceDue?: number;
+  paymentStatus?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'NO_DUES';
   notes?: string;
   terms?: string;
   cancellationReason?: string;
   receiptHistory?: PurchaseReceiptRecord[];
+  payments?: PurchaseOrderPaymentRecord[];
   createdAt: string;
   updatedAt?: string;
   createdBy?: string;
   createdByName?: string;
 }
+
+export interface PurchasesBySupplierItem {
+  supplier_id: string;
+  supplier_name: string;
+  orders_count: number;
+  ordered_amount: number;
+  received_amount: number;
+  paid_amount: number;
+  pending_balance: number;
+}
+
+export interface PurchasesSummaryReport {
+  total_orders_count: number;
+  total_ordered_amount: number;
+  total_received_amount: number;
+  total_paid_amount: number;
+  total_pending_payables: number;
+  total_tax_input_credit: number;
+  by_supplier: PurchasesBySupplierItem[];
+}
+
 
 
 

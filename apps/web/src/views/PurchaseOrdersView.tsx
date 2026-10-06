@@ -78,13 +78,16 @@ export const PurchaseOrdersView: React.FC = () => {
   const [isQuickSupplierModalOpen, setIsQuickSupplierModalOpen] = useState<boolean>(false);
   const [isQuickItemModalOpen, setIsQuickItemModalOpen] = useState<boolean>(false);
 
-  // Active PO for Actions (Receive / Cancel / View)
+  // Active PO for Actions (Receive / Cancel / View / Pay)
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
+  const [paymentTargetPO, setPaymentTargetPO] = useState<PurchaseOrder | null>(null);
 
   // Form State: Create Purchase Order
   const [newPO, setNewPO] = useState<{
     supplierId: string;
     locationId: string;
+    orderDate: string;
     expectedDeliveryDate: string;
     notes: string;
     terms: string;
@@ -97,10 +100,24 @@ export const PurchaseOrdersView: React.FC = () => {
   }>({
     supplierId: '',
     locationId: activeLocation?.id || (locations[0]?.id || ''),
+    orderDate: new Date().toISOString().split('T')[0],
     expectedDeliveryDate: '',
     notes: '',
     terms: 'Payment due within 30 days of goods receipt.',
     items: [],
+  });
+
+  // Form State: Record Standalone Supplier Payment
+  const [poPaymentForm, setPoPaymentForm] = useState<{
+    amount: number;
+    paymentMode: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE';
+    referenceNumber: string;
+    notes: string;
+  }>({
+    amount: 0,
+    paymentMode: 'BANK_TRANSFER',
+    referenceNumber: '',
+    notes: '',
   });
 
   // PO Form Search & Autocomplete States
@@ -328,6 +345,7 @@ export const PurchaseOrdersView: React.FC = () => {
     setNewPO({
       supplierId: '',
       locationId: defaultLocation,
+      orderDate: new Date().toISOString().split('T')[0],
       expectedDeliveryDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
       notes: '',
       terms: 'Payment due within 30 days of goods receipt.',
@@ -373,6 +391,7 @@ export const PurchaseOrdersView: React.FC = () => {
       await store.createPurchaseOrder({
         supplierId: newPO.supplierId,
         locationId: newPO.locationId,
+        orderDate: newPO.orderDate || undefined,
         expectedDeliveryDate: newPO.expectedDeliveryDate || undefined,
         items: parsedItems,
         notes: newPO.notes || undefined,
@@ -384,6 +403,49 @@ export const PurchaseOrdersView: React.FC = () => {
       loadData();
     } catch (err: any) {
       showNotification('error', err?.message || 'Failed to create purchase order');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openPaymentModal = (po: PurchaseOrder) => {
+    setPaymentTargetPO(po);
+    const balance = (po.balanceDue !== undefined && po.balanceDue > 0)
+      ? po.balanceDue
+      : ((po.totalReceivedAmount !== undefined && po.totalReceivedAmount > 0) ? po.totalReceivedAmount : po.grandTotal);
+    setPoPaymentForm({
+      amount: balance,
+      paymentMode: 'BANK_TRANSFER',
+      referenceNumber: '',
+      notes: `Payment for PO ${po.poNumber}`,
+    });
+    setIsPaymentModalOpen(true);
+  };
+
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentTargetPO) return;
+
+    if (poPaymentForm.amount <= 0) {
+      showNotification('error', 'Please specify a payment amount greater than 0.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await store.recordPurchaseOrderPayment(paymentTargetPO.id, {
+        amount: Number(poPaymentForm.amount),
+        paymentMode: poPaymentForm.paymentMode,
+        referenceNumber: poPaymentForm.referenceNumber || undefined,
+        notes: poPaymentForm.notes || undefined,
+      });
+
+      showNotification('success', `Payment of ₹${Number(poPaymentForm.amount).toFixed(2)} recorded for ${paymentTargetPO.poNumber}!`);
+      setIsPaymentModalOpen(false);
+      setPaymentTargetPO(null);
+      loadData();
+    } catch (err: any) {
+      showNotification('error', err?.message || 'Failed to record payment');
     } finally {
       setIsSaving(false);
     }
@@ -720,7 +782,16 @@ export const PurchaseOrdersView: React.FC = () => {
   const receivedCount = allPOs.filter(p => p.status === 'RECEIVED' || p.status === 'FULLY_RECEIVED').length;
   const totalSpend = allPOs
     .filter(p => p.status !== 'CANCELLED')
-    .reduce((sum, p) => sum + p.grandTotal, 0);
+    .reduce((sum, p) => sum + (p.grandTotal || 0), 0);
+  const totalReceivedSpend = allPOs
+    .filter(p => p.status !== 'CANCELLED')
+    .reduce((sum, p) => sum + (p.totalReceivedAmount !== undefined ? p.totalReceivedAmount : (p.status === 'RECEIVED' || p.status === 'FULLY_RECEIVED' ? p.grandTotal : 0)), 0);
+  const totalPaidSpend = allPOs
+    .filter(p => p.status !== 'CANCELLED')
+    .reduce((sum, p) => sum + (p.totalPaidAmount || 0), 0);
+  const totalPendingBalance = allPOs
+    .filter(p => p.status !== 'CANCELLED')
+    .reduce((sum, p) => sum + (p.balanceDue !== undefined ? p.balanceDue : Math.max(0, (p.totalReceivedAmount || 0) - (p.totalPaidAmount || 0))), 0);
 
   // Status Badge UI
   const renderStatusBadge = (status: PurchaseOrderStatus) => {
@@ -752,6 +823,31 @@ export const PurchaseOrdersView: React.FC = () => {
         );
       default:
         return <span className="badge">{status}</span>;
+    }
+  };
+
+  const renderPaymentStatusBadge = (po: PurchaseOrder) => {
+    const status = po.paymentStatus || (po.balanceDue !== undefined && po.totalReceivedAmount !== undefined ? (po.balanceDue === 0 && po.totalReceivedAmount > 0 ? 'PAID' : (po.totalPaidAmount && po.totalPaidAmount > 0 ? 'PARTIALLY_PAID' : 'UNPAID')) : 'UNPAID');
+    switch (status) {
+      case 'PAID':
+        return (
+          <span className="badge" style={{ backgroundColor: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', fontSize: '0.7rem' }}>
+            Paid
+          </span>
+        );
+      case 'PARTIALLY_PAID':
+        return (
+          <span className="badge" style={{ backgroundColor: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', fontSize: '0.7rem' }}>
+            Partially Paid
+          </span>
+        );
+      case 'UNPAID':
+      default:
+        return (
+          <span className="badge" style={{ backgroundColor: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', fontSize: '0.7rem' }}>
+            Unpaid
+          </span>
+        );
     }
   };
 
@@ -789,10 +885,10 @@ export const PurchaseOrdersView: React.FC = () => {
         <div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--neutral-900)', display: 'flex', alignItems: 'center', gap: 8 }}>
             <ShoppingBag size={24} color="var(--primary-600)" />
-            Purchase Orders
+            Purchase Orders & Vendor Payables
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-            Place orders with suppliers, receive incoming stock directly into branches, and manage vendor payables.
+            Place purchase orders, inward stock directly into branches, and track supplier ledger payments & pending dues.
           </p>
         </div>
 
@@ -828,16 +924,7 @@ export const PurchaseOrdersView: React.FC = () => {
           <div>
             <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Orders</div>
             <div style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--neutral-900)' }}>{totalCount}</div>
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', backgroundColor: 'var(--warning-50)', color: 'var(--warning-600)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Clock size={22} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Pending Inward</div>
-            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--warning-700)' }}>{pendingCount}</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Ordered: ₹{totalSpend.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           </div>
         </div>
 
@@ -846,8 +933,11 @@ export const PurchaseOrdersView: React.FC = () => {
             <PackageCheck size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Fully Received</div>
-            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#059669' }}>{receivedCount}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Inwarded Stock Value</div>
+            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#059669' }}>
+              ₹{totalReceivedSpend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#059669' }}>{receivedCount} fully received</div>
           </div>
         </div>
 
@@ -856,10 +946,24 @@ export const PurchaseOrdersView: React.FC = () => {
             <DollarSign size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Spend Volume</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Paid to Vendors</div>
             <div style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--primary-700)' }}>
-              ₹{totalSpend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₹{totalPaidSpend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Recorded payment out</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', backgroundColor: totalPendingBalance > 0 ? 'var(--danger-50)' : '#ecfdf5', color: totalPendingBalance > 0 ? 'var(--danger-600)' : '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Clock size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Outstanding Payables</div>
+            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: totalPendingBalance > 0 ? 'var(--danger-700)' : '#059669' }}>
+              ₹{totalPendingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Pending vendor settlement</div>
           </div>
         </div>
       </div>
@@ -960,7 +1064,8 @@ export const PurchaseOrdersView: React.FC = () => {
                 <th>Supplier (Vendor)</th>
                 <th>Receiving Branch</th>
                 <th>Inward Fulfillment</th>
-                <th style={{ textAlign: 'right' }}>Grand Total</th>
+                <th style={{ textAlign: 'right' }}>Order Value</th>
+                <th style={{ textAlign: 'right' }}>Inward &amp; Settlement</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
@@ -968,7 +1073,7 @@ export const PurchaseOrdersView: React.FC = () => {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--neutral-500)' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--neutral-500)' }}>
                     <div className="spin-animation" style={{ display: 'inline-block', marginBottom: 8 }}>
                       <RefreshCw size={24} color="var(--primary-600)" />
                     </div>
@@ -977,7 +1082,7 @@ export const PurchaseOrdersView: React.FC = () => {
                 </tr>
               ) : purchaseOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: 'var(--neutral-400)' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 48, color: 'var(--neutral-400)' }}>
                     <ShoppingBag size={36} color="var(--neutral-300)" style={{ margin: '0 auto 12px auto' }} />
                     <div style={{ fontWeight: 700, color: 'var(--neutral-700)', fontSize: '0.95rem' }}>No purchase orders found</div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', marginTop: 4 }}>
@@ -997,11 +1102,15 @@ export const PurchaseOrdersView: React.FC = () => {
                 </tr>
               ) : (
                 purchaseOrders.map((po) => {
-                  const totalOrdered = po.items.reduce((s, i) => s + i.orderedQty, 0);
-                  const totalReceived = po.items.reduce((s, i) => s + i.receivedQty, 0);
+                  const totalOrdered = (po.items || []).reduce((s, i) => s + (i.orderedQty || 0), 0);
+                  const totalReceived = (po.items || []).reduce((s, i) => s + (i.receivedQty || 0), 0);
                   const percent = totalOrdered > 0 ? Math.min(100, Math.round((totalReceived / totalOrdered) * 100)) : 0;
                   const canReceive = po.status === 'ORDERED' || po.status === 'PARTIALLY_RECEIVED';
                   const canCancel = po.status !== 'CANCELLED' && po.status !== 'RECEIVED' && po.status !== 'FULLY_RECEIVED';
+                  const receivedAmt = po.totalReceivedAmount !== undefined ? po.totalReceivedAmount : (po.status === 'RECEIVED' || po.status === 'FULLY_RECEIVED' ? po.grandTotal : 0);
+                  const paidAmt = po.totalPaidAmount || 0;
+                  const balanceDue = po.balanceDue !== undefined ? po.balanceDue : Math.max(0, receivedAmt - paidAmt);
+                  const canPay = po.status !== 'CANCELLED' && (balanceDue > 0 || (receivedAmt === 0 && paidAmt < po.grandTotal));
 
                   return (
                     <tr key={po.id}>
@@ -1044,7 +1153,7 @@ export const PurchaseOrdersView: React.FC = () => {
 
                       {/* Fulfillment Progress */}
                       <td>
-                        <div style={{ minWidth: 160 }}>
+                        <div style={{ minWidth: 150 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: 4 }}>
                             <span style={{ color: 'var(--neutral-500)' }}>{po.items.length} item{po.items.length > 1 ? 's' : ''}</span>
                             <span style={{ fontWeight: 700, color: 'var(--neutral-800)' }}>{totalReceived} / {totalOrdered} ({percent}%)</span>
@@ -1064,7 +1173,7 @@ export const PurchaseOrdersView: React.FC = () => {
 
                       {/* Grand Total */}
                       <td style={{ textAlign: 'right' }}>
-                        <div style={{ fontWeight: 800, color: 'var(--neutral-900)', fontFamily: 'var(--font-mono)', fontSize: '0.95rem' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--neutral-900)', fontFamily: 'var(--font-mono)', fontSize: '0.92rem' }}>
                           ₹{po.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
@@ -1072,14 +1181,32 @@ export const PurchaseOrdersView: React.FC = () => {
                         </div>
                       </td>
 
+                      {/* Inward & Settlement */}
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#059669', fontFamily: 'var(--font-mono)' }}>
+                          Inward: ₹{receivedAmt.toFixed(2)}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 1 }}>
+                          <span>Paid: ₹{paidAmt.toFixed(2)}</span>
+                          {balanceDue > 0 ? (
+                            <span style={{ color: 'var(--danger-600)', fontWeight: 700 }}>• Due: ₹{balanceDue.toFixed(2)}</span>
+                          ) : (
+                            <span style={{ color: '#059669', fontWeight: 600 }}>• Settled</span>
+                          )}
+                        </div>
+                      </td>
+
                       {/* Status */}
                       <td style={{ textAlign: 'center' }}>
-                        {renderStatusBadge(po.status)}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+                          {renderStatusBadge(po.status)}
+                          {po.status !== 'CANCELLED' && renderPaymentStatusBadge(po)}
+                        </div>
                       </td>
 
                       {/* Actions */}
                       <td style={{ textAlign: 'right' }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                           {canReceive && (
                             <button
                               onClick={() => openReceiveModal(po)}
@@ -1089,6 +1216,18 @@ export const PurchaseOrdersView: React.FC = () => {
                             >
                               <Truck size={13} />
                               <span>Receive</span>
+                            </button>
+                          )}
+
+                          {canPay && (
+                            <button
+                              onClick={() => openPaymentModal(po)}
+                              className="btn btn-sm btn-secondary"
+                              title="Record vendor payment towards this PO"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', color: 'var(--primary-700)', borderColor: 'var(--primary-200)', backgroundColor: 'var(--primary-50)' }}
+                            >
+                              <DollarSign size={13} />
+                              <span>Pay</span>
                             </button>
                           )}
 
@@ -1342,6 +1481,19 @@ export const PurchaseOrdersView: React.FC = () => {
                         <option key={loc.id} value={loc.id}>📍 {loc.name} ({loc.code})</option>
                       ))}
                     </select>
+                  </div>
+
+                  {/* Order Date */}
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ marginBottom: 4 }}>Order Date *</label>
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={newPO.orderDate}
+                      onChange={(e) => setNewPO({ ...newPO, orderDate: e.target.value })}
+                      required
+                      style={{ height: 38, fontSize: '0.82rem' }}
+                    />
                   </div>
 
                   {/* Expected Delivery Date */}
@@ -1850,7 +2002,24 @@ export const PurchaseOrdersView: React.FC = () => {
                     <input
                       type="checkbox"
                       checked={receiveForm.recordImmediatePayment}
-                      onChange={(e) => setReceiveForm({ ...receiveForm, recordImmediatePayment: e.target.checked })}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        let estVal = 0;
+                        if (checked && selectedPO) {
+                          receiveForm.items.forEach(it => {
+                            const poLine = (selectedPO.items || []).find(x => x.itemId === it.itemId);
+                            const price = poLine?.unitPrice || 0;
+                            const tax = poLine?.taxRate || 0;
+                            const sub = Number(it.qtyToReceive || 0) * price;
+                            estVal += sub + (sub * tax / 100);
+                          });
+                        }
+                        setReceiveForm(prev => ({
+                          ...prev,
+                          recordImmediatePayment: checked,
+                          paymentAmount: checked ? Number(estVal.toFixed(2)) : 0,
+                        }));
+                      }}
                     />
                     <span>Record immediate vendor payout for this receipt (Payment Out)</span>
                   </label>
@@ -1900,6 +2069,39 @@ export const PurchaseOrdersView: React.FC = () => {
                     </div>
                   )}
                 </div>
+
+                {/* Live Inward & Settlement Preview */}
+                {(() => {
+                  let estInwardVal = 0;
+                  receiveForm.items.forEach(it => {
+                    const poLine = (selectedPO.items || []).find(x => x.itemId === it.itemId);
+                    const price = poLine?.unitPrice || 0;
+                    const tax = poLine?.taxRate || 0;
+                    const sub = Number(it.qtyToReceive || 0) * price;
+                    estInwardVal += sub + (sub * tax / 100);
+                  });
+                  const paid = receiveForm.recordImmediatePayment ? Number(receiveForm.paymentAmount || 0) : 0;
+                  const netPayableAdded = Math.max(0, estInwardVal - paid);
+
+                  return (
+                    <div style={{ background: '#f8fafc', border: '1px solid var(--neutral-200)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', flexWrap: 'wrap', gap: 8 }}>
+                      <div>
+                        <span style={{ color: 'var(--neutral-500)' }}>Batch Inward Value: </span>
+                        <strong style={{ color: '#059669', fontFamily: 'var(--font-mono)' }}>₹{estInwardVal.toFixed(2)}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: 'var(--neutral-500)' }}>Immediate Payout: </span>
+                        <strong style={{ color: 'var(--primary-700)', fontFamily: 'var(--font-mono)' }}>₹{paid.toFixed(2)}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: 'var(--neutral-500)' }}>Net Vendor Payable Increase: </span>
+                        <strong style={{ color: netPayableAdded > 0 ? 'var(--danger-700)' : '#059669', fontFamily: 'var(--font-mono)' }}>
+                          ₹{netPayableAdded.toFixed(2)}
+                        </strong>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="modal-footer" style={{ padding: '14px 20px', borderTop: '1px solid var(--neutral-200)', display: 'flex', justifyContent: 'flex-end', gap: 10, background: 'var(--neutral-50)' }}>
@@ -2052,7 +2254,7 @@ export const PurchaseOrdersView: React.FC = () => {
                     const lineSub = it.orderedQty * it.unitPrice;
                     const lineTax = (lineSub * it.taxRate) / 100;
                     return (
-                      <tr key={it.itemId} style={{ borderBottom: '1px solid var(--neutral-100)' }}>
+                      <tr key={it.itemId || idx} style={{ borderBottom: '1px solid var(--neutral-100)' }}>
                         <td style={{ padding: '8px 10px', color: 'var(--neutral-400)' }}>{idx + 1}</td>
                         <td style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--neutral-800)' }}>
                           {it.name}
@@ -2069,9 +2271,9 @@ export const PurchaseOrdersView: React.FC = () => {
                 </tbody>
               </table>
 
-              {/* Totals */}
+              {/* Totals & Settlement Breakdown */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '16px 0' }}>
-                <div style={{ width: 260, display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.85rem' }}>
+                <div style={{ width: 300, display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.85rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--neutral-600)' }}>
                     <span>Subtotal:</span>
                     <span style={{ fontFamily: 'var(--font-mono)' }}>₹{selectedPO.subtotal.toFixed(2)}</span>
@@ -2080,9 +2282,21 @@ export const PurchaseOrdersView: React.FC = () => {
                     <span>Total Tax / GST:</span>
                     <span style={{ fontFamily: 'var(--font-mono)' }}>₹{selectedPO.taxTotal.toFixed(2)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.05rem', color: 'var(--neutral-900)', borderTop: '1px solid var(--neutral-300)', paddingTop: 6 }}>
-                    <span>Grand Total:</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1rem', color: 'var(--neutral-900)', borderTop: '1px solid var(--neutral-300)', paddingTop: 6 }}>
+                    <span>Grand Total (Ordered):</span>
                     <span style={{ color: 'var(--primary-700)', fontFamily: 'var(--font-mono)' }}>₹{selectedPO.grandTotal.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontSize: '0.84rem', fontWeight: 700 }}>
+                    <span>Inwarded Stock Value:</span>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>₹{(selectedPO.totalReceivedAmount || 0).toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--primary-700)', fontSize: '0.84rem', fontWeight: 700 }}>
+                    <span>Paid to Vendor:</span>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>₹{(selectedPO.totalPaidAmount || 0).toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: (selectedPO.balanceDue || 0) > 0 ? 'var(--danger-700)' : '#059669', fontWeight: 800, fontSize: '0.95rem', borderTop: '1px dashed var(--neutral-300)', paddingTop: 6 }}>
+                    <span>Outstanding Balance Due:</span>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>₹{(selectedPO.balanceDue || 0).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -2111,6 +2325,32 @@ export const PurchaseOrdersView: React.FC = () => {
                 </div>
               )}
 
+              {/* Payments Log */}
+              {selectedPO.payments && selectedPO.payments.length > 0 && (
+                <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--neutral-200)' }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--primary-700)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <DollarSign size={14} />
+                    Vendor Payment Records
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {selectedPO.payments.map((pmt, i) => (
+                      <div key={pmt.paymentId || i} style={{ padding: '8px 12px', borderRadius: 'var(--radius-sm)', background: '#ecfdf5', border: '1px solid #a7f3d0', fontSize: '0.78rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <strong>Payment #{i + 1}</strong> • {formatIsoToDisplay(pmt.paymentDate || pmt.paidAt)} via <strong>{pmt.paymentMode}</strong>
+                          {pmt.referenceNumber && <span style={{ color: 'var(--neutral-600)', marginLeft: 6 }}>[Ref: {pmt.referenceNumber}]</span>}
+                          {pmt.notes && <span style={{ color: 'var(--neutral-500)', marginLeft: 6 }}>({pmt.notes})</span>}
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ color: '#059669', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
+                            ₹{pmt.amount.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Signatures */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginTop: 40, paddingTop: 16, borderTop: '1px solid var(--neutral-200)', fontSize: '0.8rem' }}>
                 <div>
@@ -2123,6 +2363,119 @@ export const PurchaseOrdersView: React.FC = () => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. RECORD STANDALONE PO PAYMENT MODAL */}
+      {/* ========================================================================= */}
+      {isPaymentModalOpen && paymentTargetPO && (
+        <div className="modal-overlay" style={{ zIndex: 100000 }} onClick={() => !isSaving && setIsPaymentModalOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="card-header" style={{ backgroundColor: 'var(--primary-50)', borderBottomColor: 'var(--primary-200)' }}>
+              <div>
+                <span className="card-title" style={{ color: 'var(--primary-800)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <DollarSign size={18} />
+                  Record Supplier Payment: {paymentTargetPO.poNumber}
+                </span>
+                <p style={{ fontSize: '0.78rem', color: 'var(--neutral-600)', marginTop: 2 }}>
+                  Paying vendor <strong>{paymentTargetPO.supplierName}</strong> for procurement order.
+                </p>
+              </div>
+              <button className="btn btn-secondary btn-icon" onClick={() => setIsPaymentModalOpen(false)} disabled={isSaving}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleRecordPayment}>
+              <div className="modal-body" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Financial Summary Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, padding: 10, background: 'var(--neutral-50)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)', textAlign: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Inward Value</div>
+                    <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#059669', fontFamily: 'var(--font-mono)' }}>
+                      ₹{(paymentTargetPO.totalReceivedAmount || 0).toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Already Paid</div>
+                    <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--primary-700)', fontFamily: 'var(--font-mono)' }}>
+                      ₹{(paymentTargetPO.totalPaidAmount || 0).toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Balance Due</div>
+                    <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--danger-600)', fontFamily: 'var(--font-mono)' }}>
+                      ₹{(paymentTargetPO.balanceDue || 0).toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Payment Amount (₹) *</label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="any"
+                    required
+                    className="form-input"
+                    style={{ height: 38, fontFamily: 'var(--font-mono)', fontSize: '0.95rem', fontWeight: 700 }}
+                    value={poPaymentForm.amount ?? ''}
+                    onChange={(e) => setPoPaymentForm({ ...poPaymentForm, amount: e.target.value as any })}
+                    autoFocus
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Payment Mode *</label>
+                  <select
+                    className="form-select"
+                    style={{ height: 38 }}
+                    value={poPaymentForm.paymentMode}
+                    onChange={(e: any) => setPoPaymentForm({ ...poPaymentForm, paymentMode: e.target.value })}
+                  >
+                    <option value="BANK_TRANSFER">Bank Transfer / NEFT / RTGS</option>
+                    <option value="UPI">UPI / QR Code</option>
+                    <option value="CASH">Cash</option>
+                    <option value="CARD">Debit / Credit Card</option>
+                    <option value="CHEQUE">Cheque</option>
+                  </select>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">UTR / Reference / Cheque #</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. UTR-98210398231"
+                    value={poPaymentForm.referenceNumber}
+                    onChange={(e) => setPoPaymentForm({ ...poPaymentForm, referenceNumber: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Payment Notes</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Partial settlement for invoice #992"
+                    value={poPaymentForm.notes}
+                    onChange={(e) => setPoPaymentForm({ ...poPaymentForm, notes: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer" style={{ padding: '14px 20px', borderTop: '1px solid var(--neutral-200)', display: 'flex', justifyContent: 'flex-end', gap: 10, background: 'var(--neutral-50)' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsPaymentModalOpen(false)} disabled={isSaving}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                  {isSaving ? <RefreshCw size={14} className="spin-animation" /> : <CheckCircle2 size={16} />}
+                  <span>Confirm Payment Out</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

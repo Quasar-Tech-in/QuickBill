@@ -207,6 +207,16 @@ export interface PurchaseOrderItem {
   totalAmount: number;
 }
 
+export interface PurchaseOrderPayment {
+  paymentId: string;
+  amount: number;
+  paymentMode: string;
+  referenceNumber?: string;
+  notes?: string;
+  paymentDate: string;
+  recordedBy?: string;
+}
+
 export interface PurchaseOrder {
   id: string;
   poNumber: string;
@@ -221,10 +231,15 @@ export interface PurchaseOrder {
   orderDate: string;
   expectedDeliveryDate?: string;
   status: PurchaseOrderStatus;
+  paymentStatus?: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
   items: PurchaseOrderItem[];
   subtotal: number;
   taxTotal: number;
   grandTotal: number;
+  totalReceivedAmount?: number;
+  totalPaidAmount?: number;
+  balanceDue?: number;
+  payments?: PurchaseOrderPayment[];
   notes?: string;
   createdAt: string;
 }

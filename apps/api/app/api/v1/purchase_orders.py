@@ -12,7 +12,9 @@ from app.schemas.purchase_orders import (
     PurchaseOrderResponse,
     ReceiveGoodsRequest,
     CancelPORequest,
+    RecordPOPaymentRequest,
     PurchaseReceiptHistoryRecord,
+    PurchaseOrderPaymentRecord,
     PurchaseOrderItemResponse
 )
 
@@ -60,8 +62,40 @@ def _to_po_response(doc: dict) -> PurchaseOrderResponse:
             items=r.get("items", []),
             totalAmountReceived=float(r.get("totalAmountReceived", 0.0)),
             amountPaid=float(r.get("amountPaid", 0.0)),
-            paymentMode=r.get("paymentMode")
+            paymentMode=r.get("paymentMode"),
+            referenceNumber=r.get("referenceNumber")
         ))
+
+    payments = []
+    for p in doc.get("payments", []):
+        payments.append(PurchaseOrderPaymentRecord(
+            paymentId=str(p.get("paymentId", "")),
+            paymentNumber=p.get("paymentNumber"),
+            amount=float(p.get("amount", 0.0)),
+            paymentMode=p.get("paymentMode", "BANK_TRANSFER"),
+            referenceNumber=p.get("referenceNumber"),
+            notes=p.get("notes"),
+            paidAt=str(p.get("paidAt", ""))
+        ))
+
+    created_at_raw = doc.get("createdAt")
+    created_at_str = created_at_raw.isoformat() if isinstance(created_at_raw, datetime) else str(created_at_raw or "")
+    
+    order_date = doc.get("orderDate") or (created_at_str.split("T")[0] if created_at_str else datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    tot_rec = float(doc.get("totalReceivedAmount", 0.0))
+    tot_paid = float(doc.get("totalPaidAmount", 0.0))
+    bal_due = max(0.0, round(tot_rec - tot_paid, 2)) if tot_rec > 0 else 0.0
+
+    pmt_status = doc.get("paymentStatus")
+    if not pmt_status:
+        if tot_rec <= 0:
+            pmt_status = "NO_DUES"
+        elif tot_paid >= (tot_rec - 0.01):
+            pmt_status = "PAID"
+        elif tot_paid > 0:
+            pmt_status = "PARTIALLY_PAID"
+        else:
+            pmt_status = "UNPAID"
 
     tax_amt = float(doc.get("taxAmount", doc.get("taxTotal", 0.0)))
     return PurchaseOrderResponse(
@@ -74,6 +108,7 @@ def _to_po_response(doc: dict) -> PurchaseOrderResponse:
         locationId=str(doc.get("locationId", "")),
         locationName=doc.get("locationName", "Main Branch"),
         status=doc.get("status", "ORDERED"),
+        orderDate=order_date,
         expectedDeliveryDate=doc.get("expectedDeliveryDate"),
         notes=doc.get("notes"),
         terms=doc.get("terms"),
@@ -83,11 +118,15 @@ def _to_po_response(doc: dict) -> PurchaseOrderResponse:
         taxAmount=tax_amt,
         taxTotal=tax_amt,
         grandTotal=float(doc.get("grandTotal", 0.0)),
-        totalReceivedAmount=float(doc.get("totalReceivedAmount", 0.0)),
+        totalReceivedAmount=tot_rec,
+        totalPaidAmount=tot_paid,
+        balanceDue=bal_due,
+        paymentStatus=pmt_status,
         receipts=receipts,
+        payments=payments,
         createdByUserId=str(doc.get("createdByUserId", "")) if doc.get("createdByUserId") else None,
         createdByName=doc.get("createdByName"),
-        createdAt=doc.get("createdAt").isoformat() if isinstance(doc.get("createdAt"), datetime) else str(doc.get("createdAt", "")),
+        createdAt=created_at_str,
         updatedAt=doc.get("updatedAt").isoformat() if isinstance(doc.get("updatedAt"), datetime) else str(doc.get("updatedAt", ""))
     )
 
@@ -137,12 +176,51 @@ async def list_purchase_orders(
         })
 
     if from_date or to_date:
-        date_cond: dict = {}
+        from_dt = None
+        to_dt = None
         if from_date:
-            date_cond["$gte"] = from_date
+            try:
+                clean_from = from_date.split("T")[0]
+                parts = [int(p) for p in clean_from.split("-")]
+                from_dt = datetime(parts[0], parts[1], parts[2], 0, 0, 0, tzinfo=timezone.utc)
+            except Exception:
+                pass
         if to_date:
-            date_cond["$lte"] = f"{to_date}T23:59:59.999Z" if "T" not in to_date else to_date
-        conditions.append({"createdAt": date_cond})
+            try:
+                clean_to = to_date.split("T")[0]
+                parts = [int(p) for p in clean_to.split("-")]
+                to_dt = datetime(parts[0], parts[1], parts[2], 23, 59, 59, 999999, tzinfo=timezone.utc)
+            except Exception:
+                pass
+
+        created_dt_match: dict = {}
+        created_str_match: dict = {}
+        order_str_match: dict = {}
+
+        if from_dt:
+            created_dt_match["$gte"] = from_dt
+        if to_dt:
+            created_dt_match["$lte"] = to_dt
+
+        if from_date:
+            clean_f = from_date.split("T")[0]
+            created_str_match["$gte"] = clean_f
+            order_str_match["$gte"] = clean_f
+        if to_date:
+            clean_t = to_date.split("T")[0]
+            created_str_match["$lte"] = f"{clean_t}T23:59:59.999Z"
+            order_str_match["$lte"] = clean_t
+
+        date_or = []
+        if created_dt_match:
+            date_or.append({"createdAt": created_dt_match})
+        if created_str_match:
+            date_or.append({"createdAt": created_str_match})
+        if order_str_match:
+            date_or.append({"orderDate": order_str_match})
+
+        if date_or:
+            conditions.append({"$or": date_or})
 
     query = {"$and": conditions}
 
@@ -268,6 +346,8 @@ async def create_purchase_order(
 
     grand_total = round(subtotal + tax_total, 2)
 
+    order_date = payload.orderDate or payload.order_date or now.strftime("%Y-%m-%d")
+
     po_doc = {
         "businessId": b_oid,
         "poNumber": po_number,
@@ -277,6 +357,7 @@ async def create_purchase_order(
         "locationId": location_id,
         "locationName": loc_name,
         "status": payload.status or "ORDERED",
+        "orderDate": order_date,
         "expectedDeliveryDate": payload.expectedDeliveryDate or payload.expected_delivery_date,
         "notes": payload.notes,
         "terms": payload.terms,
@@ -285,7 +366,11 @@ async def create_purchase_order(
         "taxAmount": round(tax_total, 2),
         "grandTotal": grand_total,
         "totalReceivedAmount": 0.0,
+        "totalPaidAmount": 0.0,
+        "balanceDue": 0.0,
+        "paymentStatus": "NO_DUES",
         "receipts": [],
+        "payments": [],
         "createdByUserId": current_user.sub,
         "createdByName": current_user.email.split("@")[0] if current_user.email else "Admin",
         "createdAt": now,
@@ -364,6 +449,8 @@ async def update_purchase_order(
         update_fields["locationId"] = payload.locationId
     if payload.locationName is not None:
         update_fields["locationName"] = payload.locationName
+    if payload.orderDate is not None or payload.order_date is not None:
+        update_fields["orderDate"] = payload.orderDate or payload.order_date
     if payload.expectedDeliveryDate is not None:
         update_fields["expectedDeliveryDate"] = payload.expectedDeliveryDate
     if payload.notes is not None:
@@ -587,13 +674,15 @@ async def receive_purchase_order_goods(
             "totalCost": round(item_batch_cost, 2)
         })
 
-    # 4. Record Receipt History
+    # 4. Record Receipt History & Payments
     payment_obj = payload.paymentDetails or payload.payment_details or payload.payment
     amount_paid_now = 0.0
     pay_mode = "CREDIT"
+    ref_no = None
     if payment_obj:
         amount_paid_now = float(payment_obj.amountPaid if payment_obj.amountPaid is not None else (payment_obj.amount_paid if payment_obj.amount_paid is not None else (payment_obj.amount or 0.0)))
         pay_mode = payment_obj.paymentMode or payment_obj.payment_mode or "CASH"
+        ref_no = payment_obj.referenceNumber or payment_obj.reference_number
 
     receipt_record = {
         "receiptId": f"rcpt_{secrets.token_hex(6)}",
@@ -604,11 +693,25 @@ async def receive_purchase_order_goods(
         "items": receipt_items_record,
         "totalAmountReceived": round(total_received_amount_this_batch, 2),
         "amountPaid": round(amount_paid_now, 2),
-        "paymentMode": pay_mode
+        "paymentMode": pay_mode,
+        "referenceNumber": ref_no
     }
 
     all_receipts = list(po_doc.get("receipts") or [])
     all_receipts.append(receipt_record)
+
+    all_payments = list(po_doc.get("payments") or [])
+    payment_number = f"PAY-{now.year}-{secrets.token_hex(3).upper()}"
+    if amount_paid_now > 0:
+        all_payments.append({
+            "paymentId": f"pay_{secrets.token_hex(6)}",
+            "paymentNumber": payment_number,
+            "amount": round(amount_paid_now, 2),
+            "paymentMode": pay_mode,
+            "referenceNumber": ref_no,
+            "notes": f"Payment on goods receipt for PO {po_number}",
+            "paidAt": now.isoformat()
+        })
 
     # 5. Financial Ledger & Supplier Payables Integration
     if supplier_id:
@@ -618,20 +721,23 @@ async def receive_purchase_order_goods(
                 {"$or": [{"_id": ObjectId(supplier_id) if ObjectId.is_valid(supplier_id) else supplier_id}, {"id": supplier_id}]}
             ]
         }
-        supplier_doc = await db.parties.find_one(supplier_query)
-        if supplier_doc:
-            current_balance = float(supplier_doc.get("balance", 0.0) or 0.0)
-            net_payable_delta = total_received_amount_this_batch - amount_paid_now
-            await db.parties.update_one(
-                {"_id": supplier_doc["_id"]},
-                {"$set": {"balance": round(current_balance + net_payable_delta, 2), "updatedAt": now}}
-            )
+        net_payable_delta = total_received_amount_this_batch - amount_paid_now
+        await db.parties.update_one(
+            supplier_query,
+            {"$inc": {
+                "currentPayable": round(net_payable_delta, 2),
+                "balance": round(net_payable_delta, 2)
+            }, "$set": {"updatedAt": now}}
+        )
 
         if amount_paid_now > 0:
             payment_doc = {
                 "businessId": b_oid,
-                "partyId": supplier_id,
+                "paymentNumber": payment_number,
+                "partyId": ObjectId(supplier_id) if ObjectId.is_valid(supplier_id) else supplier_id,
+                "partyNameSnapshot": supplier_name,
                 "partyName": supplier_name,
+                "direction": "OUT",
                 "type": "PAYMENT_OUT",
                 "amount": round(amount_paid_now, 2),
                 "paymentMode": pay_mode,
@@ -639,11 +745,12 @@ async def receive_purchase_order_goods(
                 "referenceId": str(po_doc["_id"]),
                 "referenceNumber": po_number,
                 "notes": f"Payment for PO {po_number} goods receipt",
+                "paidAt": now,
                 "createdAt": now
             }
             await db.payments.insert_one(payment_doc)
 
-    # 6. Check Overall PO Completion Status
+    # 6. Check Overall PO Completion Status & Balances
     all_fully_received = True
     for it in po_items:
         ordered = float(it.get("orderedQuantity", 0.0))
@@ -653,15 +760,142 @@ async def receive_purchase_order_goods(
             break
 
     new_po_status = "FULLY_RECEIVED" if all_fully_received else "PARTIALLY_RECEIVED"
-    total_cum_received = float(po_doc.get("totalReceivedAmount", 0.0) or 0.0) + total_received_amount_this_batch
+    total_cum_received = round(float(po_doc.get("totalReceivedAmount", 0.0) or 0.0) + total_received_amount_this_batch, 2)
+    total_cum_paid = round(float(po_doc.get("totalPaidAmount", 0.0) or 0.0) + amount_paid_now, 2)
+    balance_due = max(0.0, round(total_cum_received - total_cum_paid, 2))
+
+    if balance_due <= 0.001 and total_cum_received > 0:
+        pmt_status = "PAID"
+    elif total_cum_paid > 0:
+        pmt_status = "PARTIALLY_PAID"
+    else:
+        pmt_status = "UNPAID" if total_cum_received > 0 else "NO_DUES"
 
     await db.purchase_orders.update_one(
         {"_id": po_doc["_id"]},
         {"$set": {
             "items": po_items,
             "status": new_po_status,
-            "totalReceivedAmount": round(total_cum_received, 2),
+            "totalReceivedAmount": total_cum_received,
+            "totalPaidAmount": total_cum_paid,
+            "balanceDue": balance_due,
+            "paymentStatus": pmt_status,
             "receipts": all_receipts,
+            "payments": all_payments,
+            "updatedAt": now
+        }}
+    )
+
+    updated_po = await db.purchase_orders.find_one({"_id": po_doc["_id"]})
+    return _to_po_response(updated_po)
+
+
+@router.post("/{po_id}/payments", response_model=PurchaseOrderResponse)
+async def record_purchase_order_payment(
+    po_id: str,
+    payload: RecordPOPaymentRequest,
+    business_id: str = Depends(get_current_business_id),
+    current_user: TokenPayload = Depends(get_current_user)
+):
+    db = await get_tenant_db(business_id)
+    b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else business_id
+    now = datetime.now(timezone.utc)
+
+    query = {
+        "$and": [
+            {"$or": [{"businessId": b_oid}, {"businessId": business_id}]},
+            {"$or": [{"_id": ObjectId(po_id) if ObjectId.is_valid(po_id) else po_id}, {"id": po_id}]}
+        ]
+    }
+
+    po_doc = await db.purchase_orders.find_one(query)
+    if not po_doc:
+        raise HTTPException(status_code=404, detail="Purchase Order not found.")
+
+    if po_doc.get("status") == "CANCELLED":
+        raise HTTPException(status_code=400, detail="Cannot record payments for a CANCELLED purchase order.")
+
+    pay_amount = float(payload.amount)
+    if pay_amount <= 0:
+        raise HTTPException(status_code=400, detail="Payment amount must be greater than zero.")
+
+    supplier_id = str(po_doc.get("supplierId", ""))
+    supplier_name = str(po_doc.get("supplierName", "Supplier"))
+    po_number = str(po_doc.get("poNumber", f"PO-{str(po_doc['_id'])[:8].upper()}"))
+
+    payment_mode = payload.paymentMode or payload.payment_mode or "BANK_TRANSFER"
+    ref_number = payload.referenceNumber or payload.reference_number
+    notes = payload.notes or f"Payment towards PO {po_number}"
+    paid_at = payload.paidAt or payload.paid_at or now.isoformat()
+
+    # 1. Insert into discrete payments collection
+    payment_number = f"PAY-{now.year}-{secrets.token_hex(3).upper()}"
+    payment_doc = {
+        "businessId": b_oid,
+        "paymentNumber": payment_number,
+        "direction": "OUT",
+        "type": "PAYMENT_OUT",
+        "partyId": ObjectId(supplier_id) if ObjectId.is_valid(supplier_id) else supplier_id,
+        "partyNameSnapshot": supplier_name,
+        "partyName": supplier_name,
+        "amount": round(pay_amount, 2),
+        "paymentMode": payment_mode,
+        "referenceType": "PURCHASE_ORDER",
+        "referenceId": str(po_doc["_id"]),
+        "referenceNumber": po_number,
+        "notes": notes,
+        "paidAt": paid_at,
+        "createdAt": now
+    }
+    await db.payments.insert_one(payment_doc)
+
+    # 2. Update Supplier Party Balance (reduce payable)
+    if supplier_id:
+        supplier_query = {
+            "$and": [
+                {"$or": [{"businessId": b_oid}, {"businessId": business_id}]},
+                {"$or": [{"_id": ObjectId(supplier_id) if ObjectId.is_valid(supplier_id) else supplier_id}, {"id": supplier_id}]}
+            ]
+        }
+        await db.parties.update_one(
+            supplier_query,
+            {"$inc": {
+                "currentPayable": -round(pay_amount, 2),
+                "balance": -round(pay_amount, 2)
+            }, "$set": {"updatedAt": now}}
+        )
+
+    # 3. Update PO totals & payment status
+    existing_payments = list(po_doc.get("payments") or [])
+    existing_payments.append({
+        "paymentId": f"pay_{secrets.token_hex(6)}",
+        "paymentNumber": payment_number,
+        "amount": round(pay_amount, 2),
+        "paymentMode": payment_mode,
+        "referenceNumber": ref_number,
+        "notes": notes,
+        "paidAt": paid_at
+    })
+
+    tot_rec = float(po_doc.get("totalReceivedAmount", 0.0) or 0.0)
+    old_paid = float(po_doc.get("totalPaidAmount", 0.0) or 0.0)
+    new_tot_paid = round(old_paid + pay_amount, 2)
+    new_bal_due = max(0.0, round(tot_rec - new_tot_paid, 2))
+
+    if new_bal_due <= 0.001 and tot_rec > 0:
+        new_pmt_status = "PAID"
+    elif new_tot_paid > 0:
+        new_pmt_status = "PARTIALLY_PAID"
+    else:
+        new_pmt_status = "UNPAID" if tot_rec > 0 else "NO_DUES"
+
+    await db.purchase_orders.update_one(
+        {"_id": po_doc["_id"]},
+        {"$set": {
+            "totalPaidAmount": new_tot_paid,
+            "balanceDue": new_bal_due,
+            "paymentStatus": new_pmt_status,
+            "payments": existing_payments,
             "updatedAt": now
         }}
     )

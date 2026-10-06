@@ -20,10 +20,10 @@ import {
 } from 'lucide-react';
 import { DateRangePicker, DateRangeValue, calculatePresetDates, formatIsoToDisplay } from '../components/DateRangePicker';
 import { store } from '../services/store';
-import { Invoice, Item, Expense, StoreLocation } from '../types';
+import { Invoice, Item, Expense, StoreLocation, PurchaseOrder, Party } from '../types';
 
-type ReportType = 'PNL' | 'STOCK_VALUATION' | 'DAY_BOOK';
-const VALID_REPORT_TYPES: ReportType[] = ['PNL', 'STOCK_VALUATION', 'DAY_BOOK'];
+type ReportType = 'PNL' | 'STOCK_VALUATION' | 'DAY_BOOK' | 'PURCHASES';
+const VALID_REPORT_TYPES: ReportType[] = ['PNL', 'STOCK_VALUATION', 'DAY_BOOK', 'PURCHASES'];
 
 export const ReportsView: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -52,6 +52,8 @@ export const ReportsView: React.FC = () => {
   const [items, setItems] = useState<Item[]>(store.getItems(selectedLocationId, true));
   const [expenses, setExpenses] = useState<Expense[]>(() => store.getExpenses(selectedLocationId));
   const [locations, setLocations] = useState<StoreLocation[]>(() => store.getAllLocations());
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => store.getPurchaseOrders(selectedLocationId));
+  const [parties, setParties] = useState<Party[]>(() => store.getParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId));
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -60,16 +62,20 @@ export const ReportsView: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [invData, itemData, expData, locs] = await Promise.all([
+      const [invData, itemData, expData, locs, poData, partyData] = await Promise.all([
         store.fetchInvoices(selectedLocationId),
         store.fetchItems(selectedLocationId),
         store.fetchExpenses(selectedLocationId),
-        store.fetchLocations()
+        store.fetchLocations(),
+        store.fetchPurchaseOrders({ location_id: selectedLocationId === 'ALL' ? undefined : selectedLocationId }),
+        store.fetchParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId)
       ]);
       setInvoices(invData);
       setItems(itemData);
       setExpenses(expData);
       setLocations(locs);
+      setPurchaseOrders(poData.data || []);
+      setParties(partyData || []);
       
       // Extract unique categories
       const cats = Array.from(new Set(itemData.map(i => i.category).filter(Boolean)));
@@ -87,6 +93,8 @@ export const ReportsView: React.FC = () => {
     setItems(store.getItems(selectedLocationId, true));
     setExpenses(store.getExpenses(selectedLocationId));
     setLocations(store.getAllLocations());
+    setPurchaseOrders(store.getPurchaseOrders(selectedLocationId));
+    setParties(store.getParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId));
     
     // Fetch live from backend
     loadData();
@@ -210,6 +218,47 @@ export const ReportsView: React.FC = () => {
   const filteredRetailValuation = filteredItems.reduce((s, i) => s + ((Number(i.currentStock) || 0) * (Number(i.salePrice) || 0)), 0);
   const filteredProfit = filteredRetailValuation - filteredCostValuation;
 
+  // --- Procurement & Purchases Metrics ---
+  const filteredPOs = useMemo(() => {
+    return purchaseOrders.filter(po => {
+      const poDate = po.orderDate || (po.createdAt ? po.createdAt.split('T')[0] : '');
+      if (dateRange.preset === 'ALL') return true;
+      if (dateRange.fromDate && poDate < dateRange.fromDate) return false;
+      if (dateRange.toDate && poDate > dateRange.toDate) return false;
+      return true;
+    });
+  }, [purchaseOrders, dateRange]);
+
+  const totalPOOrdered = filteredPOs
+    .filter(p => p.status !== 'CANCELLED')
+    .reduce((s, p) => s + (Number(p.grandTotal) || 0), 0);
+  const totalPOReceived = filteredPOs
+    .filter(p => p.status !== 'CANCELLED')
+    .reduce((s, p) => s + (p.totalReceivedAmount !== undefined ? p.totalReceivedAmount : (p.status === 'RECEIVED' || p.status === 'FULLY_RECEIVED' ? p.grandTotal : 0)), 0);
+  const totalPOPaid = filteredPOs
+    .filter(p => p.status !== 'CANCELLED')
+    .reduce((s, p) => s + (Number(p.totalPaidAmount) || 0), 0);
+  const totalPOBalance = filteredPOs
+    .filter(p => p.status !== 'CANCELLED')
+    .reduce((s, p) => s + (p.balanceDue !== undefined ? p.balanceDue : Math.max(0, (p.totalReceivedAmount || 0) - (p.totalPaidAmount || 0))), 0);
+  const totalPOInputTax = filteredPOs
+    .filter(p => p.status !== 'CANCELLED')
+    .reduce((s, p) => s + (Number(p.taxTotal) || 0), 0);
+
+  // Supplier payables breakdown
+  const supplierPayables = useMemo(() => {
+    return parties.filter(p => p.type === 'SUPPLIER' || (p.currentPayable && p.currentPayable > 0) || (p.currentBalance && p.currentBalance < 0) || (p.balance && p.balance < 0)).map(sup => {
+      const payable = sup.currentPayable !== undefined && sup.currentPayable > 0 ? sup.currentPayable : (sup.currentBalance && sup.currentBalance < 0 ? Math.abs(sup.currentBalance) : (sup.balance && sup.balance < 0 ? Math.abs(sup.balance) : 0));
+      return {
+        id: sup.id,
+        name: sup.name,
+        phone: sup.phone,
+        gstin: sup.gstin,
+        payable,
+      };
+    }).sort((a, b) => b.payable - a.payable);
+  }, [parties]);
+
   // Export CSV
   const handleExportCSV = () => {
     let csvContent = 'data:text/csv;charset=utf-8,';
@@ -234,6 +283,14 @@ export const ReportsView: React.FC = () => {
       csvContent += `"Gross Trading Margin",${grossProfit.toFixed(2)},"Net Sales minus COGS"\n`;
       csvContent += `"Less: Operating Expenses",-${operatingExpenses.toFixed(2)},"Store operations, rent, utilities, staff"\n`;
       csvContent += `"Net Profit / (Loss)",${netProfit.toFixed(2)},"Bottom-line profit"\n`;
+    } else if (reportType === 'PURCHASES') {
+      csvContent += 'PO Number,Order Date,Expected Delivery,Supplier,Branch,Ordered Total,Inwarded Value,Paid Amount,Balance Due,Status,Payment Status\n';
+      filteredPOs.forEach(p => {
+        const received = p.totalReceivedAmount !== undefined ? p.totalReceivedAmount : (p.status === 'RECEIVED' || p.status === 'FULLY_RECEIVED' ? p.grandTotal : 0);
+        const paid = p.totalPaidAmount || 0;
+        const due = p.balanceDue !== undefined ? p.balanceDue : Math.max(0, received - paid);
+        csvContent += `"${p.poNumber}","${p.orderDate}","${p.expectedDeliveryDate || ''}","${p.supplierName.replace(/"/g, '""')}","${p.locationName || 'Main Branch'}",${p.grandTotal.toFixed(2)},${received.toFixed(2)},${paid.toFixed(2)},${due.toFixed(2)},"${p.status}","${p.paymentStatus || 'UNPAID'}"\n`;
+      });
     } else {
       csvContent += 'Invoice Number,Date,Branch,Party,Payment Mode,Taxable Subtotal,GST Total,Grand Total,Status\n';
       invoices.forEach(i => {
@@ -313,9 +370,10 @@ export const ReportsView: React.FC = () => {
       </div>
 
       {/* Report Switcher Tabs */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         {[
           { id: 'PNL', label: '📊 Profit & Loss Statement' },
+          { id: 'PURCHASES', label: '🛒 Purchases & Vendor Ledger' },
           { id: 'STOCK_VALUATION', label: '📦 Inventory Valuation' },
           { id: 'DAY_BOOK', label: '📅 Day Book Sales Ledger' },
         ].map((tab) => (
@@ -755,6 +813,243 @@ export const ReportsView: React.FC = () => {
                   </tfoot>
                 )}
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Purchases & Vendor Ledger View */}
+      {reportType === 'PURCHASES' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Top KPI Cards Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+            {/* Total Ordered */}
+            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--primary-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-600)' }}>
+                <Layers size={22} />
+              </div>
+              <div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>Purchase Orders</span>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--neutral-900)', marginTop: 2 }}>
+                  ₹{totalPOOrdered.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>{filteredPOs.length} total orders</span>
+              </div>
+            </div>
+
+            {/* Inwarded Stock Value */}
+            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(16, 185, 129, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--success-600)' }}>
+                <CheckCircle2 size={22} />
+              </div>
+              <div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>Inwarded Value</span>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--success-700)', marginTop: 2 }}>
+                  ₹{totalPOReceived.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Received into branch stock</span>
+              </div>
+            </div>
+
+            {/* Paid to Suppliers */}
+            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--primary-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-700)' }}>
+                <DollarSign size={22} />
+              </div>
+              <div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>Paid to Vendors</span>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--primary-700)', marginTop: 2 }}>
+                  ₹{totalPOPaid.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Total payouts recorded</span>
+              </div>
+            </div>
+
+            {/* Outstanding Payables */}
+            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: totalPOBalance > 0 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: totalPOBalance > 0 ? 'var(--danger-600)' : 'var(--success-600)' }}>
+                <AlertTriangle size={22} />
+              </div>
+              <div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>Vendor Payables Due</span>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: totalPOBalance > 0 ? 'var(--danger-700)' : 'var(--success-700)', marginTop: 2 }}>
+                  ₹{totalPOBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>Pending settlement balance</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Purchases Register Table */}
+          <div className="card">
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <h3 className="card-title">Purchases &amp; Procurement Register ({selectedLocationId === 'ALL' ? 'All Branches Consolidated' : activeLocObj?.name})</h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                  Itemized list of vendor purchase orders with goods inward value and settlement status
+                </p>
+              </div>
+            </div>
+
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>PO Number &amp; Date</th>
+                    <th>Supplier (Vendor)</th>
+                    <th>Receiving Branch</th>
+                    <th style={{ textAlign: 'right' }}>Ordered (₹)</th>
+                    <th style={{ textAlign: 'right' }}>Inwarded (₹)</th>
+                    <th style={{ textAlign: 'right' }}>Paid (₹)</th>
+                    <th style={{ textAlign: 'right' }}>Balance Due (₹)</th>
+                    <th style={{ textAlign: 'center' }}>Fulfillment</th>
+                    <th style={{ textAlign: 'center' }}>Payment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPOs.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--neutral-400)' }}>
+                        <Package size={36} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
+                        <p style={{ fontWeight: 600 }}>No purchase orders found for this date range and branch.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPOs.map((po) => {
+                      const receivedAmt = po.totalReceivedAmount !== undefined ? po.totalReceivedAmount : (po.status === 'RECEIVED' || po.status === 'FULLY_RECEIVED' ? po.grandTotal : 0);
+                      const paidAmt = po.totalPaidAmount || 0;
+                      const balanceDue = po.balanceDue !== undefined ? po.balanceDue : Math.max(0, receivedAmt - paidAmt);
+                      const pmtStatus = po.paymentStatus || (balanceDue === 0 && receivedAmt > 0 ? 'PAID' : (paidAmt > 0 ? 'PARTIALLY_PAID' : 'UNPAID'));
+
+                      return (
+                        <tr key={po.id}>
+                          <td>
+                            <div style={{ fontWeight: 800, color: 'var(--primary-700)', fontFamily: 'var(--font-mono)' }}>{po.poNumber}</div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>{formatIsoToDisplay(po.orderDate)}</div>
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 700, color: 'var(--neutral-900)' }}>{po.supplierName}</div>
+                            {po.supplierPhone && <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>{po.supplierPhone}</div>}
+                          </td>
+                          <td>
+                            <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 10, background: 'var(--neutral-100)', color: 'var(--neutral-700)' }}>
+                              📍 {po.locationName || 'Main Store'}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                            ₹{po.grandTotal.toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 800, color: '#059669', fontFamily: 'var(--font-mono)' }}>
+                            ₹{receivedAmt.toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--primary-700)', fontFamily: 'var(--font-mono)' }}>
+                            ₹{paidAmt.toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 800, color: balanceDue > 0 ? 'var(--danger-600)' : '#059669', fontFamily: 'var(--font-mono)' }}>
+                            ₹{balanceDue.toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span style={{
+                              fontSize: '0.72rem',
+                              padding: '2px 8px',
+                              borderRadius: 'var(--radius-sm)',
+                              fontWeight: 700,
+                              backgroundColor: po.status === 'FULLY_RECEIVED' || po.status === 'RECEIVED' ? '#ecfdf5' : po.status === 'PARTIALLY_RECEIVED' ? 'var(--primary-50)' : 'var(--warning-50)',
+                              color: po.status === 'FULLY_RECEIVED' || po.status === 'RECEIVED' ? '#059669' : po.status === 'PARTIALLY_RECEIVED' ? 'var(--primary-700)' : 'var(--warning-700)',
+                            }}>
+                              {po.status}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span style={{
+                              fontSize: '0.72rem',
+                              padding: '2px 8px',
+                              borderRadius: 'var(--radius-sm)',
+                              fontWeight: 700,
+                              backgroundColor: pmtStatus === 'PAID' ? '#ecfdf5' : pmtStatus === 'PARTIALLY_PAID' ? '#fffbeb' : '#fef2f2',
+                              color: pmtStatus === 'PAID' ? '#059669' : pmtStatus === 'PARTIALLY_PAID' ? '#b45309' : '#b91c1c',
+                            }}>
+                              {pmtStatus}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+                {filteredPOs.length > 0 && (
+                  <tfoot>
+                    <tr style={{ background: 'var(--neutral-50)', fontWeight: 800 }}>
+                      <td colSpan={3}>Consolidated Period Totals ({filteredPOs.length} POs):</td>
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>₹{totalPOOrdered.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right', color: '#059669', fontFamily: 'var(--font-mono)' }}>₹{totalPOReceived.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--primary-700)', fontFamily: 'var(--font-mono)' }}>₹{totalPOPaid.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right', color: totalPOBalance > 0 ? 'var(--danger-700)' : '#059669', fontFamily: 'var(--font-mono)' }}>₹{totalPOBalance.toFixed(2)}</td>
+                      <td colSpan={2}></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+
+          {/* Supplier Payables Breakdown & Input Tax Credit (ITC) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 20 }}>
+            {/* Supplier Outstanding Balances Card */}
+            <div className="card">
+              <div className="card-header">
+                <h3 className="card-title">Vendor / Supplier Ledger Balances</h3>
+              </div>
+              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 16 }}>
+                {supplierPayables.length === 0 ? (
+                  <p style={{ color: 'var(--neutral-400)', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>
+                    No vendor payables currently outstanding.
+                  </p>
+                ) : (
+                  supplierPayables.map((sup) => (
+                    <div key={sup.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--neutral-900)' }}>{sup.name}</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>{sup.phone || ''} {sup.gstin ? `| GST: ${sup.gstin}` : ''}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.92rem', color: sup.payable > 0 ? 'var(--danger-600)' : '#059669', fontFamily: 'var(--font-mono)' }}>
+                          ₹{sup.payable.toFixed(2)}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--neutral-400)' }}>
+                          {sup.payable > 0 ? 'Payable Due' : 'Settled'}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Input Tax Credit (ITC) Card */}
+            <div className="card">
+              <div className="card-header">
+                <h3 className="card-title">Input Tax Credit (ITC) Overview</h3>
+              </div>
+              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 8, borderBottom: '1px solid var(--neutral-100)' }}>
+                  <span style={{ color: 'var(--neutral-600)' }}>Total Purchase Inward Tax (ITC):</span>
+                  <span style={{ fontWeight: 800, color: '#059669', fontFamily: 'var(--font-mono)' }}>₹{totalPOInputTax.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 8, borderBottom: '1px solid var(--neutral-100)' }}>
+                  <span style={{ color: 'var(--neutral-600)' }}>Output Sales GST Collected:</span>
+                  <span style={{ fontWeight: 800, color: '#d97706', fontFamily: 'var(--font-mono)' }}>₹{totalTaxCollected.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: 12, backgroundColor: 'var(--primary-50)', borderRadius: 'var(--radius-md)' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--primary-900)' }}>Net GST Payable / (Credit Carried Forward):</span>
+                  <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--primary-800)', fontFamily: 'var(--font-mono)' }}>
+                    ₹{Math.max(0, totalTaxCollected - totalPOInputTax).toFixed(2)}
+                  </span>
+                </div>
+                <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', margin: 0 }}>
+                  * Estimated Input Tax Credit based on purchase orders fulfilled in the selected date range.
+                </p>
+              </div>
             </div>
           </div>
         </div>
