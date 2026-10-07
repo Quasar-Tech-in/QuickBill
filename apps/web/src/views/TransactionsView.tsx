@@ -13,7 +13,11 @@ import {
   CheckCircle2,
   RotateCcw,
   Edit3,
-  Calendar
+  Calendar,
+  X,
+  Filter,
+  Tag,
+  Download
 } from 'lucide-react';
 import { Invoice } from '../types';
 import { store } from '../services/store';
@@ -81,10 +85,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
       console.error('Error fetching paginated invoices:', e);
       let local = store.getInvoices(locId !== 'ALL' ? locId : undefined);
       if (range.fromDate) {
-        local = local.filter(i => (i.date || '') >= range.fromDate);
+        local = local.filter(i => {
+          const invDate = (i.date || (i.createdAt ? i.createdAt.split('T')[0] : '')).split('T')[0];
+          return !invDate || invDate >= range.fromDate;
+        });
       }
       if (range.toDate) {
-        local = local.filter(i => (i.date || '') <= range.toDate);
+        local = local.filter(i => {
+          const invDate = (i.date || (i.createdAt ? i.createdAt.split('T')[0] : '')).split('T')[0];
+          return !invDate || invDate <= range.toDate;
+        });
       }
       setInvoices(local.slice((page - 1) * size, page * size));
       setTotalItems(local.length);
@@ -125,6 +135,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
     setInvoices(prev => prev.map(inv => inv.id === updatedInv.id ? updatedInv : inv));
   };
 
+  const hasActiveFilters = searchQuery.trim() !== '' || selectedLocationId !== 'ALL' || statusFilter !== 'ALL' || dateRange.preset !== 'ALL';
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    setSelectedLocationId('ALL');
+    setStatusFilter('ALL');
+    setDateRange({ preset: 'ALL', fromDate: '', toDate: '' });
+  };
+
   return (
     <div className="page-container" style={{ maxWidth: '100%', padding: '20px 24px' }}>
       {/* Top Header Bar */}
@@ -140,7 +160,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
         </div>
 
         <button
-          onClick={() => loadInvoices(1, pageSize, selectedLocationId, searchQuery, statusFilter)}
+          onClick={() => loadInvoices(1, pageSize, selectedLocationId, searchQuery, statusFilter, dateRange)}
           className="btn btn-secondary"
           disabled={isLoading}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', fontSize: '0.82rem', fontWeight: 700 }}
@@ -205,69 +225,232 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
-      <div className="card" style={{ padding: '12px 16px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Filter & Search Bar - Single Line with Active Chips */}
+      <div className="card" style={{ padding: '12px 14px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'visible', position: 'relative', zIndex: 10 }}>
+        {/* Line 1: Single Line Controls Bar */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Search Box */}
-          <div style={{ position: 'relative', minWidth: 260, flex: 1 }}>
-            <Search size={16} style={{ position: 'absolute', left: 12, top: 10, color: 'var(--neutral-400)' }} />
+          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--neutral-400)' }} />
             <input
               type="text"
               placeholder="Search invoice number, customer name, phone, branch..."
               className="form-input"
-              style={{ paddingLeft: 36, width: '100%', height: 36, fontSize: '0.82rem' }}
+              style={{ paddingLeft: 30, paddingRight: searchQuery ? 28 : 10, width: '100%', height: 35, fontSize: '0.8rem' }}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-          </div>
-
-          {/* Date, Location & Status Filters */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            {/* Universal Date Range Filter (DD-MM-YYYY) */}
-            <DateRangePicker value={dateRange} onChange={setDateRange} compact={true} />
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <MapPin size={14} color="var(--primary-600)" />
-              <select
-                className="form-select"
-                style={{ padding: '4px 10px', fontSize: '0.8rem', width: 'auto', height: 36 }}
-                value={selectedLocationId}
-                onChange={(e) => setSelectedLocationId(e.target.value)}
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                style={{ position: 'absolute', right: 8, top: 9, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--neutral-400)', padding: 0 }}
+                title="Clear search"
               >
-                <option value="ALL">🌐 All Branches</option>
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    📍 {loc.name} ({loc.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Status Pills */}
-            <div style={{ display: 'flex', gap: 4, background: 'var(--neutral-100)', padding: 3, borderRadius: 'var(--radius-full)' }}>
-              {(['ALL', 'PAID', 'PARTIAL', 'UNPAID'] as const).map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  style={{
-                    padding: '4px 12px',
-                    borderRadius: 'var(--radius-full)',
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    border: 'none',
-                    backgroundColor: statusFilter === status ? '#ffffff' : 'transparent',
-                    color: statusFilter === status ? 'var(--primary-700)' : 'var(--neutral-600)',
-                    boxShadow: statusFilter === status ? 'var(--shadow-sm)' : 'none',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  {status}
-                </button>
-              ))}
-            </div>
+                <X size={14} />
+              </button>
+            )}
           </div>
+
+          {/* Location / Branch Filter */}
+          <select
+            className="form-select"
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+            value={selectedLocationId}
+            onChange={(e) => setSelectedLocationId(e.target.value)}
+          >
+            <option value="ALL">🌐 All Branches</option>
+            {locations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                📍 {loc.name} ({loc.code})
+              </option>
+            ))}
+          </select>
+
+          {/* Payment Status Filter */}
+          <select
+            className="form-select"
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 120 }}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
+          >
+            <option value="ALL">All Statuses</option>
+            <option value="PAID">✅ Paid in Full</option>
+            <option value="PARTIAL">⏳ Partial / Due</option>
+            <option value="UNPAID">❌ Unpaid / Credit</option>
+          </select>
+
+          {/* Single Date Range Button */}
+          <DateRangePicker
+            value={dateRange}
+            onChange={setDateRange}
+            variant="dropdown"
+            allowAllTime={true}
+          />
+
+          {/* Refresh Action Button */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => loadInvoices(currentPage, pageSize, selectedLocationId, debouncedSearch, statusFilter, dateRange)}
+            disabled={isLoading}
+            style={{ height: 35, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: '0.8rem' }}
+            title="Refresh Invoices"
+          >
+            <RefreshCw size={13} className={isLoading ? 'spin-animation' : ''} />
+            <span>Refresh</span>
+          </button>
         </div>
+
+        {/* Line 2: Active Filter Chips */}
+        {hasActiveFilters && (
+          <div style={{
+            display: 'flex',
+            gap: 6,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            paddingTop: 8,
+            borderTop: '1px solid var(--neutral-200)',
+            fontSize: '0.74rem'
+          }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.03em', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Filter size={11} /> Active Filters:
+            </span>
+
+            {/* Search Query Chip */}
+            {searchQuery.trim() !== '' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 12,
+                backgroundColor: 'var(--primary-50)',
+                color: 'var(--primary-700)',
+                border: '1px solid var(--primary-200)',
+                fontWeight: 600,
+                fontSize: '0.74rem'
+              }}>
+                <Search size={10} />
+                <span>"{searchQuery.trim()}"</span>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--primary-700)' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Branch Chip */}
+            {selectedLocationId !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 12,
+                backgroundColor: '#f1f5f9',
+                color: '#334155',
+                border: '1px solid #cbd5e1',
+                fontWeight: 600,
+                fontSize: '0.74rem'
+              }}>
+                <MapPin size={10} />
+                <span>Branch: {locations.find(l => l.id === selectedLocationId)?.name || selectedLocationId}</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLocationId('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#475569' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Status Chip */}
+            {statusFilter !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 12,
+                backgroundColor: '#f8fafc',
+                color: '#0f172a',
+                border: '1px solid #e2e8f0',
+                fontWeight: 600,
+                fontSize: '0.74rem'
+              }}>
+                <CreditCard size={10} />
+                <span>Status: {statusFilter}</span>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#64748b' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Date Range Chip */}
+            {dateRange.preset !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 12,
+                backgroundColor: '#f0fdf4',
+                color: '#166534',
+                border: '1px solid #bbf7d0',
+                fontWeight: 600,
+                fontSize: '0.74rem'
+              }}>
+                <Calendar size={10} />
+                <span>
+                  {dateRange.preset === 'CUSTOM'
+                    ? `${formatIsoToDisplay(dateRange.fromDate)} to ${formatIsoToDisplay(dateRange.toDate)}`
+                    : dateRange.preset.replace(/_/g, ' ')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDateRange({ preset: 'ALL', fromDate: '', toDate: '' })}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#166534' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Clear All Filters Button */}
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--danger-600)',
+                fontWeight: 700,
+                fontSize: '0.72rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                marginLeft: 4,
+                padding: '2px 6px',
+                borderRadius: 4,
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--danger-50)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <RotateCcw size={10} />
+              <span>Clear All</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Streamlined Invoices Table */}

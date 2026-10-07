@@ -19,12 +19,48 @@ class ReportService:
     def _build_date_query(self, field_name: str, from_date: Optional[str], to_date: Optional[str]) -> Optional[Dict[str, Any]]:
         if not from_date and not to_date:
             return None
-        cond: Dict[str, Any] = {}
+        from_dt = None
+        to_dt = None
         if from_date:
-            cond["$gte"] = from_date
+            try:
+                clean_from = from_date.split("T")[0]
+                parts = [int(p) for p in clean_from.split("-")]
+                from_dt = datetime(parts[0], parts[1], parts[2], 0, 0, 0, tzinfo=timezone.utc)
+            except Exception:
+                pass
         if to_date:
-            cond["$lte"] = f"{to_date}T23:59:59.999Z" if "T" not in to_date else to_date
-        return {field_name: cond}
+            try:
+                clean_to = to_date.split("T")[0]
+                parts = [int(p) for p in clean_to.split("-")]
+                to_dt = datetime(parts[0], parts[1], parts[2], 23, 59, 59, 999999, tzinfo=timezone.utc)
+            except Exception:
+                pass
+
+        dt_cond: Dict[str, Any] = {}
+        str_cond: Dict[str, Any] = {}
+
+        if from_dt:
+            dt_cond["$gte"] = from_dt
+        if to_dt:
+            dt_cond["$lte"] = to_dt
+
+        if from_date:
+            str_cond["$gte"] = from_date.split("T")[0]
+        if to_date:
+            clean_t = to_date.split("T")[0]
+            str_cond["$lte"] = f"{clean_t}T23:59:59.999Z"
+
+        or_conds = []
+        if dt_cond:
+            or_conds.append({field_name: dt_cond})
+        if str_cond:
+            or_conds.append({field_name: str_cond})
+
+        if len(or_conds) == 1:
+            return or_conds[0]
+        if len(or_conds) > 1:
+            return {"$or": or_conds}
+        return None
 
     async def get_dashboard_summary(self, business_id: str, from_date: Optional[str] = None, to_date: Optional[str] = None) -> DashboardSummaryResponse:
         b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()

@@ -26,7 +26,8 @@ import {
   Building,
   CreditCard,
   Smartphone,
-  Banknote
+  Banknote,
+  RefreshCw
 } from 'lucide-react';
 import { DateRangePicker, DateRangeValue, calculatePresetDates, formatIsoToDisplay } from '../components/DateRangePicker';
 import { store } from '../services/store';
@@ -239,6 +240,17 @@ export const LedgerView: React.FC = () => {
 
     return true;
   });
+
+  const hasActiveFilters = searchQuery.trim() !== '' || filterType !== 'ALL' || filterCategory !== 'ALL' || selectedLocationId !== 'ALL' || dateRange.preset !== 'ALL';
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    setFilterType('ALL');
+    setFilterCategory('ALL');
+    setSelectedLocationId('ALL');
+    setDateRange({ preset: 'ALL', fromDate: '', toDate: '' });
+  };
 
   // Customers & Suppliers lists for dropdowns
   const customerList = parties.filter(p => p.type === 'CUSTOMER');
@@ -588,80 +600,257 @@ export const LedgerView: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
-      <div className="card" style={{ padding: 16, marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ position: 'relative', minWidth: 260, flex: 1 }}>
-            <Search size={18} style={{ position: 'absolute', left: 12, top: 10, color: 'var(--neutral-400)' }} />
+      {/* Filter & Search Bar - Single Line with Active Chips */}
+      <div className="card" style={{ padding: '12px 14px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'visible', position: 'relative', zIndex: 10 }}>
+        {/* Line 1: Single Line Controls Bar */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Search Box */}
+          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--neutral-400)' }} />
             <input
               type="text"
               placeholder="Search by Payee, Category, Ref #, Description..."
               className="form-input"
-              style={{ paddingLeft: 38, width: '100%' }}
+              style={{ paddingLeft: 30, paddingRight: searchQuery ? 28 : 10, width: '100%', height: 35, fontSize: '0.8rem' }}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            {/* Custom Date Range Picker */}
-            <DateRangePicker value={dateRange} onChange={setDateRange} compact={true} />
-
-            {/* Location Selector */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <MapPin size={15} color="var(--primary-600)" />
-              <select
-                className="form-select"
-                style={{ padding: '5px 10px', fontSize: '0.82rem', width: 'auto' }}
-                value={selectedLocationId}
-                onChange={(e) => setSelectedLocationId(e.target.value)}
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                style={{ position: 'absolute', right: 8, top: 9, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--neutral-400)', padding: 0 }}
+                title="Clear search"
               >
-                <option value="ALL">🌐 All Branch Locations</option>
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    📍 {loc.name} ({loc.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Type Buttons */}
-            <div style={{ display: 'flex', gap: 4 }}>
-              {(['ALL', 'EXPENSE', 'PAYMENT_IN', 'PAYMENT_OUT'] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setFilterType(t)}
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: 'var(--radius-full)',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    border: '1px solid',
-                    borderColor: filterType === t ? 'var(--primary-500)' : 'var(--neutral-200)',
-                    backgroundColor: filterType === t ? 'var(--primary-50)' : '#ffffff',
-                    color: filterType === t ? 'var(--primary-700)' : 'var(--neutral-600)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {t === 'ALL' ? 'All Entries' : t === 'EXPENSE' ? 'Operating Expenses' : t === 'PAYMENT_IN' ? 'Receipts' : 'Payouts'}
-                </button>
-              ))}
-            </div>
-
-            {/* Category Dropdown */}
-            <select
-              className="form-select"
-              style={{ padding: '5px 10px', fontSize: '0.82rem', width: 'auto' }}
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-            >
-              <option value="ALL">All Categories</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.name}>{c.name}</option>
-              ))}
-            </select>
+                <X size={14} />
+              </button>
+            )}
           </div>
+
+          {/* Entry Type Filter */}
+          <select
+            className="form-select"
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as any)}
+          >
+            <option value="ALL">All Entry Types</option>
+            <option value="EXPENSE">Operating Expenses</option>
+            <option value="PAYMENT_IN">Receipts (Inflow)</option>
+            <option value="PAYMENT_OUT">Payouts (Outflow)</option>
+          </select>
+
+          {/* Category Dropdown */}
+          <select
+            className="form-select"
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+          >
+            <option value="ALL">All Categories</option>
+            {categories.map(c => (
+              <option key={c.id} value={c.name}>{c.name}</option>
+            ))}
+          </select>
+
+          {/* Location Selector */}
+          <select
+            className="form-select"
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+            value={selectedLocationId}
+            onChange={(e) => setSelectedLocationId(e.target.value)}
+          >
+            <option value="ALL">🌐 All Branches</option>
+            {locations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                📍 {loc.name} ({loc.code})
+              </option>
+            ))}
+          </select>
+
+          {/* Single Date Range Button */}
+          <DateRangePicker
+            value={dateRange}
+            onChange={setDateRange}
+            variant="dropdown"
+            allowAllTime={true}
+          />
+
+          {/* Refresh Button */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={refreshData}
+            style={{ height: 35, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: '0.8rem' }}
+            title="Refresh Ledger"
+          >
+            <RefreshCw size={13} />
+            <span>Refresh</span>
+          </button>
         </div>
+
+        {/* Line 2: Active Filter Chips */}
+        {hasActiveFilters && (
+          <div style={{
+            display: 'flex',
+            gap: 6,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            paddingTop: 8,
+            borderTop: '1px solid var(--neutral-200)',
+            fontSize: '0.74rem'
+          }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.03em', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Filter size={11} /> Active Filters:
+            </span>
+
+            {/* Search Chip */}
+            {searchQuery.trim() !== '' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full, 9999px)',
+                background: 'var(--neutral-100)',
+                color: 'var(--neutral-700)',
+                border: '1px solid var(--neutral-200)',
+                fontSize: '0.74rem',
+                fontWeight: 600
+              }}>
+                <span>Keyword: &quot;{searchQuery}&quot;</span>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--neutral-400)', display: 'inline-flex', alignItems: 'center' }}
+                  title="Remove search query filter"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            )}
+
+            {/* Type Chip */}
+            {filterType !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full, 9999px)',
+                background: filterType === 'PAYMENT_IN' ? '#ecfdf5' : filterType === 'PAYMENT_OUT' ? '#fef3c7' : '#fee2e2',
+                color: filterType === 'PAYMENT_IN' ? '#047857' : filterType === 'PAYMENT_OUT' ? '#b45309' : '#b91c1c',
+                border: '1px solid var(--neutral-200)',
+                fontSize: '0.74rem',
+                fontWeight: 600
+              }}>
+                <span>Type: {filterType === 'EXPENSE' ? 'Operating Expense' : filterType === 'PAYMENT_IN' ? 'Receipt (Inflow)' : 'Payout (Outflow)'}</span>
+                <button
+                  type="button"
+                  onClick={() => setFilterType('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'inherit', display: 'inline-flex', alignItems: 'center', opacity: 0.7 }}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            )}
+
+            {/* Category Chip */}
+            {filterCategory !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full, 9999px)',
+                background: 'var(--primary-50)',
+                color: 'var(--primary-700)',
+                border: '1px solid var(--primary-200)',
+                fontSize: '0.74rem',
+                fontWeight: 600
+              }}>
+                <span>Category: {filterCategory}</span>
+                <button
+                  type="button"
+                  onClick={() => setFilterCategory('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--primary-500)', display: 'inline-flex', alignItems: 'center' }}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            )}
+
+            {/* Location Chip */}
+            {selectedLocationId !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full, 9999px)',
+                background: 'var(--neutral-100)',
+                color: 'var(--neutral-700)',
+                border: '1px solid var(--neutral-200)',
+                fontSize: '0.74rem',
+                fontWeight: 600
+              }}>
+                <span>Branch: {locations.find(l => l.id === selectedLocationId)?.name || selectedLocationId}</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLocationId('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--neutral-400)', display: 'inline-flex', alignItems: 'center' }}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            )}
+
+            {/* Date Range Chip */}
+            {dateRange.preset !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full, 9999px)',
+                background: 'var(--primary-50)',
+                color: 'var(--primary-700)',
+                border: '1px solid var(--primary-200)',
+                fontSize: '0.74rem',
+                fontWeight: 600
+              }}>
+                <span>Date: {dateRange.preset !== 'CUSTOM' ? dateRange.preset.replace('_', ' ') : `${dateRange.fromDate} to ${dateRange.toDate}`}</span>
+                <button
+                  type="button"
+                  onClick={() => setDateRange({ preset: 'ALL', fromDate: '', toDate: '' })}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--primary-500)', display: 'inline-flex', alignItems: 'center' }}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            )}
+
+            {/* Clear All Button */}
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--danger-600)',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                padding: '2px 6px',
+                borderRadius: 4,
+                marginLeft: 4
+              }}
+              title="Reset all filters"
+            >
+              Clear All
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Unified Ledger Entries Table */}

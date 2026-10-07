@@ -354,7 +354,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
           background: 'var(--surface-card)',
           borderRadius: 'var(--radius-lg)',
           border: '1px solid var(--surface-border)',
-          boxShadow: 'var(--shadow-sm)'
+          boxShadow: 'var(--shadow-sm)',
+          position: 'relative',
+          zIndex: 10,
+          overflow: 'visible'
         }}
       >
         {/* Title & Scope */}
@@ -383,7 +386,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
         {/* Action Controls & Selectors */}
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
           {/* Universal Date Range Filter (DD-MM-YYYY) */}
-          <DateRangePicker value={dateRange} onChange={setDateRange} />
+          <DateRangePicker value={dateRange} onChange={setDateRange} variant="dropdown" allowAllTime={true} />
 
           {/* Location Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

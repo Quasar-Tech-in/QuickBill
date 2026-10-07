@@ -46,10 +46,17 @@ export const formatDisplayToIso = (displayStr: string): string => {
   return displayStr;
 };
 
-// Helper to compute ISO dates from presets
+// Helper to compute ISO dates from presets using local calendar dates
 export const calculatePresetDates = (preset: DatePreset): { fromDate: string; toDate: string } => {
   const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
+  const formatLocalDate = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayStr = formatLocalDate(today);
 
   if (preset === 'TODAY') {
     return { fromDate: todayStr, toDate: todayStr };
@@ -58,36 +65,35 @@ export const calculatePresetDates = (preset: DatePreset): { fromDate: string; to
   if (preset === 'YESTERDAY') {
     const yest = new Date(today);
     yest.setDate(yest.getDate() - 1);
-    const yestStr = yest.toISOString().split('T')[0];
-    return { fromDate: yestStr, toDate: yestStr };
+    return { fromDate: formatLocalDate(yest), toDate: formatLocalDate(yest) };
   }
 
   if (preset === 'LAST_7_DAYS') {
     const past = new Date(today);
     past.setDate(past.getDate() - 6);
-    return { fromDate: past.toISOString().split('T')[0], toDate: todayStr };
+    return { fromDate: formatLocalDate(past), toDate: todayStr };
   }
 
   if (preset === 'THIS_MONTH') {
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { fromDate: firstDay.toISOString().split('T')[0], toDate: todayStr };
+    return { fromDate: formatLocalDate(firstDay), toDate: todayStr };
   }
 
   if (preset === 'LAST_30_DAYS') {
     const past = new Date(today);
     past.setDate(past.getDate() - 29);
-    return { fromDate: past.toISOString().split('T')[0], toDate: todayStr };
+    return { fromDate: formatLocalDate(past), toDate: todayStr };
   }
 
   if (preset === 'THIS_QUARTER') {
     const currentQuarter = Math.floor(today.getMonth() / 3);
     const startOfQuarter = new Date(today.getFullYear(), currentQuarter * 3, 1);
-    return { fromDate: startOfQuarter.toISOString().split('T')[0], toDate: todayStr };
+    return { fromDate: formatLocalDate(startOfQuarter), toDate: todayStr };
   }
 
   if (preset === 'THIS_YEAR') {
     const startOfYear = new Date(today.getFullYear(), 0, 1);
-    return { fromDate: startOfYear.toISOString().split('T')[0], toDate: todayStr };
+    return { fromDate: formatLocalDate(startOfYear), toDate: todayStr };
   }
 
   // ALL or CUSTOM default
@@ -99,7 +105,7 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({
   onChange,
   compact = false,
   allowAllTime = true,
-  variant = 'strip',
+  variant = 'dropdown',
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
@@ -185,38 +191,51 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({
   };
 
   return (
-    <div ref={dropdownRef} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+    <div 
+      ref={dropdownRef} 
+      style={{ 
+        display: 'inline-flex', 
+        alignItems: 'center', 
+        gap: 8, 
+        position: 'relative',
+        zIndex: isDropdownOpen ? 9999 : 'auto'
+      }}
+    >
       {variant === 'dropdown' ? (
         /* Single Compact Dropdown Button */
         <div style={{ position: 'relative' }}>
           <button
             type="button"
-            onClick={() => setIsDropdownOpen(prev => !prev)}
-            className="form-select"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsDropdownOpen(prev => !prev);
+            }}
             style={{
-              height: 36,
-              fontSize: '0.82rem',
+              height: 35,
+              fontSize: '0.8rem',
               fontWeight: 600,
-              padding: '0 12px',
+              padding: '0 10px',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 8,
               cursor: 'pointer',
-              minWidth: 155,
+              minWidth: 145,
               justifyContent: 'space-between',
               backgroundColor: value.preset !== 'ALL' ? 'var(--primary-50)' : '#ffffff',
-              borderColor: value.preset !== 'ALL' ? 'var(--primary-300)' : 'var(--neutral-300)',
+              border: `1px solid ${value.preset !== 'ALL' ? 'var(--primary-400)' : 'var(--neutral-300)'}`,
+              borderRadius: 'var(--radius-md, 6px)',
               color: value.preset !== 'ALL' ? 'var(--primary-800)' : 'var(--neutral-800)',
-              appearance: 'none',
-              WebkitAppearance: 'none',
+              outline: 'none',
+              transition: 'all 0.15s ease',
               boxShadow: 'none',
+              userSelect: 'none',
             }}
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              <Calendar size={14} style={{ color: value.preset !== 'ALL' ? 'var(--primary-600)' : 'var(--neutral-500)', flexShrink: 0 }} />
+              <Calendar size={13} style={{ color: value.preset !== 'ALL' ? 'var(--primary-600)' : 'var(--neutral-500)', flexShrink: 0 }} />
               <span>{getDropdownLabel()}</span>
             </span>
-            <ChevronDown size={13} style={{ color: 'var(--neutral-400)', flexShrink: 0 }} />
+            <ChevronDown size={13} style={{ color: 'var(--neutral-400)', flexShrink: 0, transform: isDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
           </button>
 
           {/* Dropdown Menu Overlay */}
@@ -229,8 +248,8 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({
                 background: '#ffffff',
                 borderRadius: 'var(--radius-md, 8px)',
                 border: '1px solid var(--neutral-200)',
-                boxShadow: '0 12px 28px rgba(0, 0, 0, 0.14), 0 4px 10px rgba(0, 0, 0, 0.05)',
-                zIndex: 1100,
+                boxShadow: '0 14px 32px rgba(0, 0, 0, 0.16), 0 4px 10px rgba(0, 0, 0, 0.06)',
+                zIndex: 99999,
                 minWidth: 200,
                 padding: 4,
                 display: 'flex',
@@ -247,7 +266,10 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({
                   <button
                     key={key}
                     type="button"
-                    onClick={() => handlePresetSelect(key)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePresetSelect(key);
+                    }}
                     style={{
                       border: 'none',
                       padding: '7px 10px',

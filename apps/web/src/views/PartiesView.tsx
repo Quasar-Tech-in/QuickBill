@@ -13,7 +13,9 @@ import {
   UserCheck, 
   TrendingUp, 
   TrendingDown,
-  AlertCircle
+  AlertCircle,
+  Filter,
+  RefreshCw
 } from 'lucide-react';
 import { Party } from '../types';
 import { store } from '../services/store';
@@ -138,6 +140,15 @@ export const PartiesView: React.FC = () => {
   const totalPayables = allCurrentParties
     .filter(p => p.currentBalance < 0)
     .reduce((sum, p) => sum + Math.abs(p.currentBalance), 0);
+
+  const hasActiveFilters = searchQuery.trim() !== '' || (!isCashier && filterType !== 'ALL') || selectedLocationId !== 'ALL';
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    if (!isCashier) setFilterType('ALL');
+    setSelectedLocationId('ALL');
+  };
 
   const handleCreateParty = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -313,64 +324,187 @@ export const PartiesView: React.FC = () => {
         )}
       </div>
 
-      {/* Filter Bar */}
-      <div className="card" style={{ padding: 16, marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ position: 'relative', minWidth: 280, flex: 1 }}>
-            <Search size={18} style={{ position: 'absolute', left: 12, top: 10, color: 'var(--neutral-400)' }} />
+      {/* Filter Bar - Single Line with Active Chips */}
+      <div className="card" style={{ padding: '12px 14px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'visible', position: 'relative', zIndex: 10 }}>
+        {/* Line 1: Single Line Controls Bar */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Search Box */}
+          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--neutral-400)' }} />
             <input
               type="text"
               placeholder={isCashier ? 'Search customer by name, phone, email...' : 'Search by profile name, phone, GSTIN, email...'}
               className="form-input"
-              style={{ paddingLeft: 38, width: '100%' }}
+              style={{ paddingLeft: 30, paddingRight: searchQuery ? 28 : 10, width: '100%', height: 35, fontSize: '0.8rem' }}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <MapPin size={15} color="var(--primary-600)" />
-              <select
-                className="form-select"
-                style={{ padding: '5px 10px', fontSize: '0.82rem', width: 'auto' }}
-                value={selectedLocationId}
-                onChange={(e) => setSelectedLocationId(e.target.value)}
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                style={{ position: 'absolute', right: 8, top: 9, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--neutral-400)', padding: 0 }}
+                title="Clear search"
               >
-                <option value="ALL">🌐 All Branch Locations</option>
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    📍 {loc.name} ({loc.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {!isCashier && (
-              <div style={{ display: 'flex', gap: 6 }}>
-                {(['ALL', 'CUSTOMER', 'SUPPLIER'] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setFilterType(t)}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: 'var(--radius-full)',
-                      fontSize: '0.78rem',
-                      fontWeight: 600,
-                      border: '1px solid',
-                      borderColor: filterType === t ? 'var(--primary-500)' : 'var(--neutral-200)',
-                      backgroundColor: filterType === t ? 'var(--primary-50)' : '#ffffff',
-                      color: filterType === t ? 'var(--primary-700)' : 'var(--neutral-600)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {t === 'ALL' ? 'All Profiles' : t === 'CUSTOMER' ? 'Customers' : 'Suppliers'}
-                  </button>
-                ))}
-              </div>
+                <X size={14} />
+              </button>
             )}
           </div>
+
+          {/* Location Selector */}
+          <select
+            className="form-select"
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+            value={selectedLocationId}
+            onChange={(e) => setSelectedLocationId(e.target.value)}
+          >
+            <option value="ALL">🌐 All Branches</option>
+            {locations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                📍 {loc.name} ({loc.code})
+              </option>
+            ))}
+          </select>
+
+          {/* Party Type Filter */}
+          {!isCashier && (
+            <select
+              className="form-select"
+              style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value as any)}
+            >
+              <option value="ALL">All Profiles</option>
+              <option value="CUSTOMER">👤 Customers</option>
+              <option value="SUPPLIER">🏢 Suppliers</option>
+            </select>
+          )}
+
+          {/* Refresh Action Button */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={refreshData}
+            style={{ height: 35, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: '0.8rem' }}
+            title="Refresh Directory"
+          >
+            <RefreshCw size={13} />
+            <span>Refresh</span>
+          </button>
         </div>
+
+        {/* Line 2: Active Filter Chips */}
+        {hasActiveFilters && (
+          <div style={{
+            display: 'flex',
+            gap: 6,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            paddingTop: 8,
+            borderTop: '1px solid var(--neutral-200)',
+            fontSize: '0.74rem'
+          }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.03em', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Filter size={11} /> Active Filters:
+            </span>
+
+            {/* Search Query Chip */}
+            {searchQuery.trim() !== '' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full, 9999px)',
+                background: 'var(--neutral-100)',
+                color: 'var(--neutral-700)',
+                border: '1px solid var(--neutral-200)',
+                fontSize: '0.74rem',
+                fontWeight: 600
+              }}>
+                <span>Keyword: &quot;{searchQuery}&quot;</span>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--neutral-400)', display: 'inline-flex', alignItems: 'center' }}
+                  title="Remove search query filter"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            )}
+
+            {/* Location Chip */}
+            {selectedLocationId !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full, 9999px)',
+                background: 'var(--neutral-100)',
+                color: 'var(--neutral-700)',
+                border: '1px solid var(--neutral-200)',
+                fontSize: '0.74rem',
+                fontWeight: 600
+              }}>
+                <span>Branch: {locations.find(l => l.id === selectedLocationId)?.name || selectedLocationId}</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLocationId('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--neutral-400)', display: 'inline-flex', alignItems: 'center' }}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            )}
+
+            {/* Type Chip */}
+            {!isCashier && filterType !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full, 9999px)',
+                background: filterType === 'CUSTOMER' ? 'var(--primary-50)' : '#fef3c7',
+                color: filterType === 'CUSTOMER' ? 'var(--primary-700)' : '#b45309',
+                border: '1px solid var(--neutral-200)',
+                fontSize: '0.74rem',
+                fontWeight: 600
+              }}>
+                <span>Type: {filterType === 'CUSTOMER' ? 'Customers' : 'Suppliers'}</span>
+                <button
+                  type="button"
+                  onClick={() => setFilterType('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'inherit', display: 'inline-flex', alignItems: 'center', opacity: 0.7 }}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            )}
+
+            {/* Clear All Button */}
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--danger-600)',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                padding: '2px 6px',
+                borderRadius: 4,
+                marginLeft: 4
+              }}
+              title="Reset all filters"
+            >
+              Clear All
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Profiles Directory Table */}

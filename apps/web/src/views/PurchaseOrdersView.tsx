@@ -968,90 +968,278 @@ export const PurchaseOrdersView: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter Toolbar */}
-      <div className="card" style={{ padding: 16, marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Filter Toolbar - Single Line with Active Chips */}
+      <div className="card" style={{ padding: '12px 14px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'visible', position: 'relative', zIndex: 10 }}>
+        {/* Line 1: Single Line Controls Bar */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Search Box */}
-          <div style={{ position: 'relative', minWidth: 280, flex: 1 }}>
-            <Search size={18} style={{ position: 'absolute', left: 12, top: 10, color: 'var(--neutral-400)' }} />
+          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--neutral-400)' }} />
             <input
               type="text"
               placeholder="Search by PO Number, Supplier name, phone or notes..."
               className="form-input"
-              style={{ paddingLeft: 38, width: '100%' }}
+              style={{ paddingLeft: 30, paddingRight: searchQuery ? 28 : 10, width: '100%', height: 35, fontSize: '0.8rem' }}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             {searchQuery && (
               <button 
+                type="button"
                 onClick={() => setSearchQuery('')}
-                style={{ position: 'absolute', right: 10, top: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--neutral-400)' }}
+                style={{ position: 'absolute', right: 8, top: 9, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--neutral-400)', padding: 0 }}
+                title="Clear search"
               >
-                <X size={16} />
+                <X size={14} />
               </button>
             )}
           </div>
 
-          {/* Location & Supplier Filters & Date Range */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <DateRangePicker value={dateRange} onChange={setDateRange} compact={true} />
+          {/* PO Status Filter */}
+          <select
+            className="form-select"
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="ALL">All Statuses</option>
+            <option value="ORDERED">📦 Ordered</option>
+            <option value="PARTIALLY_RECEIVED">⏳ Partial Inward</option>
+            <option value="RECEIVED">✅ Fully Received</option>
+            <option value="CANCELLED">❌ Cancelled</option>
+          </select>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <MapPin size={15} color="var(--primary-600)" />
-              <select
-                className="form-select"
-                style={{ padding: '7px 12px', fontSize: '0.82rem', width: 'auto' }}
-                value={locationFilter}
-                onChange={(e) => setLocationFilter(e.target.value)}
-              >
-                <option value="ALL">🌐 All Branch Locations</option>
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    📍 {loc.name} ({loc.code})
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Location / Branch Filter */}
+          <select
+            className="form-select"
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+          >
+            <option value="ALL">🌐 All Branches</option>
+            {locations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                📍 {loc.name} ({loc.code})
+              </option>
+            ))}
+          </select>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Building2 size={15} color="var(--primary-600)" />
-              <select
-                className="form-select"
-                style={{ padding: '7px 12px', fontSize: '0.82rem', width: 'auto' }}
-                value={supplierFilter}
-                onChange={(e) => setSupplierFilter(e.target.value)}
-              >
-                <option value="ALL">👥 All Suppliers</option>
-                {parties.filter(p => p.type === 'SUPPLIER').map(sup => (
-                  <option key={sup.id} value={sup.id}>{sup.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+          {/* Supplier Filter */}
+          <select
+            className="form-select"
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+            value={supplierFilter}
+            onChange={(e) => setSupplierFilter(e.target.value)}
+          >
+            <option value="ALL">👥 All Suppliers</option>
+            {parties.filter(p => p.type === 'SUPPLIER').map(sup => (
+              <option key={sup.id} value={sup.id}>{sup.name}</option>
+            ))}
+          </select>
+
+          {/* Single Date Range Button */}
+          <DateRangePicker
+            value={dateRange}
+            onChange={setDateRange}
+            variant="dropdown"
+            allowAllTime={true}
+          />
+
+          {/* Refresh Button */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => loadData()}
+            disabled={isLoading}
+            style={{ height: 35, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: '0.8rem' }}
+            title="Refresh Orders"
+          >
+            <RefreshCw size={13} className={isLoading ? 'spin-animation' : ''} />
+            <span>Refresh</span>
+          </button>
         </div>
 
-        {/* Status Filter Buttons */}
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--neutral-200)', flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--neutral-500)', display: 'flex', alignItems: 'center', gap: 4, marginRight: 4 }}>
-            <Filter size={13} /> Filter Status:
-          </span>
-          {[
-            { key: 'ALL', label: 'All Orders' },
-            { key: 'ORDERED', label: 'Ordered' },
-            { key: 'PARTIALLY_RECEIVED', label: 'Partially Received' },
-            { key: 'RECEIVED', label: 'Fully Received' },
-            { key: 'CANCELLED', label: 'Cancelled' },
-          ].map(tab => (
+        {/* Line 2: Active Filter Chips */}
+        {(searchQuery.trim() !== '' || statusFilter !== 'ALL' || locationFilter !== 'ALL' || supplierFilter !== 'ALL' || dateRange.preset !== 'ALL') && (
+          <div style={{
+            display: 'flex',
+            gap: 6,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            paddingTop: 8,
+            borderTop: '1px solid var(--neutral-200)',
+            fontSize: '0.74rem'
+          }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.03em', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Filter size={11} /> Active Filters:
+            </span>
+
+            {/* Search Query Chip */}
+            {searchQuery.trim() !== '' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 12,
+                backgroundColor: 'var(--primary-50)',
+                color: 'var(--primary-700)',
+                border: '1px solid var(--primary-200)',
+                fontWeight: 600,
+                fontSize: '0.74rem'
+              }}>
+                <Search size={10} />
+                <span>"{searchQuery.trim()}"</span>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--primary-700)' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Status Chip */}
+            {statusFilter !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 12,
+                backgroundColor: '#f8fafc',
+                color: '#0f172a',
+                border: '1px solid #e2e8f0',
+                fontWeight: 600,
+                fontSize: '0.74rem'
+              }}>
+                <PackageCheck size={10} />
+                <span>Status: {statusFilter.replace(/_/g, ' ')}</span>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#64748b' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Branch Chip */}
+            {locationFilter !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 12,
+                backgroundColor: '#f1f5f9',
+                color: '#334155',
+                border: '1px solid #cbd5e1',
+                fontWeight: 600,
+                fontSize: '0.74rem'
+              }}>
+                <MapPin size={10} />
+                <span>Branch: {locations.find(l => l.id === locationFilter)?.name || locationFilter}</span>
+                <button
+                  type="button"
+                  onClick={() => setLocationFilter('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#475569' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Supplier Chip */}
+            {supplierFilter !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 12,
+                backgroundColor: '#fef3c7',
+                color: '#92400e',
+                border: '1px solid #fde68a',
+                fontWeight: 600,
+                fontSize: '0.74rem'
+              }}>
+                <Building2 size={10} />
+                <span>Supplier: {parties.find(p => p.id === supplierFilter)?.name || supplierFilter}</span>
+                <button
+                  type="button"
+                  onClick={() => setSupplierFilter('ALL')}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#92400e' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Date Range Chip */}
+            {dateRange.preset !== 'ALL' && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 8px',
+                borderRadius: 12,
+                backgroundColor: '#f0fdf4',
+                color: '#166534',
+                border: '1px solid #bbf7d0',
+                fontWeight: 600,
+                fontSize: '0.74rem'
+              }}>
+                <Calendar size={10} />
+                <span>
+                  {dateRange.preset === 'CUSTOM'
+                    ? `${formatIsoToDisplay(dateRange.fromDate)} to ${formatIsoToDisplay(dateRange.toDate)}`
+                    : dateRange.preset.replace(/_/g, ' ')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDateRange({ preset: 'ALL', fromDate: '', toDate: '' })}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#166534' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Clear All Filters Button */}
             <button
-              key={tab.key}
-              onClick={() => setStatusFilter(tab.key)}
-              className={`btn btn-sm ${statusFilter === tab.key ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 'var(--radius-sm)' }}
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setStatusFilter('ALL');
+                setLocationFilter('ALL');
+                setSupplierFilter('ALL');
+                setDateRange({ preset: 'ALL', fromDate: '', toDate: '' });
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--danger-600)',
+                fontWeight: 700,
+                fontSize: '0.72rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                marginLeft: 4,
+                padding: '2px 6px',
+                borderRadius: 4,
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--danger-50)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             >
-              {tab.label}
+              <RotateCcw size={10} />
+              <span>Clear All</span>
             </button>
-          ))}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Main PO Table Card */}

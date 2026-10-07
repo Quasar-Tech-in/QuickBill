@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -44,12 +45,51 @@ async def list_sales(
         })
 
     if from_date or to_date:
-        date_cond: dict = {}
+        from_dt = None
+        to_dt = None
         if from_date:
-            date_cond["$gte"] = from_date
+            try:
+                clean_from = from_date.split("T")[0]
+                parts = [int(p) for p in clean_from.split("-")]
+                from_dt = datetime(parts[0], parts[1], parts[2], 0, 0, 0, tzinfo=timezone.utc)
+            except Exception:
+                pass
         if to_date:
-            date_cond["$lte"] = f"{to_date}T23:59:59.999Z" if "T" not in to_date else to_date
-        conditions.append({"$or": [{"createdAt": date_cond}, {"date": date_cond}]})
+            try:
+                clean_to = to_date.split("T")[0]
+                parts = [int(p) for p in clean_to.split("-")]
+                to_dt = datetime(parts[0], parts[1], parts[2], 23, 59, 59, 999999, tzinfo=timezone.utc)
+            except Exception:
+                pass
+
+        created_dt_match: dict = {}
+        created_str_match: dict = {}
+        date_str_match: dict = {}
+
+        if from_dt:
+            created_dt_match["$gte"] = from_dt
+        if to_dt:
+            created_dt_match["$lte"] = to_dt
+
+        if from_date:
+            clean_f = from_date.split("T")[0]
+            created_str_match["$gte"] = clean_f
+            date_str_match["$gte"] = clean_f
+        if to_date:
+            clean_t = to_date.split("T")[0]
+            created_str_match["$lte"] = f"{clean_t}T23:59:59.999Z"
+            date_str_match["$lte"] = clean_t
+
+        date_or = []
+        if created_dt_match:
+            date_or.append({"createdAt": created_dt_match})
+        if created_str_match:
+            date_or.append({"createdAt": created_str_match})
+        if date_str_match:
+            date_or.append({"date": date_str_match})
+
+        if date_or:
+            conditions.append({"$or": date_or})
 
     query = {"$and": conditions}
 

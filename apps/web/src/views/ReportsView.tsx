@@ -322,9 +322,9 @@ export const ReportsView: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, position: 'relative', zIndex: 10 }}>
           {/* Universal Date Range Filter (DD-MM-YYYY) */}
-          <DateRangePicker value={dateRange} onChange={setDateRange} />
+          <DateRangePicker value={dateRange} onChange={setDateRange} variant="dropdown" allowAllTime={true} />
 
           {/* Branch Location Scope Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
