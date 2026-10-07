@@ -23,6 +23,7 @@ interface DateRangePickerProps {
   onChange: (val: DateRangeValue) => void;
   compact?: boolean;
   allowAllTime?: boolean;
+  variant?: 'strip' | 'dropdown';
 }
 
 // Format 'YYYY-MM-DD' to 'DD-MM-YYYY'
@@ -98,18 +99,36 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({
   onChange,
   compact = false,
   allowAllTime = true,
+  variant = 'strip',
 }) => {
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
   const [customFromDate, setCustomFromDate] = useState<string>(value.fromDate || new Date().toISOString().split('T')[0]);
   const [customToDate, setCustomToDate] = useState<string>(value.toDate || new Date().toISOString().split('T')[0]);
   const [inputError, setInputError] = useState<string>('');
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (value.fromDate) setCustomFromDate(value.fromDate);
     if (value.toDate) setCustomToDate(value.toDate);
   }, [value.fromDate, value.toDate]);
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDropdownOpen]);
+
   const handlePresetSelect = (preset: DatePreset) => {
+    setIsDropdownOpen(false);
     if (preset === 'CUSTOM') {
       setIsCustomModalOpen(true);
       return;
@@ -142,88 +161,200 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({
   };
 
   const presetsList: { key: DatePreset; label: string }[] = [
+    ...(allowAllTime ? [{ key: 'ALL' as DatePreset, label: 'All Time' }] : []),
     { key: 'TODAY', label: 'Today' },
     { key: 'YESTERDAY', label: 'Yesterday' },
-    { key: 'LAST_7_DAYS', label: '7 Days' },
+    { key: 'LAST_7_DAYS', label: 'Last 7 Days' },
     { key: 'THIS_MONTH', label: 'This Month' },
-    { key: 'LAST_30_DAYS', label: '30 Days' },
+    { key: 'LAST_30_DAYS', label: 'Last 30 Days' },
     { key: 'THIS_QUARTER', label: 'This Quarter' },
     { key: 'THIS_YEAR', label: 'This Year' },
-    ...(allowAllTime ? [{ key: 'ALL' as DatePreset, label: 'All Time' }] : []),
-    { key: 'CUSTOM', label: 'Custom' },
+    { key: 'CUSTOM', label: 'Custom Range...' },
   ];
 
+  const getDropdownLabel = () => {
+    if (value.preset === 'CUSTOM' && value.fromDate && value.toDate) {
+      return `${formatIsoToDisplay(value.fromDate)} to ${formatIsoToDisplay(value.toDate)}`;
+    }
+    const matching = presetsList.find(p => p.key === value.preset);
+    if (matching) return matching.label;
+    if (value.fromDate && value.toDate) {
+      return `${formatIsoToDisplay(value.fromDate)} to ${formatIsoToDisplay(value.toDate)}`;
+    }
+    return 'Select Date Range';
+  };
+
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      {/* Preset Buttons Strip */}
-      <div 
-        style={{ 
-          display: 'inline-flex', 
-          alignItems: 'center', 
-          background: 'var(--neutral-100)', 
-          borderRadius: 'var(--radius-md)', 
-          padding: 3, 
-          border: '1px solid var(--neutral-200)',
-          gap: 2,
-          flexWrap: 'wrap'
-        }}
-      >
-        {presetsList.map(({ key, label }) => {
-          const isSelected = value.preset === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => handlePresetSelect(key)}
+    <div ref={dropdownRef} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+      {variant === 'dropdown' ? (
+        /* Single Compact Dropdown Button */
+        <div style={{ position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => setIsDropdownOpen(prev => !prev)}
+            className="form-select"
+            style={{
+              height: 36,
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              padding: '0 12px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              minWidth: 155,
+              justifyContent: 'space-between',
+              backgroundColor: value.preset !== 'ALL' ? 'var(--primary-50)' : '#ffffff',
+              borderColor: value.preset !== 'ALL' ? 'var(--primary-300)' : 'var(--neutral-300)',
+              color: value.preset !== 'ALL' ? 'var(--primary-800)' : 'var(--neutral-800)',
+              appearance: 'none',
+              WebkitAppearance: 'none',
+              boxShadow: 'none',
+            }}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <Calendar size={14} style={{ color: value.preset !== 'ALL' ? 'var(--primary-600)' : 'var(--neutral-500)', flexShrink: 0 }} />
+              <span>{getDropdownLabel()}</span>
+            </span>
+            <ChevronDown size={13} style={{ color: 'var(--neutral-400)', flexShrink: 0 }} />
+          </button>
+
+          {/* Dropdown Menu Overlay */}
+          {isDropdownOpen && (
+            <div
               style={{
-                border: 'none',
-                padding: compact ? '4px 8px' : '5px 11px',
-                fontSize: compact ? '0.74rem' : '0.78rem',
-                fontWeight: isSelected ? 700 : 500,
-                borderRadius: 'var(--radius-sm)',
-                cursor: 'pointer',
-                background: isSelected ? 'var(--surface-card)' : 'transparent',
-                color: isSelected ? 'var(--primary-600)' : 'var(--neutral-600)',
-                boxShadow: isSelected ? 'var(--shadow-sm)' : 'none',
-                transition: 'all 0.15s ease',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
+                position: 'absolute',
+                top: 'calc(100% + 4px)',
+                left: 0,
+                background: '#ffffff',
+                borderRadius: 'var(--radius-md, 8px)',
+                border: '1px solid var(--neutral-200)',
+                boxShadow: '0 12px 28px rgba(0, 0, 0, 0.14), 0 4px 10px rgba(0, 0, 0, 0.05)',
+                zIndex: 1100,
+                minWidth: 200,
+                padding: 4,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
               }}
             >
-              {key === 'CUSTOM' && <Calendar size={12} />}
-              <span>{label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Formatted Date Range Indicator (in DD-MM-YYYY) */}
-      {value.fromDate && value.toDate && (
-        <div
-          onClick={() => setIsCustomModalOpen(true)}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 10px',
-            borderRadius: 'var(--radius-sm)',
-            backgroundColor: 'var(--primary-50)',
-            border: '1px solid var(--primary-200)',
-            color: 'var(--primary-700)',
-            fontSize: '0.76rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap'
-          }}
-          title="Click to change custom date range"
-        >
-          <Calendar size={13} />
-          <span>
-            {formatIsoToDisplay(value.fromDate)} to {formatIsoToDisplay(value.toDate)}
-          </span>
-          <ChevronDown size={12} style={{ opacity: 0.7 }} />
+              <div style={{ padding: '4px 8px', fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-400)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Quick Date Durations
+              </div>
+              {presetsList.map(({ key, label }) => {
+                const isSelected = value.preset === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => handlePresetSelect(key)}
+                    style={{
+                      border: 'none',
+                      padding: '7px 10px',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      background: isSelected ? 'var(--primary-50)' : 'transparent',
+                      color: isSelected ? 'var(--primary-700)' : 'var(--neutral-700)',
+                      fontWeight: isSelected ? 700 : 500,
+                      fontSize: '0.8rem',
+                      textAlign: 'left',
+                      transition: 'background 0.12s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = 'var(--neutral-100)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {key === 'CUSTOM' ? <Clock size={13} style={{ color: 'var(--primary-600)' }} /> : null}
+                      <span>{label}</span>
+                    </span>
+                    {isSelected && <Check size={14} style={{ color: 'var(--primary-600)' }} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
+      ) : (
+        /* Preset Buttons Strip */
+        <>
+          <div 
+            style={{ 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              background: 'var(--neutral-100)', 
+              borderRadius: 'var(--radius-md)', 
+              padding: 3, 
+              border: '1px solid var(--neutral-200)',
+              gap: 2,
+              flexWrap: 'wrap'
+            }}
+          >
+            {presetsList.map(({ key, label }) => {
+              const isSelected = value.preset === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => handlePresetSelect(key)}
+                  style={{
+                    border: 'none',
+                    padding: compact ? '4px 8px' : '5px 11px',
+                    fontSize: compact ? '0.74rem' : '0.78rem',
+                    fontWeight: isSelected ? 700 : 500,
+                    borderRadius: 'var(--radius-sm)',
+                    cursor: 'pointer',
+                    background: isSelected ? 'var(--surface-card)' : 'transparent',
+                    color: isSelected ? 'var(--primary-600)' : 'var(--neutral-600)',
+                    boxShadow: isSelected ? 'var(--shadow-sm)' : 'none',
+                    transition: 'all 0.15s ease',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  {key === 'CUSTOM' && <Calendar size={12} />}
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Formatted Date Range Indicator (in DD-MM-YYYY) */}
+          {value.fromDate && value.toDate && (
+            <div
+              onClick={() => setIsCustomModalOpen(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--primary-50)',
+                border: '1px solid var(--primary-200)',
+                color: 'var(--primary-700)',
+                fontSize: '0.76rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+              title="Click to change custom date range"
+            >
+              <Calendar size={13} />
+              <span>
+                {formatIsoToDisplay(value.fromDate)} to {formatIsoToDisplay(value.toDate)}
+              </span>
+              <ChevronDown size={12} style={{ opacity: 0.7 }} />
+            </div>
+          )}
+        </>
       )}
 
       {/* Custom Date Range Popover / Modal (DD-MM-YYYY) */}

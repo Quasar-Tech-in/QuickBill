@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Package, 
   Plus, 
@@ -28,9 +28,17 @@ import {
   Eye,
   Check,
   Boxes,
-  Printer
+  Printer,
+  History,
+  TrendingUp,
+  TrendingDown,
+  Download,
+  RefreshCw,
+  FileSpreadsheet,
+  Lock,
+  Scale
 } from 'lucide-react';
-import { Item, StoreLocation, ItemLocationInventory, ItemCategory, ItemImage } from '../types';
+import { Item, StoreLocation, ItemLocationInventory, ItemCategory, ItemImage, InventoryMovement } from '../types';
 import { store } from '../services/store';
 import { StatusBadge } from '../components/StatusBadge';
 import { QRModal } from '../components/QRModal';
@@ -38,6 +46,7 @@ import { PrintLabelModal } from '../components/PrintLabelModal';
 import { CustomSelect } from '../components/CustomSelect';
 import { Pagination } from '../components/Pagination';
 import { SyncInventoryModal } from '../components/SyncInventoryModal';
+import { DateRangePicker, DateRangeValue } from '../components/DateRangePicker';
 import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
 import { uploadItemImage, deleteItemImages } from '../services/supabaseStorage';
 
@@ -82,6 +91,23 @@ export const InventoryView: React.FC = () => {
   const [adjustLocationId, setAdjustLocationId] = useState<string>(selectedLocationId);
   const [adjustDelta, setAdjustDelta] = useState<number | string>(10);
   const [adjustType, setAdjustType] = useState<'ADD' | 'REDUCE'>('ADD');
+  const [adjustUnitCost, setAdjustUnitCost] = useState<number | string>('');
+  const [adjustReason, setAdjustReason] = useState<string>('Physical Stock Count / Surplus');
+  const [adjustNotes, setAdjustNotes] = useState<string>('');
+
+  const openStockAdjustment = (item: Item, locationId?: string) => {
+    const raw = rawItems.find(r => r.id === item.id) || item;
+    setSelectedItemForAdjust(raw);
+    setAdjustLocationId(locationId || selectedLocationId);
+    setAdjustDelta(raw.allowParts ? '1.000' : '1');
+    setAdjustType('ADD');
+    const defaultCost = raw.purchasePrice !== undefined ? String(raw.purchasePrice) : (raw.averageCostPrice !== undefined ? String(raw.averageCostPrice) : '');
+    setAdjustUnitCost(defaultCost);
+    setAdjustReason('Physical Stock Count / Surplus');
+    setAdjustNotes('');
+    setIsAdjustModalOpen(true);
+  };
+
 
   // Branch Catalog Sync Modal State
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -95,10 +121,56 @@ export const InventoryView: React.FC = () => {
   const [editingCatName, setEditingCatName] = useState('');
   const [editingCatDesc, setEditingCatDesc] = useState('');
 
+  // Tab State: Products Catalog vs Stock Movement Ledger
+  const [activeMainTab, setActiveMainTab] = useState<'PRODUCTS' | 'LEDGER'>('PRODUCTS');
+
+  // Stock Movement Ledger State
+  const [movements, setMovements] = useState<InventoryMovement[]>([]);
+  const [isMovementsLoading, setIsMovementsLoading] = useState<boolean>(false);
+  const [movementTypeFilter, setMovementTypeFilter] = useState<string>('ALL');
+  const [movementLocationFilter, setMovementLocationFilter] = useState<string>('ALL');
+  const [movementSearchQuery, setMovementSearchQuery] = useState<string>('');
+  const [movementKeywords, setMovementKeywords] = useState<string[]>([]);
+  const [movementDateRange, setMovementDateRange] = useState<DateRangeValue>({
+    preset: 'ALL',
+    fromDate: '',
+    toDate: '',
+  });
+  const [isProductSuggestionsOpen, setIsProductSuggestionsOpen] = useState<boolean>(false);
+  const movementSearchContainerRef = useRef<HTMLDivElement>(null);
+  const [movementPage, setMovementPage] = useState<number>(1);
+  const [movementPageSize, setMovementPageSize] = useState<number>(25);
+  const [movementTotal, setMovementTotal] = useState<number>(0);
+
+
+
   // Pagination State
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(25);
   const [totalItems, setTotalItems] = useState<number>(0);
+
+  // Close product search suggestions on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (movementSearchContainerRef.current && !movementSearchContainerRef.current.contains(event.target as Node)) {
+        setIsProductSuggestionsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Product suggestions computed from store catalog
+  const movementProductSuggestions = useMemo(() => {
+    if (!movementSearchQuery || !movementSearchQuery.trim()) return [];
+    const q = movementSearchQuery.trim().toLowerCase();
+    return rawItems.filter(item => 
+      (item.name && item.name.toLowerCase().includes(q)) ||
+      (item.sku && item.sku.toLowerCase().includes(q)) ||
+      (item.barcode && item.barcode.toLowerCase().includes(q)) ||
+      (item.publicItemId && item.publicItemId.toLowerCase().includes(q))
+    ).slice(0, 6);
+  }, [movementSearchQuery, rawItems]);
 
   // Reset page when search or category filters change
   useEffect(() => {
@@ -257,6 +329,126 @@ export const InventoryView: React.FC = () => {
       setTotalItems(all.length);
     }
   }, [currentPage, pageSize, selectedLocationId, debouncedSearch, selectedCategories]);
+
+  const addMovementKeyword = (keyword: string) => {
+    const clean = keyword.trim();
+    if (!clean) return;
+    if (!movementKeywords.includes(clean)) {
+      setMovementKeywords(prev => [...prev, clean]);
+    }
+    setMovementSearchQuery('');
+    setIsProductSuggestionsOpen(false);
+    setMovementPage(1);
+  };
+
+  const removeMovementKeyword = (keyword: string) => {
+    setMovementKeywords(prev => prev.filter(k => k !== keyword));
+    setMovementPage(1);
+  };
+
+  const clearAllMovementFilters = () => {
+    setMovementKeywords([]);
+    setMovementSearchQuery('');
+    setMovementTypeFilter('ALL');
+    setMovementLocationFilter('ALL');
+    setMovementDateRange({ preset: 'ALL', fromDate: '', toDate: '' });
+    setMovementPage(1);
+  };
+
+  const handleApplyMovementFilter = (overrideSearch?: string) => {
+    if (overrideSearch && overrideSearch.trim()) {
+      addMovementKeyword(overrideSearch);
+      return;
+    }
+    if (movementSearchQuery.trim()) {
+      addMovementKeyword(movementSearchQuery);
+      return;
+    }
+    setIsProductSuggestionsOpen(false);
+    setMovementPage(1);
+  };
+
+  const loadMovements = useCallback(async (
+    page: number = movementPage,
+    size: number = movementPageSize,
+    type: string = movementTypeFilter,
+    locId: string = movementLocationFilter,
+    keywords: string[] = movementKeywords,
+    fromDate: string = movementDateRange.fromDate,
+    toDate: string = movementDateRange.toDate
+  ) => {
+    setIsMovementsLoading(true);
+    try {
+      const searchParam = keywords.length > 0 ? keywords.join(',') : undefined;
+      const res = await store.fetchInventoryMovements({
+        page,
+        pageSize: size,
+        type: type !== 'ALL' ? type : undefined,
+        locationId: locId !== 'ALL' ? locId : undefined,
+        search: searchParam,
+        fromDate: fromDate || undefined,
+        toDate: toDate || undefined,
+      });
+      setMovements(res.data);
+      setMovementTotal(res.total);
+    } catch (err) {
+      console.error('Error fetching inventory movements:', err);
+    } finally {
+      setIsMovementsLoading(false);
+    }
+  }, [movementPage, movementPageSize, movementTypeFilter, movementLocationFilter, movementKeywords, movementDateRange.fromDate, movementDateRange.toDate]);
+
+  useEffect(() => {
+    if (activeMainTab === 'LEDGER') {
+      loadMovements(movementPage, movementPageSize, movementTypeFilter, movementLocationFilter, movementKeywords, movementDateRange.fromDate, movementDateRange.toDate);
+    }
+  }, [activeMainTab, movementPage, movementPageSize, movementTypeFilter, movementLocationFilter, movementKeywords, movementDateRange.fromDate, movementDateRange.toDate, loadMovements]);
+
+  const viewItemMovementLedger = (targetItem: Item) => {
+    setActiveMainTab('LEDGER');
+    const term = targetItem.name || targetItem.sku || targetItem.publicItemId;
+    setMovementKeywords(term ? [term] : []);
+    setMovementSearchQuery('');
+    setIsProductSuggestionsOpen(false);
+    setMovementTypeFilter('ALL');
+    setMovementLocationFilter('ALL');
+    setMovementDateRange({ preset: 'ALL', fromDate: '', toDate: '' });
+    setMovementPage(1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const exportMovementsToCsv = () => {
+    if (movements.length === 0) return;
+    const headers = ['Date & Time', 'Product Name', 'SKU', 'Public ID', 'Location', 'Movement Type', 'Reference Type', 'Reference Number', 'Qty Change', 'Stock Before', 'Stock After', 'Unit Cost (INR)', 'Total Valuation (INR)', 'Actor', 'Reason', 'Notes'];
+    const rows = movements.map(m => [
+      `"${m.createdAt}"`,
+      `"${(m.itemName || '').replace(/"/g, '""')}"`,
+      `"${m.sku || ''}"`,
+      `"${m.publicItemId || ''}"`,
+      `"${m.locationName || 'Branch'}"`,
+      `"${m.type}"`,
+      `"${m.referenceType || ''}"`,
+      `"${m.referenceNumber || ''}"`,
+      m.quantityChange,
+      m.quantityBefore,
+      m.quantityAfter,
+      m.unitCost,
+      m.totalCost || (Math.abs(m.quantityChange) * m.unitCost),
+      `"${m.createdByName || 'Staff'}"`,
+      `"${(m.reason || '').replace(/"/g, '""')}"`,
+      `"${(m.notes || '').replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Inventory_Stock_Movements_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   useEffect(() => {
     loadPaginatedItems(currentPage, pageSize, selectedLocationId, debouncedSearch, selectedCategories);
@@ -603,7 +795,16 @@ export const InventoryView: React.FC = () => {
     if (!selectedItemForAdjust) return;
     const numDelta = parseFloat(String(adjustDelta)) || 0;
     const delta = adjustType === 'ADD' ? Math.abs(numDelta) : -Math.abs(numDelta);
-    await store.adjustStock(selectedItemForAdjust.id, delta, adjustLocationId);
+    const customCost = adjustType === 'ADD' && adjustUnitCost !== '' ? parseFloat(String(adjustUnitCost)) : undefined;
+
+    await store.adjustStock(
+      selectedItemForAdjust.id,
+      delta,
+      adjustLocationId,
+      customCost,
+      adjustReason,
+      adjustNotes.trim() || undefined
+    );
     await loadPaginatedItems();
     refreshData();
     setIsAdjustModalOpen(false);
@@ -668,20 +869,73 @@ export const InventoryView: React.FC = () => {
         )}
       </div>
 
-      {/* Filters Card */}
-      <div className="card" style={{ padding: '12px 16px', marginBottom: 16, overflow: 'visible', position: 'relative', zIndex: 5 }}>
-        <div style={{ display: 'flex', gap: 14, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-          {/* Main Product Search Bar */}
-          <div style={{ position: 'relative', flex: '1 1 300px', minWidth: 240 }}>
-            <Search size={17} style={{ position: 'absolute', left: 12, top: 10, color: 'var(--neutral-400)' }} />
-            <input
-              type="text"
-              placeholder="Search by name, SKU, QR barcode, or public ID..."
-              className="form-input"
-              style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box' }}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+      {/* Navigation Tab Switcher */}
+      <div style={{ display: 'flex', gap: 12, borderBottom: '2px solid var(--neutral-200)', marginBottom: 16 }}>
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('PRODUCTS')}
+          style={{
+            padding: '10px 18px',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeMainTab === 'PRODUCTS' ? '3px solid var(--primary-600)' : '3px solid transparent',
+            color: activeMainTab === 'PRODUCTS' ? 'var(--primary-700)' : 'var(--neutral-600)',
+            fontWeight: activeMainTab === 'PRODUCTS' ? 800 : 600,
+            fontSize: '0.88rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: -2,
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <Package size={16} color={activeMainTab === 'PRODUCTS' ? 'var(--primary-600)' : 'var(--neutral-400)'} />
+          <span>Products Catalog ({totalItems || items.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveMainTab('LEDGER');
+            loadMovements(1);
+          }}
+          style={{
+            padding: '10px 18px',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeMainTab === 'LEDGER' ? '3px solid var(--primary-600)' : '3px solid transparent',
+            color: activeMainTab === 'LEDGER' ? 'var(--primary-700)' : 'var(--neutral-600)',
+            fontWeight: activeMainTab === 'LEDGER' ? 800 : 600,
+            fontSize: '0.88rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: -2,
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <History size={16} color={activeMainTab === 'LEDGER' ? 'var(--primary-600)' : 'var(--neutral-400)'} />
+          <span>Stock Movement Ledger & Audit Trail</span>
+        </button>
+      </div>
+
+      {activeMainTab === 'PRODUCTS' && (
+        <>
+          {/* Filters Card */}
+          <div className="card" style={{ padding: '12px 16px', marginBottom: 16, overflow: 'visible', position: 'relative', zIndex: 5 }}>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              {/* Main Product Search Bar */}
+              <div style={{ position: 'relative', flex: '1 1 300px', minWidth: 240 }}>
+                <Search size={17} style={{ position: 'absolute', left: 12, top: 10, color: 'var(--neutral-400)' }} />
+                <input
+                  type="text"
+                  placeholder="Search by name, SKU, QR barcode, or public ID..."
+                  className="form-input"
+                  style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box' }}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
             {searchQuery && (
               <button
                 type="button"
@@ -943,11 +1197,11 @@ export const InventoryView: React.FC = () => {
                 <th style={{ padding: '10px 12px' }}>Product Name</th>
                 <th style={{ width: '100px', padding: '10px 12px' }}>Category</th>
                 <th style={{ width: '120px', padding: '10px 12px' }}>MRP</th>
-                <th style={{ width: '90px', padding: '10px 12px' }}>Purchase</th>
+                <th style={{ width: '110px', padding: '10px 12px' }}>Purchase (WAC)</th>
                 <th style={{ width: '70px', padding: '10px 12px' }}>GST</th>
                 <th style={{ width: '100px', padding: '10px 12px' }}>Stock</th>
                 <th style={{ width: '95px', padding: '10px 12px' }}>Status</th>
-                <th style={{ textAlign: 'right', width: '125px', padding: '10px 12px' }}>Actions</th>
+                <th style={{ textAlign: 'right', width: '150px', padding: '10px 12px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1050,7 +1304,7 @@ export const InventoryView: React.FC = () => {
                       </div>
                     </td>
                     <td style={{ color: 'var(--neutral-600)', fontSize: '0.85rem', padding: '10px 12px' }}>
-                      ₹{Number(item.purchasePrice || 0).toFixed(2)}
+                      <div style={{ fontWeight: 600 }}>₹{Number(item.purchasePrice || 0).toFixed(2)}</div>
                     </td>
                     <td style={{ fontSize: '0.85rem', padding: '10px 12px' }}>{Number(item.taxRate || 0)}%</td>
                     <td style={{ padding: '10px 12px' }}>
@@ -1076,6 +1330,14 @@ export const InventoryView: React.FC = () => {
                     </td>
                     <td style={{ textAlign: 'right', padding: '10px 12px' }}>
                       <div style={{ display: 'inline-flex', gap: 4 }}>
+                        <button
+                          className="btn btn-secondary btn-icon btn-sm"
+                          title="View Stock Movement Audit Trail in Ledger"
+                          onClick={() => viewItemMovementLedger(item)}
+                          style={{ padding: 5 }}
+                        >
+                          <History size={14} color="var(--primary-600)" />
+                        </button>
                         <button
                           className="btn btn-secondary btn-icon btn-sm"
                           title="Generate QR Barcode"
@@ -1105,11 +1367,7 @@ export const InventoryView: React.FC = () => {
                         <button
                           className="btn btn-secondary btn-icon btn-sm"
                           title="Adjust Branch Stock Quantity"
-                          onClick={() => {
-                            setSelectedItemForAdjust(item);
-                            setAdjustLocationId(selectedLocationId);
-                            setIsAdjustModalOpen(true);
-                          }}
+                          onClick={() => openStockAdjustment(item)}
                           style={{ padding: 5 }}
                         >
                           <SlidersHorizontal size={14} />
@@ -1141,6 +1399,532 @@ export const InventoryView: React.FC = () => {
           itemLabel="products"
         />
       </div>
+      </>
+      )}
+
+      {/* Stock Movement Ledger & Audit Trail Tab */}
+      {activeMainTab === 'LEDGER' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Movement KPI Summary Cards */}
+          {(() => {
+            let totalIn = 0;
+            let totalOut = 0;
+            movements.forEach(m => {
+              if (m.quantityChange > 0) totalIn += m.quantityChange;
+              else totalOut += Math.abs(m.quantityChange);
+            });
+            const netShift = totalIn - totalOut;
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                <div className="card" style={{ padding: '14px 16px', background: '#f8fafc', border: '1px solid var(--neutral-200)' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>
+                    Total Movement Logs
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--neutral-900)', fontFamily: 'var(--font-mono)', marginTop: 4 }}>
+                    {movementTotal}
+                  </div>
+                </div>
+
+                <div className="card" style={{ padding: '14px 16px', background: '#ecfdf5', border: '1px solid #a7f3d0' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <TrendingUp size={14} /> Total Inward Volume
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#065f46', fontFamily: 'var(--font-mono)', marginTop: 4 }}>
+                    +{totalIn.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="card" style={{ padding: '14px 16px', background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <TrendingDown size={14} /> Total Outward Volume
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#1e40af', fontFamily: 'var(--font-mono)', marginTop: 4 }}>
+                    -{totalOut.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="card" style={{ padding: '14px 16px', background: netShift >= 0 ? '#f0fdf4' : '#fef2f2', border: `1px solid ${netShift >= 0 ? '#bbf7d0' : '#fecaca'}` }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: netShift >= 0 ? '#15803d' : '#b91c1c', textTransform: 'uppercase' }}>
+                    Net Stock Shift
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 900, color: netShift >= 0 ? '#15803d' : '#b91c1c', fontFamily: 'var(--font-mono)', marginTop: 4 }}>
+                    {netShift >= 0 ? `+${netShift.toFixed(2)}` : netShift.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Movements Filters Card */}
+          <div className="card" style={{ padding: '12px 16px', overflow: 'visible', position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Line 1: All Primary Controls in a Single Row */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
+              {/* Product Search with Multi-Item Autocomplete */}
+              <div ref={movementSearchContainerRef} style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
+                <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--neutral-400)' }} />
+                <input
+                  type="text"
+                  placeholder="Search & select multiple items / SKUs / keywords..."
+                  className="form-input"
+                  style={{ paddingLeft: 32, paddingRight: movementSearchQuery ? 28 : 10, height: 35, fontSize: '0.82rem', width: '100%', boxSizing: 'border-box' }}
+                  value={movementSearchQuery}
+                  onChange={(e) => {
+                    setMovementSearchQuery(e.target.value);
+                    setIsProductSuggestionsOpen(true);
+                  }}
+                  onFocus={() => {
+                    if (movementSearchQuery.trim()) {
+                      setIsProductSuggestionsOpen(true);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleApplyMovementFilter();
+                    }
+                  }}
+                />
+                {movementSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setMovementSearchQuery('')}
+                    style={{ position: 'absolute', right: 8, top: 8, background: 'none', border: 'none', color: 'var(--neutral-400)', cursor: 'pointer', fontSize: '0.85rem' }}
+                    title="Clear input"
+                  >
+                    ✕
+                  </button>
+                )}
+
+                {/* Autocomplete Dropdown with Multi-Selection Support */}
+                {isProductSuggestionsOpen && movementProductSuggestions.length > 0 && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 4px)',
+                      left: 0,
+                      right: 0,
+                      background: '#ffffff',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      border: '1px solid var(--neutral-200)',
+                      boxShadow: '0 12px 28px rgba(0, 0, 0, 0.14), 0 4px 10px rgba(0, 0, 0, 0.06)',
+                      maxHeight: 280,
+                      overflowY: 'auto',
+                      zIndex: 1100,
+                      padding: 4,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 2,
+                    }}
+                  >
+                    <div style={{ padding: '4px 8px', fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-400)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Click to Select Multiple Items
+                    </div>
+                    {movementProductSuggestions.map(item => {
+                      const isAlreadySelected = movementKeywords.includes(item.name) || (item.sku && movementKeywords.includes(item.sku));
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            addMovementKeyword(item.name);
+                          }}
+                          style={{
+                            padding: '7px 10px',
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            background: isAlreadySelected ? 'var(--primary-50)' : 'transparent',
+                            transition: 'background 0.12s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isAlreadySelected) e.currentTarget.style.background = 'var(--neutral-100)';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isAlreadySelected) e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontWeight: 600, fontSize: '0.82rem', color: isAlreadySelected ? 'var(--primary-800)' : 'var(--neutral-900)' }}>
+                              {item.name}
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)', display: 'flex', gap: 6, alignItems: 'center' }}>
+                              {item.sku && <span style={{ fontFamily: 'var(--font-mono)' }}>SKU: {item.sku}</span>}
+                              {item.category && <span>&bull; {item.category}</span>}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: Number(item.currentStock || 0) > 0 ? '#ecfdf5' : '#fef2f2', color: Number(item.currentStock || 0) > 0 ? '#047857' : '#b91c1c' }}>
+                              {Number(item.currentStock || 0).toFixed(item.allowParts ? 3 : 0)} {item.unit || 'pcs'}
+                            </span>
+                            {isAlreadySelected ? (
+                              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--primary-600)', background: 'var(--primary-100)', padding: '2px 6px', borderRadius: 4 }}>
+                                ✓ Added
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-600)', background: 'var(--neutral-100)', padding: '2px 6px', borderRadius: 4 }}>
+                                + Add
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Add / Search Button */}
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => handleApplyMovementFilter()}
+                style={{ height: 35, padding: '0 12px', display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 600, flexShrink: 0, fontSize: '0.8rem' }}
+              >
+                <Search size={13} /> Add
+              </button>
+
+              {/* Movement Type Filter */}
+              <select
+                className="form-select"
+                style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 140 }}
+                value={movementTypeFilter}
+                onChange={(e) => { setMovementTypeFilter(e.target.value); setMovementPage(1); }}
+              >
+                <option value="ALL">All Types</option>
+                <option value="PURCHASE">🛒 Inward (PO)</option>
+                <option value="SALE">🛍️ Sales Outward</option>
+                <option value="SALE_RETURN">🔄 Sales Returns</option>
+                <option value="MANUAL_ADJUSTMENT">⚙️ Manual Adjustments</option>
+                <option value="DAMAGED_WRITE_OFF">⚠️ Damaged/Expired</option>
+                <option value="OPENING_STOCK">📦 Opening Stock</option>
+              </select>
+
+              {/* Location Filter */}
+              <select
+                className="form-select"
+                style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 125 }}
+                value={movementLocationFilter}
+                onChange={(e) => { setMovementLocationFilter(e.target.value); setMovementPage(1); }}
+              >
+                <option value="ALL">All Branches</option>
+                {locations.map(loc => (
+                  <option key={loc.id} value={loc.id}>{loc.name}</option>
+                ))}
+              </select>
+
+              {/* Date Range Dropdown Button */}
+              <DateRangePicker
+                value={movementDateRange}
+                onChange={(dr) => {
+                  setMovementDateRange(dr);
+                  setMovementPage(1);
+                }}
+                variant="dropdown"
+                allowAllTime={true}
+              />
+
+              {/* Refresh Button */}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => loadMovements(movementPage)}
+                disabled={isMovementsLoading}
+                style={{ height: 35, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: '0.8rem' }}
+                title="Refresh Ledger"
+              >
+                <RefreshCw size={13} className={isMovementsLoading ? 'spin-animation' : ''} />
+                <span>Refresh</span>
+              </button>
+
+              {/* Export CSV Button */}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={exportMovementsToCsv}
+                disabled={movements.length === 0}
+                style={{ height: 35, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--primary-700)', fontWeight: 600, flexShrink: 0, fontSize: '0.8rem' }}
+                title="Export movements to CSV"
+              >
+                <Download size={13} />
+                <span>Export CSV</span>
+              </button>
+            </div>
+
+            {/* Line 2: Active Keywords & Filter Chips in Small Font */}
+            {(movementKeywords.length > 0 || movementTypeFilter !== 'ALL' || movementLocationFilter !== 'ALL' || movementDateRange.preset !== 'ALL') && (
+              <div style={{
+                display: 'flex',
+                gap: 6,
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                paddingTop: 8,
+                borderTop: '1px solid var(--neutral-200)',
+                fontSize: '0.74rem'
+              }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.03em', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Filter size={11} /> Keywords & Filters:
+                </span>
+
+                {/* Product Keywords Chips */}
+                {movementKeywords.map(kw => (
+                  <span
+                    key={kw}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '2px 8px',
+                      borderRadius: 12,
+                      backgroundColor: 'var(--primary-50)',
+                      color: 'var(--primary-700)',
+                      border: '1px solid var(--primary-200)',
+                      fontWeight: 600,
+                      fontSize: '0.74rem'
+                    }}
+                  >
+                    <Tag size={10} />
+                    <span>{kw}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeMovementKeyword(kw)}
+                      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--primary-600)', display: 'flex', alignItems: 'center', fontSize: '0.75rem', marginLeft: 2 }}
+                      title={`Remove ${kw}`}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+
+                {/* Type Chip */}
+                {movementTypeFilter !== 'ALL' && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '2px 8px',
+                      borderRadius: 12,
+                      backgroundColor: '#eff6ff',
+                      color: '#1d4ed8',
+                      border: '1px solid #bfdbfe',
+                      fontWeight: 600,
+                      fontSize: '0.74rem'
+                    }}
+                  >
+                    <span>Type: {movementTypeFilter}</span>
+                    <button
+                      type="button"
+                      onClick={() => { setMovementTypeFilter('ALL'); setMovementPage(1); }}
+                      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#1d4ed8', display: 'flex', alignItems: 'center', fontSize: '0.75rem', marginLeft: 2 }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+
+                {/* Location Chip */}
+                {movementLocationFilter !== 'ALL' && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '2px 8px',
+                      borderRadius: 12,
+                      backgroundColor: '#f5f3ff',
+                      color: '#6d28d9',
+                      border: '1px solid #ddd6fe',
+                      fontWeight: 600,
+                      fontSize: '0.74rem'
+                    }}
+                  >
+                    <span>Branch: {locations.find(l => l.id === movementLocationFilter)?.name || movementLocationFilter}</span>
+                    <button
+                      type="button"
+                      onClick={() => { setMovementLocationFilter('ALL'); setMovementPage(1); }}
+                      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#6d28d9', display: 'flex', alignItems: 'center', fontSize: '0.75rem', marginLeft: 2 }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+
+                {/* Date Range Chip */}
+                {movementDateRange.preset !== 'ALL' && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '2px 8px',
+                      borderRadius: 12,
+                      backgroundColor: '#ecfdf5',
+                      color: '#047857',
+                      border: '1px solid #a7f3d0',
+                      fontWeight: 600,
+                      fontSize: '0.74rem'
+                    }}
+                  >
+                    <span>Date: {movementDateRange.preset === 'CUSTOM' ? `${movementDateRange.fromDate} to ${movementDateRange.toDate}` : movementDateRange.preset}</span>
+                    <button
+                      type="button"
+                      onClick={() => { setMovementDateRange({ preset: 'ALL', fromDate: '', toDate: '' }); setMovementPage(1); }}
+                      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#047857', display: 'flex', alignItems: 'center', fontSize: '0.75rem', marginLeft: 2 }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+
+                {/* Clear All Button */}
+                <button
+                  type="button"
+                  onClick={clearAllMovementFilters}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: '2px 6px',
+                    cursor: 'pointer',
+                    color: 'var(--danger-600)',
+                    fontWeight: 700,
+                    fontSize: '0.72rem',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  Clear All Filters
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Movements Data Table */}
+          <div className="card" style={{ overflow: 'hidden' }}>
+            <div className="table-responsive">
+              <table className="table" style={{ width: '100%', margin: 0 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: '135px', padding: '10px 12px' }}>Timestamp</th>
+                    <th style={{ padding: '10px 12px' }}>Product & SKU</th>
+                    <th style={{ width: '100px', padding: '10px 12px' }}>Branch</th>
+                    <th style={{ width: '130px', padding: '10px 12px' }}>Type</th>
+                    <th style={{ width: '130px', padding: '10px 12px' }}>Reference</th>
+                    <th style={{ width: '90px', padding: '10px 12px', textAlign: 'right' }}>Qty Shift</th>
+                    <th style={{ width: '120px', padding: '10px 12px', textAlign: 'right' }}>Stock Impact</th>
+                    <th style={{ width: '100px', padding: '10px 12px', textAlign: 'right' }}>Unit Cost</th>
+                    <th style={{ width: '110px', padding: '10px 12px' }}>User</th>
+                    <th style={{ padding: '10px 12px' }}>Reason / Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {isMovementsLoading ? (
+                    <tr>
+                      <td colSpan={10} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--neutral-500)' }}>
+                        <RefreshCw size={24} className="spin-animation" style={{ margin: '0 auto 8px auto', display: 'block', color: 'var(--primary-600)' }} />
+                        Loading stock movements...
+                      </td>
+                    </tr>
+                  ) : movements.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--neutral-500)' }}>
+                        <Package size={28} style={{ margin: '0 auto 8px auto', display: 'block', color: 'var(--neutral-300)' }} />
+                        No inventory movements found matching the selected filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    movements.map((m, idx) => {
+                      const isPositive = m.quantityChange > 0;
+                      let badgeBg = '#f1f5f9';
+                      let badgeColor = '#475569';
+                      let badgeLabel = m.type;
+
+                      if (m.type === 'PURCHASE') {
+                        badgeBg = '#ecfdf5';
+                        badgeColor = '#047857';
+                        badgeLabel = '🛒 PURCHASE';
+                      } else if (m.type === 'SALE') {
+                        badgeBg = '#eff6ff';
+                        badgeColor = '#1d4ed8';
+                        badgeLabel = '🛍️ SALE';
+                      } else if (m.type === 'SALE_RETURN') {
+                        badgeBg = '#faf5ff';
+                        badgeColor = '#7e22ce';
+                        badgeLabel = '🔄 RETURN';
+                      } else if (m.type === 'MANUAL_ADJUSTMENT') {
+                        badgeBg = '#fffbeb';
+                        badgeColor = '#b45309';
+                        badgeLabel = '⚙️ ADJUSTMENT';
+                      } else if (m.type === 'DAMAGED_WRITE_OFF') {
+                        badgeBg = '#fef2f2';
+                        badgeColor = '#b91c1c';
+                        badgeLabel = '⚠️ DAMAGED';
+                      } else if (m.type === 'OPENING_STOCK') {
+                        badgeBg = '#f0fdfa';
+                        badgeColor = '#0f766e';
+                        badgeLabel = '📦 OPENING';
+                      }
+
+                      return (
+                        <tr key={m.id || idx}>
+                          <td style={{ fontSize: '0.78rem', color: 'var(--neutral-600)', padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                            {new Date(m.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ fontWeight: 700, color: 'var(--neutral-900)', fontSize: '0.85rem' }}>{m.itemName}</div>
+                            <div style={{ display: 'flex', gap: 6, fontSize: '0.7rem', color: 'var(--neutral-500)', fontFamily: 'var(--font-mono)' }}>
+                              {m.sku && <span>SKU: {m.sku}</span>}
+                              {m.publicItemId && <span>[{m.publicItemId}]</span>}
+                            </div>
+                          </td>
+                          <td style={{ fontSize: '0.78rem', padding: '10px 12px', color: 'var(--neutral-700)' }}>
+                            {m.locationName || 'Branch'}
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, background: badgeBg, color: badgeColor, fontSize: '0.72rem', fontWeight: 800 }}>
+                              {badgeLabel}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: '0.78rem', fontFamily: 'var(--font-mono)', padding: '10px 12px', fontWeight: 600 }}>
+                            {m.referenceNumber || m.referenceType || '—'}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, color: isPositive ? '#059669' : '#dc2626' }}>
+                            {isPositive ? `+${m.quantityChange.toFixed(2)}` : m.quantityChange.toFixed(2)}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '0.78rem', fontFamily: 'var(--font-mono)' }}>
+                            <span style={{ color: 'var(--neutral-400)' }}>{m.quantityBefore.toFixed(1)}</span>
+                            <span style={{ margin: '0 4px', color: 'var(--neutral-400)' }}>→</span>
+                            <strong style={{ color: 'var(--neutral-900)' }}>{m.quantityAfter.toFixed(1)}</strong>
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '0.82rem', fontFamily: 'var(--font-mono)', color: 'var(--neutral-700)' }}>
+                            ₹{Number(m.unitCost || 0).toFixed(2)}
+                          </td>
+                          <td style={{ fontSize: '0.78rem', color: 'var(--neutral-600)', padding: '10px 12px' }}>
+                            {m.createdByName || 'System'}
+                          </td>
+                          <td style={{ fontSize: '0.78rem', color: 'var(--neutral-600)', padding: '10px 12px' }}>
+                            <div>{m.reason || '—'}</div>
+                            {m.notes && <div style={{ fontSize: '0.7rem', color: 'var(--neutral-400)' }}>{m.notes}</div>}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              currentPage={movementPage}
+              totalItems={movementTotal}
+              pageSize={movementPageSize}
+              onPageChange={(p) => { setMovementPage(p); loadMovements(p); }}
+              onPageSizeChange={(s) => { setMovementPageSize(s); setMovementPage(1); loadMovements(1, s); }}
+              itemLabel="movements"
+            />
+          </div>
+        </div>
+      )}
 
       {/* QR Modal */}
       {selectedItemForQR && (
@@ -1686,29 +2470,75 @@ export const InventoryView: React.FC = () => {
                                 </div>
 
                                 <div style={{ minWidth: 0 }}>
-                                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
-                                    Stock ({formUnit}) *
-                                  </label>
-                                  <input
-                                    type="number"
-                                    step={formAllowParts ? "0.001" : "1"}
-                                    min="0"
-                                    className="form-input"
-                                    placeholder={formAllowParts ? "10.000" : "10"}
-                                    value={currentLocData.currentStock ?? ''}
-                                    onChange={(e) => {
-                                      const raw = e.target.value;
-                                      setLocationOverrides({
-                                        ...locationOverrides,
-                                        [loc.id]: {
-                                          ...currentLocData,
-                                          currentStock: raw as any,
-                                        },
-                                      });
-                                    }}
-                                    required
-                                    style={{ width: '100%', boxSizing: 'border-box' }}
-                                  />
+                                  {editingItem ? (
+                                    <>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', margin: 0 }}>
+                                          Stock ({formUnit})
+                                        </label>
+                                        <span style={{ fontSize: '0.68rem', color: 'var(--primary-700)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                                          <Lock size={10} /> Locked
+                                        </span>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                        <div
+                                          style={{
+                                            flex: 1,
+                                            padding: '7px 10px',
+                                            backgroundColor: 'var(--neutral-100)',
+                                            border: '1px solid var(--neutral-300)',
+                                            borderRadius: 'var(--radius-sm)',
+                                            fontWeight: 700,
+                                            fontSize: '0.85rem',
+                                            color: 'var(--neutral-800)',
+                                          }}
+                                        >
+                                          {Number(currentLocData.currentStock ?? 0).toFixed(formAllowParts ? 3 : 0)} {formUnit}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          style={{ whiteSpace: 'nowrap', padding: '6px 8px', fontSize: '0.73rem', fontWeight: 600 }}
+                                          title="Adjust Stock for this branch"
+                                          onClick={() => {
+                                            setIsAddModalOpen(false);
+                                            openStockAdjustment(editingItem, loc.id);
+                                          }}
+                                        >
+                                          <SlidersHorizontal size={12} style={{ marginRight: 3 }} /> Adjust
+                                        </button>
+                                      </div>
+                                      <p style={{ fontSize: '0.65rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                                        Managed via Stock Adjustments & POs.
+                                      </p>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
+                                        Opening Stock ({formUnit}) *
+                                      </label>
+                                      <input
+                                        type="number"
+                                        step={formAllowParts ? "0.001" : "1"}
+                                        min="0"
+                                        className="form-input"
+                                        placeholder={formAllowParts ? "10.000" : "10"}
+                                        value={currentLocData.currentStock ?? ''}
+                                        onChange={(e) => {
+                                          const raw = e.target.value;
+                                          setLocationOverrides({
+                                            ...locationOverrides,
+                                            [loc.id]: {
+                                              ...currentLocData,
+                                              currentStock: raw as any,
+                                            },
+                                          });
+                                        }}
+                                        required
+                                        style={{ width: '100%', boxSizing: 'border-box' }}
+                                      />
+                                    </>
+                                  )}
                                 </div>
 
                                 <div style={{ minWidth: 0 }}>
@@ -1883,94 +2713,236 @@ export const InventoryView: React.FC = () => {
       )}
 
       {/* Stock Adjustment Modal */}
-      {isAdjustModalOpen && selectedItemForAdjust && (
-        <div className="modal-overlay" onClick={() => setIsAdjustModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
-            <div className="card-header">
-              <h3 className="card-title">Adjust Stock Level</h3>
-              <button className="btn btn-secondary btn-icon" onClick={() => setIsAdjustModalOpen(false)}>
-                <X size={16} />
-              </button>
-            </div>
-            <form onSubmit={handleStockAdjustment}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div>
-                  <p style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--neutral-900)' }}>
-                    {selectedItemForAdjust.name}
-                  </p>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-500)' }}>
-                    Code: {selectedItemForAdjust.publicItemId} | Branch Available Stock: {
-                      (() => {
-                        const raw = rawItems.find(r => r.id === selectedItemForAdjust.id) || selectedItemForAdjust;
-                        const bInv = raw.locations?.find(l => l.locationId === adjustLocationId);
-                        return bInv && bInv.currentStock !== undefined ? Number(bInv.currentStock) : Number(selectedItemForAdjust.currentStock || 0);
-                      })()
-                    } {selectedItemForAdjust.unit}
-                  </p>
-                </div>
+      {isAdjustModalOpen && selectedItemForAdjust && (() => {
+        const raw = rawItems.find(r => r.id === selectedItemForAdjust.id) || selectedItemForAdjust;
+        const bInv = raw.locations?.find(l => l.locationId === adjustLocationId);
+        const prevStock = bInv && bInv.currentStock !== undefined ? Number(bInv.currentStock) : Number(selectedItemForAdjust.currentStock || 0);
+        const oldAvgCost = Number(raw.averageCostPrice || raw.purchasePrice || selectedItemForAdjust.averageCostPrice || selectedItemForAdjust.purchasePrice || 0);
+        const inwardQty = parseFloat(String(adjustDelta)) || 0;
+        const inwardCost = adjustUnitCost !== '' ? (parseFloat(String(adjustUnitCost)) || 0) : oldAvgCost;
+        const resultingStock = adjustType === 'ADD' ? (Math.max(0, prevStock) + inwardQty) : Math.max(0, prevStock - inwardQty);
+        const newWac = adjustType === 'ADD' && resultingStock > 0 ? (((Math.max(0, prevStock) * oldAvgCost) + (inwardQty * inwardCost)) / resultingStock) : oldAvgCost;
 
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600, display: 'block', marginBottom: 5 }}>
-                    Branch Location
-                  </label>
-                  <CustomSelect
-                    value={adjustLocationId}
-                    onChange={(val) => setAdjustLocationId(String(val))}
-                    options={locations.map((loc) => ({
-                      value: loc.id,
-                      label: loc.name,
-                      badge: loc.code,
-                      icon: <MapPin size={13} />,
-                    }))}
-                  />
+        return (
+          <div className="modal-overlay" onClick={() => setIsAdjustModalOpen(false)}>
+            <div
+              className="modal-content"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: 560,
+                width: '100%',
+                maxHeight: '90vh',
+                display: 'flex',
+                flexDirection: 'column',
+                borderRadius: 'var(--radius-lg, 12px)',
+                overflow: 'hidden',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              }}
+            >
+              <div className="card-header" style={{ flexShrink: 0, padding: '16px 20px', borderBottom: '1px solid var(--neutral-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: adjustType === 'ADD' ? '#ecfdf5' : '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: adjustType === 'ADD' ? '#059669' : '#dc2626' }}>
+                    <SlidersHorizontal size={18} />
+                  </div>
+                  <div>
+                    <h3 className="card-title" style={{ fontSize: '1.05rem', margin: 0, fontWeight: 700 }}>Stock Adjustment & Valuation</h3>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                      Audited inventory movement with cost averaging
+                    </p>
+                  </div>
                 </div>
+                <button className="btn btn-secondary btn-icon" onClick={() => setIsAdjustModalOpen(false)}>
+                  <X size={16} />
+                </button>
+              </div>
 
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Adjustment Type</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <button
-                      type="button"
-                      className={`btn ${adjustType === 'ADD' ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => setAdjustType('ADD')}
+              <form onSubmit={handleStockAdjustment} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                <div className="modal-body" style={{ overflowY: 'auto', flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ background: 'var(--neutral-50)', padding: '10px 14px', borderRadius: 'var(--radius-md, 8px)', border: '1px solid var(--neutral-200)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <p style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--neutral-900)', margin: 0 }}>
+                        {selectedItemForAdjust.name}
+                      </p>
+                      <p style={{ fontSize: '0.74rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
+                        SKU: <strong>{selectedItemForAdjust.sku || selectedItemForAdjust.publicItemId}</strong> &bull; Purchase Price: <strong>₹{oldAvgCost.toFixed(2)}</strong>
+                      </p>
+                    </div>
+                    <div style={{ textAlign: 'right', background: '#ffffff', padding: '4px 10px', borderRadius: 6, border: '1px solid var(--neutral-200)' }}>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Branch Stock</span>
+                      <span style={{ fontWeight: 800, fontSize: '0.95rem', color: prevStock > 0 ? '#15803d' : '#dc2626' }}>
+                        {prevStock.toFixed(selectedItemForAdjust.allowParts ? 3 : 0)} {selectedItemForAdjust.unit}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.8rem', marginBottom: 4, display: 'block' }}>
+                        Target Branch Location
+                      </label>
+                      <select
+                        className="form-input"
+                        style={{ width: '100%', height: 38, fontSize: '0.85rem', cursor: 'pointer', background: '#fff' }}
+                        value={adjustLocationId}
+                        onChange={(e) => setAdjustLocationId(e.target.value)}
+                      >
+                        {locations.map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.name} {loc.code ? `(${loc.code})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.8rem', marginBottom: 4, display: 'block' }}>
+                        Adjustment Flow
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, height: 38 }}>
+                        <button
+                          type="button"
+                          className={`btn ${adjustType === 'ADD' ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={() => {
+                            setAdjustType('ADD');
+                            setAdjustReason('Physical Stock Count / Surplus');
+                          }}
+                          style={{ justifyContent: 'center', fontSize: '0.78rem', padding: '4px 6px', fontWeight: 600 }}
+                        >
+                          + Add Stock
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${adjustType === 'REDUCE' ? 'btn-danger' : 'btn-secondary'}`}
+                          onClick={() => {
+                            setAdjustType('REDUCE');
+                            setAdjustReason('Damaged / Broken Goods');
+                          }}
+                          style={{ justifyContent: 'center', fontSize: '0.78rem', padding: '4px 6px', fontWeight: 600 }}
+                        >
+                          - Reduce
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: adjustType === 'ADD' ? '1fr 1fr' : '1fr', gap: 12 }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.8rem', marginBottom: 4, display: 'block' }}>
+                        Quantity ({selectedItemForAdjust.unit}) *
+                      </label>
+                      <input
+                        type="number"
+                        step={selectedItemForAdjust.allowParts ? "0.001" : "1"}
+                        min={selectedItemForAdjust.allowParts ? "0.001" : "1"}
+                        required
+                        className="form-input"
+                        placeholder="1"
+                        style={{ height: 38, fontSize: '0.85rem' }}
+                        value={adjustDelta ?? ''}
+                        onChange={(e) => setAdjustDelta(e.target.value)}
+                      />
+                    </div>
+
+                    {adjustType === 'ADD' && (
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label" style={{ fontWeight: 600, fontSize: '0.8rem', marginBottom: 4, display: 'block' }}>
+                          Inward Unit Cost (₹)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="form-input"
+                          style={{ height: 38, fontSize: '0.85rem' }}
+                          placeholder={oldAvgCost > 0 ? oldAvgCost.toFixed(2) : "0.00"}
+                          value={adjustUnitCost ?? ''}
+                          onChange={(e) => setAdjustUnitCost(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Real-time Weighted Average Cost Preview on Inflow */}
+                  {adjustType === 'ADD' && (
+                    <div style={{ padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-md, 8px)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Scale size={14} /> Weighted Average Cost Preview
+                        </span>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#15803d', background: '#dcfce7', padding: '2px 8px', borderRadius: 4 }}>
+                          New Cost: ₹{newWac.toFixed(2)}
+                        </span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '0.73rem', color: '#374151' }}>
+                        <div>Prior: <strong>{prevStock.toFixed(selectedItemForAdjust.allowParts ? 3 : 0)}</strong> @ ₹{oldAvgCost.toFixed(2)}</div>
+                        <div>Adding: <strong>+{inwardQty.toFixed(selectedItemForAdjust.allowParts ? 3 : 0)}</strong> @ ₹{inwardCost.toFixed(2)}</div>
+                        <div>New Total Stock: <strong>{resultingStock.toFixed(selectedItemForAdjust.allowParts ? 3 : 0)}</strong> {selectedItemForAdjust.unit}</div>
+                        <div style={{ color: '#166534', fontWeight: 700 }}>Auto-syncs catalog purchase price</div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.8rem', marginBottom: 4, display: 'block' }}>
+                      Reason for Adjustment *
+                    </label>
+                    <select
+                      className="form-input"
+                      style={{ width: '100%', height: 38, fontSize: '0.85rem', cursor: 'pointer', background: '#fff' }}
+                      value={adjustReason}
+                      onChange={(e) => setAdjustReason(e.target.value)}
+                      required
                     >
-                      + Add Stock (In)
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn ${adjustType === 'REDUCE' ? 'btn-danger' : 'btn-secondary'}`}
-                      onClick={() => setAdjustType('REDUCE')}
-                    >
-                      - Reduce (Damaged/Lost)
-                    </button>
+                      {adjustType === 'ADD' ? (
+                        <>
+                          <option value="Physical Stock Count / Surplus">Physical Stock Count / Surplus</option>
+                          <option value="Supplier Direct Restock (No PO)">Supplier Direct Restock (No PO)</option>
+                          <option value="Found Inventory / Warehouse Discovery">Found Inventory / Warehouse Discovery</option>
+                          <option value="Opening Balance Correction">Opening Balance Correction</option>
+                          <option value="Customer Return (Manual / Unlinked)">Customer Return (Manual / Unlinked)</option>
+                          <option value="Other Inward Stock Adjustment">Other Inward Stock Adjustment</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="Damaged / Broken Goods">Damaged / Broken Goods</option>
+                          <option value="Expired / Past Date Goods">Expired / Past Date Goods</option>
+                          <option value="Stock Count Deficit / Shrinkage">Stock Count Deficit / Shrinkage</option>
+                          <option value="Internal Store Usage / Testing">Internal Store Usage / Testing</option>
+                          <option value="Lost / Theft Write-off">Lost / Theft Write-off</option>
+                          <option value="Other Outward Stock Reduction">Other Outward Stock Reduction</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.8rem', marginBottom: 4, display: 'block' }}>
+                      Audit Notes / Reference (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ height: 38, fontSize: '0.85rem' }}
+                      placeholder="e.g. Verified by Store Manager during monthly physical count"
+                      value={adjustNotes}
+                      onChange={(e) => setAdjustNotes(e.target.value)}
+                    />
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Quantity ({selectedItemForAdjust.unit}) *</label>
-                  <input
-                    type="number"
-                    step={selectedItemForAdjust.allowParts ? "0.001" : "1"}
-                    min={selectedItemForAdjust.allowParts ? "0.001" : "1"}
-                    required
-                    className="form-input"
-                    value={adjustDelta ?? ''}
-                    onChange={(e) => setAdjustDelta(e.target.value)}
-                  />
+                <div className="modal-footer" style={{ flexShrink: 0, padding: '12px 20px', borderTop: '1px solid var(--neutral-200)', background: 'var(--neutral-50)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setIsAdjustModalOpen(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className={`btn ${adjustType === 'ADD' ? 'btn-primary' : 'btn-danger'}`}>
+                    {adjustType === 'ADD' ? `Confirm Inward Stock (+${inwardQty})` : `Confirm Stock Reduction (-${inwardQty})`}
+                  </button>
                 </div>
-              </div>
-
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setIsAdjustModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Confirm Stock Adjustment
-                </button>
-              </div>
-            </form>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Category Master Management Modal */}
       {isCategoryModalOpen && (
@@ -2193,6 +3165,8 @@ export const InventoryView: React.FC = () => {
           refreshData();
         }}
       />
+
+
     </div>
   );
 };

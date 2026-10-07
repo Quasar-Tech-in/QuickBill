@@ -629,6 +629,7 @@ async def receive_purchase_order_goods(
             item_updates = {
                 "currentStock": round(new_master_stock, 3),
                 "averageCostPrice": round(new_avg_cost, 2),
+                "purchasePrice": round(new_avg_cost, 2),
                 "batches": existing_batches,
                 "locations": loc_list,
                 "updatedAt": now
@@ -636,6 +637,7 @@ async def receive_purchase_order_goods(
 
             if payload.updateMasterPurchasePrice or target_po_item.get("updateMasterPurchasePrice"):
                 item_updates["purchasePrice"] = unit_cost
+
 
             await db.items.update_one({"_id": item_oid}, {"$set": item_updates})
 
@@ -743,7 +745,7 @@ async def receive_purchase_order_goods(
                 "paymentMode": pay_mode,
                 "referenceType": "PURCHASE_ORDER",
                 "referenceId": str(po_doc["_id"]),
-                "referenceNumber": po_number,
+                "referenceNumber": ref_no or po_number,
                 "notes": f"Payment for PO {po_number} goods receipt",
                 "paidAt": now,
                 "createdAt": now
@@ -842,9 +844,9 @@ async def record_purchase_order_payment(
         "paymentMode": payment_mode,
         "referenceType": "PURCHASE_ORDER",
         "referenceId": str(po_doc["_id"]),
-        "referenceNumber": po_number,
+        "referenceNumber": ref_number or po_number,
         "notes": notes,
-        "paidAt": paid_at,
+        "paidAt": now,
         "createdAt": now
     }
     await db.payments.insert_one(payment_doc)

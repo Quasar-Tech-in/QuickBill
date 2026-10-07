@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -18,6 +18,7 @@ class StoreService {
   private payments: Payment[] = [];
   private expenses: Expense[] = [];
   private purchaseOrders: PurchaseOrder[] = [];
+  private inventoryMovements: InventoryMovement[] = [];
   private expenseCategories: ExpenseCategory[] = [];
   private tenants: Tenant[] = [];
   private locations: StoreLocation[] = [];
@@ -2119,17 +2120,31 @@ class StoreService {
     }
 
     if (idx === -1) return null;
-    this.items[idx] = { ...this.items[idx], ...updates, businessId: activeId };
+    const { currentStock: _ignoreStock, ...safeUpdates } = updates as any;
+    this.items[idx] = { ...this.items[idx], ...safeUpdates, businessId: activeId };
     this.saveToStorage();
     return this.items[idx];
   }
 
-  async adjustStock(id: string, delta: number, locationId?: string): Promise<Item | null> {
+  async adjustStock(
+    id: string,
+    delta: number,
+    locationId?: string,
+    unitCost?: number,
+    reason?: string,
+    notes?: string
+  ): Promise<Item | null> {
     const activeId = this.currentTenant?.id || '';
     const targetLocId = locationId || this.getActiveLocation().id;
 
     try {
-      const res = await apiClient.post(`/items/${id}/adjust-stock`, { delta, locationId: targetLocId });
+      const res = await apiClient.post(`/items/${id}/adjust-stock`, {
+        delta,
+        locationId: targetLocId,
+        unitCost: unitCost !== undefined ? unitCost : undefined,
+        reason: reason || undefined,
+        notes: notes || undefined,
+      });
       if (res.data && (res.data.id || res.data._id)) {
         const d = res.data;
         const updated: Item = {
@@ -2146,6 +2161,7 @@ class StoreService {
           mrp: d.mrp ? Number(d.mrp) : Number(d.salePrice || 0),
           salePrice: Number(d.salePrice || 0),
           purchasePrice: Number(d.purchasePrice || 0),
+          averageCostPrice: d.averageCostPrice !== undefined ? Number(d.averageCostPrice) : Number(d.purchasePrice || 0),
           currentStock: Number(d.currentStock || 0),
           minStockAlert: Number(d.minStockAlert || 5),
           hasDiscount: !!d.hasDiscount,
@@ -2172,17 +2188,67 @@ class StoreService {
     );
     if (!item) return null;
 
+    const prevStock = Number(item.currentStock || 0);
+    const oldAvgCost = Number(item.averageCostPrice || item.purchasePrice || 0);
+
+    // Calculate new WAC if adding stock
+    if (delta > 0) {
+      const inwardCost = unitCost !== undefined ? unitCost : oldAvgCost;
+      const effectiveOldStock = Math.max(0, prevStock);
+      const newAvgCost = (effectiveOldStock + delta) > 0
+        ? ((effectiveOldStock * oldAvgCost) + (delta * inwardCost)) / (effectiveOldStock + delta)
+        : inwardCost;
+      item.averageCostPrice = Number(newAvgCost.toFixed(2));
+      item.purchasePrice = Number(newAvgCost.toFixed(2));
+    }
+
     // Adjust in branch location
     if (item.locations && item.locations.length > 0) {
       const branch = item.locations.find(l => l.locationId === targetLocId);
       if (branch) {
-        branch.currentStock = Number(Math.max(0, branch.currentStock + delta).toFixed(3));
+        const branchStock = Number(branch.currentStock || 0);
+        branch.currentStock = Number(Math.max(0, branchStock + delta).toFixed(3));
+        if (delta > 0 && item.purchasePrice !== undefined) {
+          branch.purchasePrice = item.purchasePrice;
+        }
       }
       // Recompute aggregate master stock
-      item.currentStock = Number(item.locations.reduce((sum, l) => sum + (l.currentStock || 0), 0).toFixed(3));
+      item.currentStock = Number(item.locations.reduce((sum, l) => sum + Number(l.currentStock || 0), 0).toFixed(3));
     } else {
-      item.currentStock = Number(Math.max(0, item.currentStock + delta).toFixed(3));
+      const itStock = Number(item.currentStock || 0);
+      item.currentStock = Number(Math.max(0, itStock + delta).toFixed(3));
     }
+
+    // Append local movement audit record
+    const locObj = this.locations.find(l => l.id === targetLocId);
+    const nowIso = new Date().toISOString();
+    const movement: InventoryMovement = {
+      id: `mov_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      businessId: activeId,
+      itemId: item.id,
+      publicItemId: item.publicItemId,
+      itemName: item.name,
+      sku: item.sku,
+      locationId: targetLocId,
+      locationName: locObj?.name || 'Main Branch',
+      movementType: 'MANUAL_ADJUSTMENT',
+      type: 'MANUAL_ADJUSTMENT',
+      referenceType: 'MANUAL',
+      referenceNumber: 'AUDIT-ADJUST',
+      quantity: delta,
+      quantityChange: delta,
+      unitCost: delta > 0 ? (unitCost ?? oldAvgCost) : oldAvgCost,
+      totalCost: Math.abs(delta) * (delta > 0 ? (unitCost ?? oldAvgCost) : oldAvgCost),
+      resultingStock: item.currentStock,
+      quantityBefore: prevStock,
+      quantityAfter: item.currentStock,
+      reason: reason || (delta > 0 ? 'Manual Stock Addition' : 'Stock Reduction / Shrinkage'),
+      notes: notes,
+      createdByUserId: this.currentUser?.id,
+      createdByName: this.currentUser?.name || 'Admin',
+      createdAt: nowIso,
+    };
+    this.inventoryMovements = [movement, ...(this.inventoryMovements || [])];
 
     this.saveToStorage();
     return item;
@@ -3025,23 +3091,64 @@ class StoreService {
     return this.expenses.length < prevLen;
   }
 
+  async fetchPayments(locationId?: string): Promise<Payment[]> {
+    try {
+      const params: any = { page: 1, page_size: 100 };
+      if (locationId && locationId !== 'ALL') {
+        params.locationId = locationId;
+      }
+      const res = await apiClient.get('/payments', { params });
+      if (res.data?.data && Array.isArray(res.data.data)) {
+        const livePayments: Payment[] = res.data.data.map((d: any) => ({
+          id: d._id || d.id,
+          businessId: d.businessId || this.currentTenant?.id || '',
+          paymentNumber: d.paymentNumber,
+          partyId: d.partyId,
+          partyName: d.partyName || d.partyNameSnapshot || 'Unknown Party',
+          partyNameSnapshot: d.partyNameSnapshot || d.partyName,
+          type: d.type || (d.direction === 'IN' ? 'PAYMENT_IN' : 'PAYMENT_OUT'),
+          direction: d.direction || (d.type === 'PAYMENT_IN' ? 'IN' : 'OUT'),
+          amount: Number(d.amount || 0),
+          paymentMode: d.paymentMode || 'CASH',
+          referenceType: d.referenceType,
+          referenceId: d.referenceId,
+          referenceNumber: d.referenceNumber,
+          purchaseOrderId: d.purchaseOrderId,
+          purchaseOrderNumber: d.purchaseOrderNumber,
+          paidAt: d.paidAt || d.date || d.createdAt,
+          date: d.date || (d.paidAt ? new Date(d.paidAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+          notes: d.notes,
+          createdAt: d.createdAt,
+          updatedAt: d.updatedAt,
+        }));
+        this.payments = livePayments;
+        this.saveToStorage();
+        return this.getPayments(locationId);
+      }
+    } catch (err) {
+      console.warn('Could not fetch live payments from /payments API:', err);
+    }
+    return this.getPayments(locationId);
+  }
+
   // --- Unified Financial Ledger Stream ---
   getLedgerEntries(locationId?: string): LedgerEntry[] {
-    const payments = this.getPayments();
+    const payments = this.getPayments(locationId);
     const expenses = this.getExpenses(locationId);
 
     const entries: LedgerEntry[] = [];
 
     payments.forEach(p => {
+      const paymentType: 'PAYMENT_IN' | 'PAYMENT_OUT' = (p.type === 'PAYMENT_IN' || p.direction === 'IN') ? 'PAYMENT_IN' : 'PAYMENT_OUT';
       entries.push({
         id: p.id,
-        date: p.date,
-        type: p.type,
-        title: p.type === 'PAYMENT_IN' ? 'Customer Receipt' : 'Supplier Payout',
-        partyOrPayee: p.partyName,
-        category: p.type === 'PAYMENT_IN' ? 'Receivable Inflow' : 'Payable Outflow',
-        paymentMode: p.paymentMode,
-        referenceNumber: p.referenceNumber,
+        date: p.date || (p.paidAt ? new Date(p.paidAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+        type: paymentType,
+        title: paymentType === 'PAYMENT_IN' ? 'Customer Receipt' : 'Supplier Payout',
+        partyOrPayee: p.partyName || p.partyNameSnapshot || 'Unknown Party',
+        category: paymentType === 'PAYMENT_IN' ? 'Receivable Inflow' : 'Payable Outflow',
+        paymentMode: p.paymentMode || 'CASH',
+        referenceNumber: p.referenceNumber || p.purchaseOrderNumber,
         notes: p.notes,
         amount: p.amount,
       });
@@ -3262,16 +3369,19 @@ class StoreService {
     if (existing) {
       updateData.items.forEach(up => {
         const prevSnap = existing.items.find(i => i.itemId === up.itemId);
-        const prevRet = prevSnap?.returnedQuantity || 0;
-        const deltaRet = up.returnedQuantity - prevRet;
+        const prevRet = Number(prevSnap?.returnedQuantity || 0);
+        const currRet = Number(up.returnedQuantity || 0);
+        const deltaRet = currRet - prevRet;
         if (deltaRet > 0 && up.returnReason !== 'DEFECTIVE_DAMAGED') {
           const it = this.items.find(i => i.id === up.itemId || i.publicItemId === up.itemId);
           if (it) {
-            it.currentStock = Number((it.currentStock + deltaRet).toFixed(3));
+            const itStock = Number(it.currentStock || 0);
+            it.currentStock = Number((itStock + deltaRet).toFixed(3));
             if (it.locations && existing.locationId) {
               const loc = it.locations.find(l => l.locationId === existing.locationId);
               if (loc) {
-                loc.currentStock = Number((loc.currentStock + deltaRet).toFixed(3));
+                const locStock = Number(loc.currentStock || 0);
+                loc.currentStock = Number((locStock + deltaRet).toFixed(3));
               }
             }
           }
@@ -3501,11 +3611,14 @@ class StoreService {
     createdInvoice.items.forEach(line => {
       const it = this.items.find(i => i.id === line.itemId || i.publicItemId === line.itemId);
       if (it) {
-        it.currentStock = Math.max(0, Number((it.currentStock - line.quantity).toFixed(3)));
+        const itStock = Number(it.currentStock || 0);
+        const lineQty = Number(line.quantity || 0);
+        it.currentStock = Math.max(0, Number((itStock - lineQty).toFixed(3)));
         if (it.locations && createdInvoice.locationId) {
           const loc = it.locations.find(l => l.locationId === createdInvoice.locationId);
           if (loc) {
-            loc.currentStock = Math.max(0, Number((loc.currentStock - line.quantity).toFixed(3)));
+            const locStock = Number(loc.currentStock || 0);
+            loc.currentStock = Math.max(0, Number((locStock - lineQty).toFixed(3)));
           }
         }
       }
@@ -3524,7 +3637,7 @@ class StoreService {
   }
 
   // --- Strict Tenant-Isolated Payments ---
-  getPayments(): Payment[] {
+  getPayments(_locationId?: string): Payment[] {
     const activeId = this.currentTenant?.id || '';
     return this.payments.filter(p => (p.businessId || activeId) === activeId);
   }
@@ -3931,6 +4044,7 @@ class StoreService {
         this.purchaseOrders = this.purchaseOrders.map(p => p.id === poId ? updatedPO : p);
         try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
         this.fetchParties().catch(() => {});
+        this.fetchPayments().catch(() => {});
         return updatedPO;
       }
     } catch (err: any) {
@@ -3956,15 +4070,44 @@ class StoreService {
     po.balanceDue = balDue;
     po.paymentStatus = balDue <= 0 ? 'PAID' : (newPaid > 0 ? 'PARTIALLY_PAID' : 'UNPAID');
     po.payments = po.payments || [];
+    const paymentNum = `PAY-${new Date().getFullYear()}-${String(this.payments.length + 1).padStart(6, '0')}`;
     po.payments.push({
       paymentId: `pay_${Date.now()}`,
-      paymentNumber: `PAY-${Date.now().toString().slice(-6)}`,
+      paymentNumber: paymentNum,
       amount: payAmount,
       paymentMode: paymentData.paymentMode || 'BANK_TRANSFER',
       referenceNumber: paymentData.referenceNumber,
       notes: paymentData.notes,
       paidAt: paymentData.paidAt || new Date().toISOString(),
     });
+
+    // Record in local payments collection
+    const pmtDoc: Payment = {
+      id: `pay_${Date.now()}`,
+      businessId: this.currentTenant?.id || '',
+      paymentNumber: paymentNum,
+      direction: 'OUT',
+      partyId: po.supplierId,
+      partyNameSnapshot: po.supplierName,
+      purchaseOrderId: po.id,
+      purchaseOrderNumber: po.poNumber,
+      amount: payAmount,
+      paymentMode: (paymentData.paymentMode || 'BANK_TRANSFER') as any,
+      referenceNumber: paymentData.referenceNumber,
+      notes: paymentData.notes || `Vendor settlement for PO ${po.poNumber}`,
+      paidAt: paymentData.paidAt || new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+    this.payments.unshift(pmtDoc);
+    try { localStorage.setItem('qb_payments', JSON.stringify(this.payments)); } catch {}
+
+    // Update supplier party balance
+    const sup = this.parties.find(p => p.id === po.supplierId);
+    if (sup) {
+      sup.currentPayable = Math.max(0, Number(((sup.currentPayable || 0) - payAmount).toFixed(2)));
+      sup.balance = Number(((sup.balance || 0) - payAmount).toFixed(2));
+      try { localStorage.setItem('qb_parties', JSON.stringify(this.parties)); } catch {}
+    }
 
     try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
     return po;
@@ -4109,14 +4252,54 @@ class StoreService {
 
     const receiptItems: { itemId: string; name: string; qty: number }[] = [];
     let allCompleted = true;
+    let batchTotalCost = 0;
 
     po.items = po.items.map(item => {
       const rec = receiveData.items.find(r => r.itemId === item.itemId);
       const addQty = rec ? rec.qty : 0;
       if (addQty > 0) {
         receiptItems.push({ itemId: item.itemId, name: item.name, qty: addQty });
-        // Adjust stock
-        this.adjustStock(item.itemId, addQty, po.locationId);
+        const inwardCost = Number(item.unitPrice || item.totalAmount / (item.orderedQty || 1) || 0);
+        batchTotalCost += addQty * inwardCost;
+
+        // Update local item stock and weighted average cost
+        const targetItem = this.items.find(i => i.id === item.itemId);
+        if (targetItem) {
+          const oldStock = Number(targetItem.currentStock || 0);
+          const oldAvgCost = Number(targetItem.averageCostPrice !== undefined ? targetItem.averageCostPrice : (targetItem.purchasePrice || 0));
+          const newStock = oldStock + addQty;
+          const newAvgCost = newStock > 0 ? ((Math.max(0, oldStock) * oldAvgCost) + (addQty * inwardCost)) / newStock : inwardCost;
+          targetItem.currentStock = Number(newStock.toFixed(3));
+          targetItem.averageCostPrice = Number(newAvgCost.toFixed(2));
+
+          // Log local inventory movement
+          const mov: InventoryMovement = {
+            id: `mov_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+            businessId: this.currentTenant?.id || '',
+            itemId: targetItem.id,
+            publicItemId: targetItem.publicItemId,
+            itemName: targetItem.name,
+            sku: targetItem.sku,
+            locationId: po.locationId,
+            locationName: po.locationName,
+            type: 'PURCHASE',
+            referenceType: 'PURCHASE_ORDER',
+            referenceId: po.id,
+            referenceNumber: po.poNumber,
+            quantityChange: addQty,
+            quantityBefore: oldStock,
+            quantityAfter: Number(newStock.toFixed(3)),
+            unitCost: inwardCost,
+            totalCost: Number((addQty * inwardCost).toFixed(2)),
+            reason: `Goods received for PO ${po.poNumber} (${po.supplierName})`,
+            notes: receiveData.notes,
+            createdByUserId: this.currentUser?.id,
+            createdByName: this.currentUser?.name || 'Staff',
+            createdAt: new Date().toISOString(),
+          };
+          this.inventoryMovements.unshift(mov);
+          try { localStorage.setItem('qb_inventory_movements', JSON.stringify(this.inventoryMovements)); } catch {}
+        }
       }
       const newRecQty = item.receivedQty + addQty;
       if (newRecQty < item.orderedQty) allCompleted = false;
@@ -4143,8 +4326,56 @@ class StoreService {
       } : undefined,
     });
 
+    if (receiveData.payment && receiveData.payment.amount > 0) {
+      const pmtAmount = Number(receiveData.payment.amount);
+      po.totalPaidAmount = Number(((po.totalPaidAmount || 0) + pmtAmount).toFixed(2));
+      po.totalReceivedAmount = Number(((po.totalReceivedAmount || 0) + batchTotalCost).toFixed(2));
+      po.balanceDue = Math.max(0, Number(((po.totalReceivedAmount || 0) - po.totalPaidAmount).toFixed(2)));
+      po.payments = po.payments || [];
+      const paymentNum = `PAY-${new Date().getFullYear()}-${String(this.payments.length + 1).padStart(6, '0')}`;
+      po.payments.push({
+        paymentId: `pay_${Date.now()}`,
+        paymentNumber: paymentNum,
+        amount: pmtAmount,
+        paymentMode: receiveData.payment.paymentMode,
+        referenceNumber: receiveData.payment.referenceNumber,
+        notes: receiveData.payment.notes,
+        paidAt: new Date().toISOString(),
+      });
+
+      // Also record in discrete payments ledger
+      const pmtDoc: Payment = {
+        id: `pay_${Date.now()}`,
+        businessId: this.currentTenant?.id || '',
+        paymentNumber: paymentNum,
+        direction: 'OUT',
+        partyId: po.supplierId,
+        partyNameSnapshot: po.supplierName,
+        purchaseOrderId: po.id,
+        purchaseOrderNumber: po.poNumber,
+        amount: pmtAmount,
+        paymentMode: receiveData.payment.paymentMode as any,
+        referenceNumber: receiveData.payment.referenceNumber,
+        notes: receiveData.payment.notes || `Payment on goods receipt for PO ${po.poNumber}`,
+        paidAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      };
+      this.payments.unshift(pmtDoc);
+      try { localStorage.setItem('qb_payments', JSON.stringify(this.payments)); } catch {}
+
+      // Update supplier party balance
+      const sup = this.parties.find(p => p.id === po.supplierId);
+      if (sup) {
+        const netDelta = batchTotalCost - pmtAmount;
+        sup.currentPayable = Number(((sup.currentPayable || 0) + netDelta).toFixed(2));
+        sup.balance = Number(((sup.balance || 0) + netDelta).toFixed(2));
+        try { localStorage.setItem('qb_parties', JSON.stringify(this.parties)); } catch {}
+      }
+    }
+
     this.purchaseOrders = this.purchaseOrders.map(p => p.id === id ? po : p);
     try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
+    this.saveToStorage();
     return po;
   }
 
@@ -4185,6 +4416,106 @@ class StoreService {
       try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
       return true;
     }
+  }
+
+  // --- Inventory Movements & Stock Audit Ledger ---
+  async fetchInventoryMovements(params: {
+    page?: number;
+    pageSize?: number;
+    itemId?: string;
+    locationId?: string;
+    type?: string;
+    search?: string;
+    fromDate?: string;
+    toDate?: string;
+  } = {}): Promise<PaginatedApiResponse<InventoryMovement>> {
+    const page = params.page || 1;
+    const pageSize = params.pageSize || 25;
+    const activeTenantId = this.currentTenant?.id || '';
+
+    try {
+      const qParams: Record<string, any> = { page, pageSize };
+      if (params.itemId && params.itemId !== 'ALL') qParams.itemId = params.itemId;
+      if (params.locationId && params.locationId !== 'ALL') qParams.locationId = params.locationId;
+      if (params.type && params.type !== 'ALL') qParams.type = params.type;
+      if (params.search && params.search.trim()) qParams.search = params.search.trim();
+      if (params.fromDate) qParams.fromDate = params.fromDate;
+      if (params.toDate) qParams.toDate = params.toDate;
+
+      const res = await apiClient.get('/inventory/movements', { params: qParams });
+      if (res.data && res.data.data) {
+        return {
+          data: res.data.data.map((d: any) => ({
+            id: d._id || d.id,
+            businessId: d.businessId || activeTenantId,
+            itemId: d.itemId,
+            publicItemId: d.publicItemId,
+            itemName: d.itemName,
+            sku: d.sku,
+            locationId: d.locationId,
+            locationName: d.locationName,
+            type: d.type,
+            referenceType: d.referenceType,
+            referenceId: d.referenceId,
+            referenceNumber: d.referenceNumber,
+            quantityChange: Number(d.quantityChange || 0),
+            quantityBefore: Number(d.quantityBefore || 0),
+            quantityAfter: Number(d.quantityAfter || 0),
+            unitCost: Number(d.unitCost || 0),
+            totalCost: Number(d.totalCost || 0),
+            reason: d.reason,
+            notes: d.notes,
+            createdByUserId: d.createdByUserId,
+            createdByName: d.createdByName,
+            createdAt: d.createdAt,
+          })),
+          page: res.data.page || page,
+          pageSize: res.data.pageSize || pageSize,
+          total: res.data.total || 0,
+          totalPages: res.data.totalPages || 1,
+        };
+      }
+    } catch (err) {
+      console.warn('Backend /inventory/movements failed, fallback local:', err);
+    }
+
+    // Local fallback filtering
+    let filtered = this.inventoryMovements.filter(m => {
+      if (m.businessId && activeTenantId && m.businessId !== activeTenantId) return false;
+      if (params.itemId && params.itemId !== 'ALL' && m.itemId !== params.itemId && m.publicItemId !== params.itemId) return false;
+      if (params.locationId && params.locationId !== 'ALL' && m.locationId !== params.locationId) return false;
+      if (params.type && params.type !== 'ALL' && m.type !== params.type) return false;
+      if (params.search && params.search.trim()) {
+        const s = params.search.trim().toLowerCase();
+        const matches = (m.itemName || '').toLowerCase().includes(s) ||
+          (m.sku || '').toLowerCase().includes(s) ||
+          (m.referenceNumber || '').toLowerCase().includes(s) ||
+          (m.reason || '').toLowerCase().includes(s);
+        if (!matches) return false;
+      }
+      if (params.fromDate) {
+        const mDate = m.createdAt ? m.createdAt.split('T')[0] : '';
+        if (mDate && mDate < params.fromDate) return false;
+      }
+      if (params.toDate) {
+        const mDate = m.createdAt ? m.createdAt.split('T')[0] : '';
+        if (mDate && mDate > params.toDate) return false;
+      }
+      return true;
+    });
+
+    const total = filtered.length;
+    const totalPages = Math.ceil(total / pageSize) || 1;
+    const start = (page - 1) * pageSize;
+    const data = filtered.slice(start, start + pageSize);
+
+    return {
+      data,
+      page,
+      pageSize,
+      total,
+      totalPages,
+    };
   }
 
   // --- Staged / Held Orders (Multi-Tenant & Location Scoped with Cloud DB Sync) ---

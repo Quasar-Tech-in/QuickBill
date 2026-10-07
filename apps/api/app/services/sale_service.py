@@ -295,12 +295,23 @@ class SaleService:
             movement_doc = {
                 "businessId": b_oid,
                 "itemId": target_item_oid or it.item_id,
+                "publicItemId": item_doc_found.get("publicItemId"),
+                "itemName": it.name_snapshot or item_doc_found.get("name", "Item"),
+                "sku": it.sku_snapshot or item_doc_found.get("sku", ""),
+                "locationId": request.location_id,
+                "locationName": request.location_name,
                 "type": "SALE",
                 "referenceType": "INVOICE",
                 "referenceId": invoice_id,
                 "referenceNumber": invoice_number,
                 "quantityChange": -qty_sold,
+                "quantityBefore": float(item_doc_found.get("currentStock", 0.0) or 0.0),
+                "quantityAfter": round(float(item_doc_found.get("currentStock", 0.0) or 0.0) - qty_sold, 3),
                 "unitCost": round(cogs_cost, 2),
+                "totalCost": round(qty_sold * cogs_cost, 2),
+                "reason": f"Sale Invoice #{invoice_number}",
+                "createdByUserId": user_id,
+                "createdByName": request.billed_by_name or "Cashier",
                 "createdAt": now
             }
             await self.db.inventory_movements.insert_one(movement_doc)

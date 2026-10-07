@@ -96,6 +96,10 @@ class ItemUpdate(BaseSchema):
 class StockAdjustmentRequest(BaseSchema):
     delta: Decimal = Field(...)
     location_id: Optional[str] = Field(None, alias="locationId")
+    unit_cost: Optional[Decimal] = Field(None, alias="unitCost")
+    reason: Optional[str] = None
+    notes: Optional[str] = None
+
 
 class ItemResponse(ItemBase):
     id: str = Field(..., alias="_id")

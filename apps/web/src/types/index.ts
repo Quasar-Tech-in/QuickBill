@@ -263,13 +263,23 @@ export interface Invoice {
 export interface Payment {
   id: string;
   businessId?: string;
-  date: string;
+  paymentNumber?: string;
+  date?: string;
   partyId: string;
-  partyName: string;
-  type: 'PAYMENT_IN' | 'PAYMENT_OUT';
+  partyName?: string;
+  partyNameSnapshot?: string;
+  type?: 'PAYMENT_IN' | 'PAYMENT_OUT' | string;
+  direction?: 'IN' | 'OUT' | string;
   amount: number;
-  paymentMode: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE';
+  paymentMode: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE' | string;
+  referenceType?: string;
+  referenceId?: string;
   referenceNumber?: string;
+  purchaseOrderId?: string;
+  purchaseOrderNumber?: string;
+  paidAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
   notes?: string;
 }
 
@@ -504,6 +514,37 @@ export interface PurchasesSummaryReport {
   total_tax_input_credit: number;
   by_supplier: PurchasesBySupplierItem[];
 }
+
+export type InventoryMovementType = 'PURCHASE' | 'SALE' | 'SALE_RETURN' | 'MANUAL_ADJUSTMENT' | 'DAMAGED_WRITE_OFF' | 'OPENING_STOCK' | 'PO_CANCEL';
+
+export interface InventoryMovement {
+  id: string;
+  businessId: string;
+  itemId: string;
+  publicItemId?: string;
+  itemName: string;
+  sku?: string;
+  locationId?: string;
+  locationName?: string;
+  type: InventoryMovementType | string;
+  movementType?: InventoryMovementType | string;
+  referenceType?: string;
+  referenceId?: string;
+  referenceNumber?: string;
+  quantity?: number;
+  quantityChange: number;
+  quantityBefore: number;
+  quantityAfter: number;
+  resultingStock?: number;
+  unitCost: number;
+  totalCost?: number;
+  reason?: string;
+  notes?: string;
+  createdByUserId?: string;
+  createdByName?: string;
+  createdAt: string;
+}
+
 
 
 

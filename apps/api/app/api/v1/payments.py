@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, Query, status
-from app.core.database import get_database
+from app.core.database import get_tenant_db, get_database
 from app.core.security import get_current_business_id
 from app.schemas.common import PaginatedResponse
 from app.schemas.payment import PaymentCreate, PaymentResponse
@@ -15,17 +15,24 @@ async def list_payments(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     direction: Optional[str] = None,
+    party_id: Optional[str] = Query(None, alias="partyId"),
     search: Optional[str] = None,
     location_id: Optional[str] = Query(None, alias="locationId"),
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "payments")
     b_oid = repo._to_object_id(business_id)
     conditions: list = [{"$or": [{"businessId": b_oid}, {"businessId": business_id}]}]
 
     if direction and direction != "ALL":
-        conditions.append({"direction": direction})
+        conditions.append({"$or": [{"direction": direction}, {"type": f"PAYMENT_{direction}"}]})
+
+    if party_id and party_id != "ALL":
+        p_queries = [{"partyId": party_id}]
+        if ObjectId.is_valid(party_id):
+            p_queries.append({"partyId": ObjectId(party_id)})
+        conditions.append({"$or": p_queries})
 
     if location_id and location_id != "ALL":
         conditions.append({"locationId": location_id})
@@ -36,6 +43,7 @@ async def list_payments(
             "$or": [
                 {"paymentNumber": {"$regex": s, "$options": "i"}},
                 {"partyName": {"$regex": s, "$options": "i"}},
+                {"partyNameSnapshot": {"$regex": s, "$options": "i"}},
                 {"referenceNumber": {"$regex": s, "$options": "i"}},
                 {"notes": {"$regex": s, "$options": "i"}},
             ]
@@ -58,7 +66,12 @@ async def list_payments(
             d["partyId"] = str(d["partyId"])
         if d.get("invoiceId"):
             d["invoiceId"] = str(d["invoiceId"])
+        if d.get("referenceId"):
+            d["referenceId"] = str(d["referenceId"])
+        if not d.get("direction") and d.get("type"):
+            d["direction"] = "OUT" if "OUT" in d["type"] else "IN"
         payments.append(PaymentResponse(**d))
+
 
     return PaginatedResponse(
         data=payments,
@@ -72,8 +85,8 @@ async def list_payments(
 async def create_payment(
     payload: PaymentCreate,
     business_id: str = Depends(get_current_business_id),
-    db = Depends(get_database)
 ):
+    db = await get_tenant_db(business_id)
     b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
     count = await db.payments.count_documents({"businessId": b_oid})
     payment_number = f"PAY-{datetime.now().year}-{count + 1:06d}"

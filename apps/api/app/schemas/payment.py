@@ -19,14 +19,19 @@ class PaymentResponse(BaseSchema):
     id: str = Field(..., alias="_id")
     business_id: str = Field(..., alias="businessId")
     payment_number: str = Field(..., alias="paymentNumber")
-    direction: str
+    direction: str = "IN"
+    type: Optional[str] = None
     party_id: Optional[str] = Field(None, alias="partyId")
+    party_name: Optional[str] = Field(None, alias="partyName")
     party_name_snapshot: Optional[str] = Field(None, alias="partyNameSnapshot")
     invoice_id: Optional[str] = Field(None, alias="invoiceId")
     invoice_number: Optional[str] = Field(None, alias="invoiceNumber")
+    reference_type: Optional[str] = Field(None, alias="referenceType")
+    reference_id: Optional[str] = Field(None, alias="referenceId")
+    reference_number: Optional[str] = Field(None, alias="referenceNumber")
     amount: Decimal
     payment_mode: str = Field(..., alias="paymentMode")
-    reference_number: Optional[str] = Field(None, alias="referenceNumber")
     notes: Optional[str] = None
     paid_at: datetime = Field(..., alias="paidAt")
     created_at: datetime = Field(..., alias="createdAt")
+

@@ -1935,11 +1935,11 @@ export const PurchaseOrdersView: React.FC = () => {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                     <thead>
                       <tr style={{ background: 'var(--neutral-100)', color: 'var(--neutral-600)', borderBottom: '1px solid var(--neutral-200)' }}>
-                        <th style={{ padding: '8px 10px', textAlign: 'left' }}>Product</th>
-                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>Ordered</th>
-                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>Received</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left' }}>Product & Inward Cost</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>Ordered / Rec'd</th>
                         <th style={{ padding: '8px 10px', textAlign: 'right' }}>Remaining</th>
-                        <th style={{ padding: '8px 10px', textAlign: 'right', width: 120 }}>Receive Now</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right', width: 110 }}>Receive Now</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right', width: 140 }}>New WAC / Stock</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1952,11 +1952,30 @@ export const PurchaseOrdersView: React.FC = () => {
                       ) : (
                         receiveForm.items.map((item, idx) => {
                           const remaining = Math.max(0, item.orderedQty - item.alreadyReceived);
+                          const poLine = (selectedPO?.items || []).find(x => x.itemId === item.itemId);
+                          const inwardPrice = poLine?.unitPrice || 0;
+
+                          const catalogItem = items.find(i => i.id === item.itemId);
+                          const currStock = Number(catalogItem?.currentStock || 0);
+                          const currAvgCost = Number(catalogItem?.averageCostPrice !== undefined && catalogItem?.averageCostPrice > 0 ? catalogItem.averageCostPrice : (catalogItem?.purchasePrice || inwardPrice));
+                          const qtyToRec = Number(item.qtyToReceive || 0);
+                          const newStock = currStock + qtyToRec;
+                          const newAvgCost = newStock > 0 ? ((Math.max(0, currStock) * currAvgCost) + (qtyToRec * inwardPrice)) / newStock : inwardPrice;
+
                           return (
                             <tr key={item.itemId || idx} style={{ borderBottom: '1px solid var(--neutral-100)' }}>
-                              <td style={{ padding: '8px 10px', fontWeight: 600, color: 'var(--neutral-800)' }}>{item.name}</td>
-                              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{item.orderedQty}</td>
-                              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{item.alreadyReceived}</td>
+                              <td style={{ padding: '8px 10px' }}>
+                                <div style={{ fontWeight: 700, color: 'var(--neutral-900)' }}>{item.name}</div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', display: 'flex', gap: 6 }}>
+                                  <span>Inward: <strong>₹{inwardPrice.toFixed(2)}</strong></span>
+                                  <span>• Cur Avg: ₹{currAvgCost.toFixed(2)}</span>
+                                </div>
+                              </td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                                <span>{item.orderedQty}</span>
+                                <span style={{ color: 'var(--neutral-400)', margin: '0 3px' }}>/</span>
+                                <span style={{ color: 'var(--neutral-600)' }}>{item.alreadyReceived}</span>
+                              </td>
                               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--warning-700)' }}>{remaining}</td>
                               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                                 <input
@@ -1976,6 +1995,20 @@ export const PurchaseOrdersView: React.FC = () => {
                                     });
                                   }}
                                 />
+                              </td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontSize: '0.78rem', fontFamily: 'var(--font-mono)' }}>
+                                {qtyToRec > 0 ? (
+                                  <div>
+                                    <div style={{ color: '#059669', fontWeight: 800 }}>
+                                      Avg: ₹{newAvgCost.toFixed(2)}
+                                    </div>
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>
+                                      Stock: {currStock} → {newStock}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: 'var(--neutral-400)' }}>—</span>
+                                )}
                               </td>
                             </tr>
                           );

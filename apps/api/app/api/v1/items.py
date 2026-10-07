@@ -13,9 +13,9 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from app.core.config import settings
 from app.core.database import get_tenant_db
-from app.core.security import get_current_business_id, enforce_active_store_operations
+from app.core.security import get_current_business_id, enforce_active_store_operations, get_current_user, TokenPayload
 from app.schemas.common import PaginatedResponse
-from app.schemas.item import ItemCreate, ItemUpdate, ItemResponse
+from app.schemas.item import ItemCreate, ItemUpdate, ItemResponse, StockAdjustmentRequest
 from app.repositories.item_repository import ItemRepository
 
 logger = logging.getLogger("quickbill.items")
@@ -92,6 +92,7 @@ async def list_items(
 async def create_item(
     payload: ItemCreate,
     business_id: str = Depends(enforce_active_store_operations),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
@@ -151,6 +152,7 @@ async def create_item(
         "category": payload.category or "General",
         "unit": payload.unit,
         "purchasePrice": float(payload.purchase_price),
+        "averageCostPrice": float(payload.purchase_price),
         "salePrice": float(payload.sale_price),
         "mrp": float(payload.mrp) if payload.mrp is not None else float(payload.sale_price),
         "taxRate": float(payload.tax_rate),
@@ -174,6 +176,33 @@ async def create_item(
     doc_id = await repo.insert(business_id, item_doc)
     item_doc["_id"] = doc_id
     item_doc["businessId"] = business_id
+
+    if float(initial_stock) > 0:
+        movement_doc = {
+            "businessId": ObjectId(business_id),
+            "itemId": ObjectId(doc_id) if ObjectId.is_valid(str(doc_id)) else doc_id,
+            "publicItemId": public_id,
+            "itemName": payload.name,
+            "sku": payload.sku,
+            "locationId": locations_data[0].get("locationId") if locations_data else None,
+            "locationName": locations_data[0].get("locationName") if locations_data else "Default Branch",
+            "type": "OPENING_STOCK",
+            "referenceType": "INITIAL_STOCK",
+            "referenceId": str(doc_id),
+            "referenceNumber": "OPEN-STOCK",
+            "quantityChange": float(initial_stock),
+            "quantityBefore": 0.0,
+            "quantityAfter": float(initial_stock),
+            "unitCost": float(payload.purchase_price),
+            "totalCost": round(float(initial_stock) * float(payload.purchase_price), 2),
+            "reason": "Initial Opening Stock on Product Creation",
+            "notes": "System initialized product stock",
+            "createdByUserId": str(current_user.sub) if current_user and current_user.sub else None,
+            "createdByName": current_user.email.split("@")[0] if current_user and current_user.email else "Admin",
+            "createdAt": now
+        }
+        await db.inventory_movements.insert_one(movement_doc)
+
     return ItemResponse(**item_doc)
 
 @router.get("/lookup/qr/{public_item_id}", response_model=ItemResponse)
@@ -228,14 +257,22 @@ async def update_item(
             else:
                 update_data[k] = v
 
+    # Disallow direct stock alterations in update_item to preserve audit ledger integrity
+    update_data.pop("currentStock", None)
+
     # Float conversion for monetary / numeric fields
-    for float_field in ["purchasePrice", "salePrice", "mrp", "taxRate", "minStockAlert", "currentStock", "discountValue"]:
+    for float_field in ["purchasePrice", "averageCostPrice", "salePrice", "mrp", "taxRate", "minStockAlert", "discountValue"]:
         if float_field in update_data and update_data[float_field] is not None:
             update_data[float_field] = float(update_data[float_field])
 
     if "locations" in update_data and update_data["locations"]:
+        # Preserve existing location currentStock counts
+        existing_loc_map = {str(l.get("locationId")): float(l.get("currentStock", 0.0) or 0.0) for l in (existing.get("locations") or [])}
         for loc in update_data["locations"]:
-            for float_field in ["mrp", "salePrice", "purchasePrice", "currentStock", "minStockAlert", "discountValue"]:
+            loc_id_str = str(loc.get("locationId"))
+            if loc_id_str in existing_loc_map:
+                loc["currentStock"] = existing_loc_map[loc_id_str]
+            for float_field in ["mrp", "salePrice", "purchasePrice", "minStockAlert", "discountValue"]:
                 if float_field in loc and loc[float_field] is not None:
                     loc[float_field] = float(loc[float_field])
 
@@ -253,8 +290,9 @@ async def update_item(
 @router.post("/{item_id}/adjust-stock", response_model=ItemResponse)
 async def adjust_item_stock(
     item_id: str,
-    payload: dict,
+    payload: StockAdjustmentRequest,
     business_id: str = Depends(enforce_active_store_operations),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
@@ -262,35 +300,101 @@ async def adjust_item_stock(
     if not existing:
         raise HTTPException(status_code=404, detail="Item not found in current business catalog")
 
-    delta = float(payload.get("delta", 0))
-    location_id = payload.get("locationId")
+    delta = float(payload.delta)
+    location_id = payload.location_id
+    reason = payload.reason or ("Manual Stock Addition" if delta > 0 else "Stock Reduction / Shrinkage")
+    notes = payload.notes or "Manual inventory audit adjustment"
 
-    current_stock = max(0.0, float(existing.get("currentStock", 0)) + delta)
+    prev_stock = float(existing.get("currentStock", 0.0) or 0.0)
+    current_stock = max(0.0, prev_stock + delta)
+    now = datetime.now(timezone.utc)
+    b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else business_id
+    item_oid = existing.get("_id") if isinstance(existing.get("_id"), ObjectId) else (ObjectId(item_id) if ObjectId.is_valid(item_id) else item_id)
+
+    old_avg_cost = float(existing.get("averageCostPrice") or existing.get("purchasePrice") or 0.0)
+
     update_fields: dict = {
-        "currentStock": current_stock,
-        "updatedAt": datetime.now(timezone.utc)
+        "currentStock": round(current_stock, 3),
+        "updatedAt": now
     }
 
+    # Custom Unit Cost & Weighted Average Cost Recalculation on Inward Stock Addition
+    if delta > 0:
+        inward_unit_cost = float(payload.unit_cost) if payload.unit_cost is not None else old_avg_cost
+        movement_unit_cost = inward_unit_cost
+        movement_total_cost = round(delta * inward_unit_cost, 2)
+
+        # Weighted average costing formula
+        effective_old_stock = max(0.0, prev_stock)
+        if (effective_old_stock + delta) > 0:
+            new_avg_cost = ((effective_old_stock * old_avg_cost) + (delta * inward_unit_cost)) / (effective_old_stock + delta)
+        else:
+            new_avg_cost = inward_unit_cost
+
+        # Directly update averageCostPrice AND purchasePrice to keep catalog and bookkeeping in sync
+        update_fields["averageCostPrice"] = round(new_avg_cost, 2)
+        update_fields["purchasePrice"] = round(new_avg_cost, 2)
+    else:
+        movement_unit_cost = old_avg_cost
+        movement_total_cost = round(abs(delta) * old_avg_cost, 2)
+
+    location_name = None
     if location_id and existing.get("locations"):
         locs = list(existing["locations"])
         found = False
         for loc in locs:
-            if loc.get("locationId") == location_id:
+            if str(loc.get("locationId")) == str(location_id):
                 loc["currentStock"] = max(0.0, float(loc.get("currentStock", 0)) + delta)
+                if delta > 0 and "purchasePrice" in update_fields:
+                    loc["purchasePrice"] = update_fields["purchasePrice"]
+                location_name = loc.get("locationName")
                 found = True
                 break
         if not found:
             locs.append({
                 "locationId": location_id,
+                "locationName": "Store Branch",
                 "currentStock": max(0.0, delta),
                 "salePrice": float(existing.get("salePrice", 0)),
-                "purchasePrice": float(existing.get("purchasePrice", 0)),
+                "purchasePrice": update_fields.get("purchasePrice", float(existing.get("purchasePrice", 0))),
                 "minStockAlert": float(existing.get("minStockAlert", 5)),
                 "isListed": True,
             })
+            location_name = "Store Branch"
         update_fields["locations"] = locs
 
     await repo.update_by_id(business_id, item_id, update_fields)
+
+    # User Tagging from Authenticated User Credentials
+    user_id = current_user.sub
+    user_name = getattr(current_user, "name", None) or (current_user.email.split("@")[0] if current_user.email else "Admin")
+
+    # Insert immutable inventory movement audit entry
+    movement_doc = {
+        "businessId": b_oid,
+        "itemId": item_oid,
+        "publicItemId": existing.get("publicItemId"),
+        "itemName": existing.get("name", "Product"),
+        "sku": existing.get("sku"),
+        "locationId": location_id,
+        "locationName": location_name,
+        "type": "MANUAL_ADJUSTMENT",
+        "referenceType": "MANUAL",
+        "referenceId": None,
+        "referenceNumber": "AUDIT-ADJUST",
+        "quantityChange": delta,
+        "quantityBefore": prev_stock,
+        "quantityAfter": round(current_stock, 3),
+        "unitCost": movement_unit_cost,
+        "totalCost": movement_total_cost,
+        "reason": reason,
+        "notes": notes,
+        "createdByUserId": user_id,
+        "createdByName": user_name,
+        "createdAt": now
+    }
+    await db.inventory_movements.insert_one(movement_doc)
+
     updated = await repo.get_by_id(business_id, item_id)
     updated["_id"] = str(updated["_id"])
     updated["businessId"] = str(updated["businessId"])
