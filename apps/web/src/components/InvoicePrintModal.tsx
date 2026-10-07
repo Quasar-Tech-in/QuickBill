@@ -36,13 +36,17 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const branchPhone = invoice.locationPhone || branchLocation?.phone || activeLocation?.phone || '';
   const gstin = invoice.locationGstin || branchLocation?.gstin || (invoice.locationId === activeLocation?.id ? activeLocation?.gstin : undefined) || activeTenant?.gstin || '';
 
+  const grossSubtotal = invoice.grossTotal !== undefined
+    ? invoice.grossTotal
+    : invoice.items.reduce((sum, it) => sum + (Number(it.unitPrice || 0) * Number(it.quantity || 0)), 0);
+
   const itemDiscountsSum = invoice.itemDiscountTotal !== undefined
     ? invoice.itemDiscountTotal
     : invoice.items.reduce((sum, it) => sum + (it.discountAmount || 0), 0);
 
   const orderDiscountAmount = invoice.orderDiscountAmount !== undefined
     ? invoice.orderDiscountAmount
-    : Math.max(0, (invoice.discountTotal || 0) - itemDiscountsSum);
+    : (invoice.invoiceDiscount !== undefined ? invoice.invoiceDiscount : Math.max(0, (invoice.discountTotal || 0) - itemDiscountsSum));
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
@@ -51,7 +55,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
         onClick={(e) => e.stopPropagation()} 
         style={{ 
           width: '100%',
-          maxWidth: printFormat === 'A4' ? 700 : 440, 
+          maxWidth: printFormat === 'A4' ? 760 : 440, 
           maxHeight: '92vh', 
           display: 'flex', 
           flexDirection: 'column', 
@@ -278,10 +282,14 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     const retQty = line.returnedQuantity ? Math.round(Number(line.returnedQuantity) * 1000) / 1000 : 0;
                     const hasRet = retQty > 0;
                     const activeQty = Math.max(0, Math.round((Number(line.quantity) - retQty) * 1000) / 1000);
-                    const hasDisc = (line.discountAmount !== undefined && line.discountAmount > 0) || (line.discountPercent !== undefined && line.discountPercent > 0);
-                    const discLabel = line.discountType === 'FLAT' 
-                      ? `Disc: -₹${(line.discountValue !== undefined ? line.discountValue : (line.discountAmount || 0)).toFixed(2)}`
-                      : `Disc: ${line.discountValue !== undefined ? line.discountValue : line.discountPercent}% (-₹${(line.discountAmount || 0).toFixed(2)})`;
+                    const is100PctDisc = line.total === 0 || (line.discountPercent !== undefined && line.discountPercent >= 100) || (line.discountAmount !== undefined && line.originalTotal !== undefined && line.discountAmount >= line.originalTotal);
+                    const hasDisc = is100PctDisc || (line.discountAmount !== undefined && line.discountAmount > 0) || (line.discountPercent !== undefined && line.discountPercent > 0);
+                    
+                    const discLabel = is100PctDisc 
+                      ? 'Disc: 100% OFF (FREE)'
+                      : (line.discountType === 'FLAT' 
+                          ? `Disc: -₹${(line.discountValue !== undefined ? line.discountValue : (line.discountAmount || 0)).toFixed(2)}`
+                          : `Disc: ${line.discountValue !== undefined ? line.discountValue : line.discountPercent}% (-₹${(line.discountAmount || 0).toFixed(2)})`);
 
                     return (
                       <tr key={idx} style={{ borderBottom: '1px dotted #e5e5e5' }}>
@@ -306,7 +314,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                         </td>
 
                         <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700 }}>
-                          {hasDisc && line.originalTotal && line.originalTotal !== line.total && (
+                          {hasDisc && line.originalTotal !== undefined && line.originalTotal !== line.total && (
                             <div style={{ fontSize: '0.62rem', textDecoration: 'line-through', color: '#777777', fontWeight: 400 }}>
                               {line.originalTotal.toFixed(2)}
                             </div>
@@ -337,12 +345,8 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   </div>
                 ) : null}
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Taxable Base:</span>
-                  <span>₹{invoice.subtotal.toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>GST Taxes (Incl.):</span>
-                  <span>₹{invoice.taxTotal.toFixed(2)}</span>
+                  <span>Total Item Value (Actual):</span>
+                  <span>₹{grossSubtotal.toFixed(2)}</span>
                 </div>
                 {itemDiscountsSum > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#047857' }}>
@@ -354,6 +358,21 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#047857' }}>
                     <span>Order Discount:</span>
                     <span>-₹{orderDiscountAmount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div style={{ borderBottom: '1px dotted #dddddd', margin: '4px 0' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Taxable Base (Ex-Tax):</span>
+                  <span>₹{invoice.subtotal.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>GST Taxes (Incl.):</span>
+                  <span>₹{invoice.taxTotal.toFixed(2)}</span>
+                </div>
+                {invoice.roundOff !== 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#555555' }}>
+                    <span>Round Off:</span>
+                    <span>{invoice.roundOff > 0 ? `+₹${invoice.roundOff.toFixed(2)}` : `-₹${Math.abs(invoice.roundOff).toFixed(2)}`}</span>
                   </div>
                 )}
               </div>
@@ -448,6 +467,8 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     <th style={{ padding: '7px 6px', textAlign: 'center' }}>Billed Qty</th>
                     <th style={{ padding: '7px 6px', textAlign: 'center' }}>Returned</th>
                     <th style={{ padding: '7px 6px', textAlign: 'right' }}>Price</th>
+                    <th style={{ padding: '7px 6px', textAlign: 'right' }}>Discount</th>
+                    <th style={{ padding: '7px 6px', textAlign: 'right' }}>Taxable Base</th>
                     <th style={{ padding: '7px 6px', textAlign: 'right' }}>GST</th>
                     <th style={{ padding: '7px 6px', textAlign: 'right' }}>Net Total (₹)</th>
                   </tr>
@@ -456,20 +477,27 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   {invoice.items.map((line, idx) => {
                     const retQty = line.returnedQuantity ? Math.round(Number(line.returnedQuantity) * 1000) / 1000 : 0;
                     const hasRet = retQty > 0;
-                    const hasDisc = (line.discountAmount !== undefined && line.discountAmount > 0) || (line.discountPercent !== undefined && line.discountPercent > 0);
-                    const discLabel = line.discountType === 'FLAT' 
-                      ? `Disc: -₹${(line.discountValue !== undefined ? line.discountValue : (line.discountAmount || 0)).toFixed(2)}`
-                      : `Disc: ${line.discountValue !== undefined ? line.discountValue : line.discountPercent}% (-₹${(line.discountAmount || 0).toFixed(2)})`;
+                    const is100PctDisc = line.total === 0 || (line.discountPercent !== undefined && line.discountPercent >= 100) || (line.discountAmount !== undefined && line.originalTotal !== undefined && line.discountAmount >= line.originalTotal);
+                    const hasDisc = is100PctDisc || (line.discountAmount !== undefined && line.discountAmount > 0) || (line.discountPercent !== undefined && line.discountPercent > 0);
+                    
+                    const discLabel = is100PctDisc 
+                      ? '100% (FREE)'
+                      : (line.discountType === 'FLAT' 
+                          ? `-₹${(line.discountValue !== undefined ? line.discountValue : (line.discountAmount || 0)).toFixed(2)}`
+                          : `${line.discountValue !== undefined ? line.discountValue : line.discountPercent}%`);
+
+                    const lineTaxable = line.taxableAmount !== undefined 
+                      ? line.taxableAmount 
+                      : (line.taxRate > 0 && line.total > 0 ? line.total * 100 / (100 + line.taxRate) : (line.total === 0 ? 0 : line.total));
+                    
+                    const lineTaxAmt = line.taxAmount !== undefined
+                      ? line.taxAmount
+                      : Math.max(0, line.total - lineTaxable);
 
                     return (
                       <tr key={idx} style={{ borderBottom: '1px solid var(--neutral-100)' }}>
                         <td style={{ padding: '7px 6px', fontWeight: 600 }}>
                           <div>{line.name}</div>
-                          {hasDisc && (
-                            <div style={{ fontSize: '0.72rem', color: '#047857', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                              🏷️ {discLabel}
-                            </div>
-                          )}
                           {line.returnNote && (
                             <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontWeight: 400 }}>
                               Note: {line.returnNote}
@@ -481,7 +509,13 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                           {hasRet ? `${formatQty(retQty)} (${line.returnReason === 'DEFECTIVE_DAMAGED' ? 'Defective' : 'Return'})` : '-'}
                         </td>
                         <td style={{ padding: '7px 6px', textAlign: 'right' }}>₹{line.unitPrice.toFixed(2)}</td>
-                        <td style={{ padding: '7px 6px', textAlign: 'right' }}>{line.taxRate}%</td>
+                        <td style={{ padding: '7px 6px', textAlign: 'right', color: hasDisc ? '#047857' : 'inherit', fontWeight: hasDisc ? 600 : 400 }}>
+                          {hasDisc ? discLabel : '-'}
+                        </td>
+                        <td style={{ padding: '7px 6px', textAlign: 'right' }}>₹{lineTaxable.toFixed(2)}</td>
+                        <td style={{ padding: '7px 6px', textAlign: 'right' }}>
+                          {line.taxRate > 0 ? `${line.taxRate}% (₹${lineTaxAmt.toFixed(2)})` : '0%'}
+                        </td>
                         <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 700 }}>
                           {hasDisc && line.originalTotal && line.originalTotal !== line.total && (
                             <div style={{ fontSize: '0.70rem', textDecoration: 'line-through', color: 'var(--neutral-400)', fontWeight: 400 }}>
@@ -498,7 +532,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
               {/* Totals Summary */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
-                <div style={{ width: '280px' }}>
+                <div style={{ width: '310px' }}>
                   {invoice.originalGrandTotal && invoice.originalGrandTotal !== invoice.grandTotal && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: 'var(--neutral-600)' }}>
                       <span>Original Billed Total:</span>
@@ -512,12 +546,8 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     </div>
                   ) : null}
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
-                    <span style={{ color: 'var(--neutral-600)' }}>Taxable Subtotal:</span>
-                    <span>₹{invoice.subtotal.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
-                    <span style={{ color: 'var(--neutral-600)' }}>GST Total (Incl.):</span>
-                    <span>₹{invoice.taxTotal.toFixed(2)}</span>
+                    <span style={{ color: 'var(--neutral-600)' }}>Total Item Value (Actual):</span>
+                    <span>₹{grossSubtotal.toFixed(2)}</span>
                   </div>
                   {itemDiscountsSum > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: '#047857', fontWeight: 600 }}>
@@ -529,6 +559,21 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: '#047857', fontWeight: 600 }}>
                       <span>Order Discount:</span>
                       <span>-₹{orderDiscountAmount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div style={{ borderBottom: '1px dashed var(--neutral-300)', margin: '4px 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
+                    <span style={{ color: 'var(--neutral-600)' }}>Taxable Subtotal (Ex-Tax):</span>
+                    <span>₹{invoice.subtotal.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
+                    <span style={{ color: 'var(--neutral-600)' }}>GST Total (Incl.):</span>
+                    <span>₹{invoice.taxTotal.toFixed(2)}</span>
+                  </div>
+                  {invoice.roundOff !== 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: 'var(--neutral-500)' }}>
+                      <span>Round Off:</span>
+                      <span>{invoice.roundOff > 0 ? `+₹${invoice.roundOff.toFixed(2)}` : `-₹${Math.abs(invoice.roundOff).toFixed(2)}`}</span>
                     </div>
                   )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '2px solid var(--neutral-900)', borderBottom: '2px solid var(--neutral-900)', marginTop: 4, fontWeight: 800, fontSize: '1rem' }}>

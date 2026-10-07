@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import re
 from typing import Dict, Any, List
 from bson import ObjectId
@@ -221,6 +221,7 @@ class SaleService:
                 }
                 for it in totals.items
             ],
+            "grossTotal": float(totals.gross_total),
             "subtotal": float(totals.subtotal),
             "taxTotal": float(totals.tax_total),
             "itemDiscountTotal": float(totals.item_discount_total),
@@ -386,73 +387,128 @@ class SaleService:
 
         now = datetime.now(timezone.utc)
         original_grand_total = Decimal(str(invoice.get("originalGrandTotal") or invoice.get("grandTotal", "0.00")))
+        orig_inv_discount = Decimal(str(invoice.get("invoiceDiscount") or invoice.get("orderDiscountTotal") or "0.00"))
+        orig_additional_charges = Decimal(str(invoice.get("additionalCharges", "0.00")))
         
-        # Map item snapshots from existing invoice
+        # 1. Map item snapshots from existing invoice and compute original net baselines
         existing_items_map = {}
+        orig_net_subtotal = Decimal("0.00")
+        
         for it_snap in invoice.get("items", []):
-            if it_snap.get("itemId"):
-                existing_items_map[str(it_snap.get("itemId"))] = it_snap
-            if it_snap.get("skuSnapshot"):
-                existing_items_map[str(it_snap.get("skuSnapshot"))] = it_snap
-            if it_snap.get("nameSnapshot"):
-                existing_items_map[str(it_snap.get("nameSnapshot"))] = it_snap
+            item_key = str(it_snap.get("itemId", ""))
+            if not item_key and it_snap.get("skuSnapshot"):
+                item_key = str(it_snap.get("skuSnapshot"))
+            if not item_key and it_snap.get("nameSnapshot"):
+                item_key = str(it_snap.get("nameSnapshot"))
+            
+            orig_q = Decimal(str(it_snap.get("quantity", "0.00")))
+            orig_p = Decimal(str(it_snap.get("unitPrice", "0.00")))
+            orig_gross = orig_q * orig_p
+            orig_disc = Decimal(str(it_snap.get("discount", "0.00")))
+            if orig_disc <= Decimal("0.00") and it_snap.get("discountPercent"):
+                orig_disc = orig_gross * (Decimal(str(it_snap["discountPercent"])) / Decimal("100.00"))
+            
+            orig_net = max(Decimal("0.00"), orig_gross - orig_disc)
+            orig_net_subtotal += orig_net
+            
+            existing_items_map[item_key] = {
+                "snap": it_snap,
+                "orig_qty": orig_q,
+                "orig_unit_price": orig_p,
+                "orig_gross": orig_gross,
+                "orig_disc": orig_disc,
+                "orig_net": orig_net
+            }
+
+        # 2. Compute bill-level discount factor across lines
+        bill_disc_factor = Decimal("0.00")
+        if orig_net_subtotal > Decimal("0.00") and orig_inv_discount > Decimal("0.00"):
+            bill_disc_factor = min(Decimal("1.00"), orig_inv_discount / orig_net_subtotal)
 
         calc_inputs: List[LineItemCalcInput] = []
         updated_item_snapshots = []
         total_has_returns = False
         all_fully_returned = True
+        return_total = Decimal("0.00")
+        active_net_subtotal = Decimal("0.00")
 
+        # 3. Process each requested line item return
         for it in request.items:
-            existing_snap = existing_items_map.get(str(it.item_id)) or existing_items_map.get(it.item_id) or {}
+            item_key = str(it.item_id)
+            meta = existing_items_map.get(item_key) or {}
+            existing_snap = meta.get("snap", {})
             name_snap = existing_snap.get("nameSnapshot") or existing_snap.get("name") or f"Item ({it.item_id})"
             sku_snap = existing_snap.get("skuSnapshot") or existing_snap.get("sku") or ""
             
-            orig_qty = Decimal(str(it.quantity))
-            ret_qty = Decimal(str(it.returned_quantity or "0.00"))
+            orig_qty = meta.get("orig_qty", Decimal(str(it.quantity)))
+            ret_qty = min(orig_qty, max(Decimal("0.00"), Decimal(str(it.returned_quantity or "0.00"))))
             active_qty = max(Decimal("0.00"), orig_qty - ret_qty)
             
-            unit_price = Decimal(str(it.unit_price if it.unit_price is not None else existing_snap.get("unitPrice", "0.00")))
+            unit_price = meta.get("orig_unit_price", Decimal(str(it.unit_price if it.unit_price is not None else existing_snap.get("unitPrice", "0.00"))))
             tax_rate = Decimal(str(it.tax_rate if it.tax_rate is not None else existing_snap.get("taxRate", "0.00")))
-            discount = Decimal(str(it.discount if it.discount is not None else existing_snap.get("discount", "0.00")))
+            orig_disc = meta.get("orig_disc", Decimal(str(it.discount if it.discount is not None else existing_snap.get("discount", "0.00"))))
+            orig_net = meta.get("orig_net", max(Decimal("0.00"), (orig_qty * unit_price) - orig_disc))
+
+            # Pro-rata bill discount allocated to this line
+            line_bill_disc = orig_net * bill_disc_factor
+            effective_line_paid = max(Decimal("0.00"), orig_net - line_bill_disc)
+            effective_unit_paid = (effective_line_paid / orig_qty) if orig_qty > Decimal("0.00") else Decimal("0.00")
+
+            # Return value for returned units (exact tax-inclusive net money paid)
+            line_return_val = ret_qty * effective_unit_paid
+            return_total += line_return_val
 
             if ret_qty > Decimal("0.00"):
                 total_has_returns = True
-
             if active_qty > Decimal("0.00"):
                 all_fully_returned = False
 
-            # Calculation input uses active remaining quantity for billing totals
+            # Pro-rate item discount on active remaining quantity
+            active_item_disc = (active_qty / orig_qty) * orig_disc if orig_qty > Decimal("0.00") else Decimal("0.00")
+            active_net = max(Decimal("0.00"), (active_qty * unit_price) - active_item_disc)
+            active_net_subtotal += active_net
+
             calc_inputs.append(LineItemCalcInput(
                 item_id=it.item_id,
                 name_snapshot=str(name_snap or "Item"),
                 sku_snapshot=str(sku_snap or ""),
                 quantity=active_qty,
                 unit_price=unit_price,
-                discount=discount if active_qty > 0 else Decimal("0.00"),
+                discount=active_item_disc,
                 tax_rate=tax_rate
             ))
 
-        # Calculate authoritative net financial totals
-        invoice_discount = request.invoice_discount if request.invoice_discount is not None else Decimal(str(invoice.get("invoiceDiscount") or invoice.get("orderDiscountTotal") or "0.00"))
-        additional_charges = request.additional_charges if request.additional_charges is not None else Decimal(str(invoice.get("additionalCharges", "0.00")))
+        return_total = return_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # 4. Pro-rate remaining invoice discount for active items
+        active_inv_discount = Decimal("0.00")
+        if orig_net_subtotal > Decimal("0.00") and active_net_subtotal > Decimal("0.00"):
+            active_inv_discount = (orig_inv_discount * (active_net_subtotal / orig_net_subtotal)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        additional_charges = request.additional_charges if request.additional_charges is not None else orig_additional_charges
         paid_amount = request.paid_amount if request.paid_amount is not None else Decimal(str(invoice.get("paidAmount", "0.00")))
 
+        # Calculate authoritative remaining active financial totals
         totals = BillingEngine.calculate(
             items=calc_inputs,
-            invoice_discount=invoice_discount,
+            invoice_discount=active_inv_discount,
             additional_charges=additional_charges,
             paid_amount=paid_amount,
             enable_round_off=request.enable_round_off
         )
 
-        return_total = max(Decimal("0.00"), original_grand_total - totals.grand_total)
+        new_grand_total = max(Decimal("0.00"), original_grand_total - return_total)
+        # If all items are returned, grand total is strictly 0.00
+        if all_fully_returned and total_has_returns:
+            new_grand_total = Decimal("0.00")
+            return_total = original_grand_total
 
-        # Build updated item snapshots & inventory restock movements
+        # 5. Build updated item snapshots & inventory restock movements
         for idx, it in enumerate(request.items):
             calc_item = totals.items[idx]
             orig_qty = Decimal(str(it.quantity))
             ret_qty = Decimal(str(it.returned_quantity or "0.00"))
-            existing_snap = existing_items_map.get(str(it.item_id)) or existing_items_map.get(it.item_id) or {}
+            existing_snap = existing_items_map.get(str(it.item_id), {}).get("snap", {})
             prev_ret_qty = Decimal(str(existing_snap.get("returnedQuantity", "0.00")))
             delta_ret_qty = ret_qty - prev_ret_qty
 
@@ -519,7 +575,10 @@ class SaleService:
                 }
                 await self.db.inventory_movements.insert_one(movement_doc)
 
-        # Determine statuses
+        # Determine statuses and balance due
+        new_paid_safe = min(paid_amount, new_grand_total)
+        new_balance_due = max(Decimal("0.00"), new_grand_total - new_paid_safe)
+
         if all_fully_returned and total_has_returns:
             invoice_status = "RETURNED"
             return_status = "FULLY_RETURNED"
@@ -527,7 +586,7 @@ class SaleService:
         elif total_has_returns:
             invoice_status = "PARTIALLY_RETURNED"
             return_status = "PARTIALLY_RETURNED"
-            payment_status = "PAID" if totals.balance_due == Decimal("0.00") else ("PARTIAL" if totals.paid_amount > 0 else "UNPAID")
+            payment_status = "PAID" if new_balance_due == Decimal("0.00") else ("PARTIAL" if paid_amount > 0 else "UNPAID")
         else:
             invoice_status = invoice.get("status", "CONFIRMED")
             return_status = "NONE"
@@ -537,17 +596,19 @@ class SaleService:
             "items": updated_item_snapshots,
             "subtotal": float(totals.subtotal),
             "taxTotal": float(totals.tax_total),
-            "discountTotal": float(totals.item_discount_total + totals.invoice_discount),
+            "discountTotal": float(totals.item_discount_total + active_inv_discount),
+            "invoiceDiscount": float(active_inv_discount),
+            "orderDiscountTotal": float(active_inv_discount),
             "additionalCharges": float(totals.additional_charges),
             "roundOff": float(totals.round_off),
-            "grandTotal": float(totals.grand_total),
+            "grandTotal": float(new_grand_total),
             "originalGrandTotal": float(original_grand_total),
             "returnTotal": float(return_total),
             "hasReturns": total_has_returns,
             "returnStatus": return_status,
             "returnNotes": request.return_notes,
-            "paidAmount": float(totals.paid_amount),
-            "balanceDue": float(totals.balance_due),
+            "paidAmount": float(paid_amount),
+            "balanceDue": float(new_balance_due),
             "status": invoice_status,
             "paymentStatus": payment_status,
             "notes": request.notes if request.notes is not None else invoice.get("notes"),

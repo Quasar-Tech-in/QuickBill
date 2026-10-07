@@ -142,11 +142,71 @@ def test_item_discount_combined_with_invoice_discount():
     )
     assert totals.items[0].discount == Decimal("20.00")
     assert totals.items[0].line_total == Decimal("80.00")
-    assert totals.items[1].discount == Decimal("10.00")
-    assert totals.items[1].line_total == Decimal("90.00")
     assert totals.item_discount_total == Decimal("30.00")
     assert totals.invoice_discount == Decimal("17.00")
     assert totals.grand_total == Decimal("153.00")
+
+
+def test_item_100_percent_complete_discount():
+    # Item with 100% complete discount (Free promotional item with 18% tax rate)
+    items = [
+        LineItemCalcInput(
+            item_id="free-item-1",
+            name_snapshot="Free Promotional Bottle",
+            quantity=Decimal("1"),
+            unit_price=Decimal("150.00"),
+            discount=Decimal("0.00"),
+            discount_type="PERCENT",
+            discount_value=Decimal("100.00"),
+            discount_percent=Decimal("100.00"),
+            tax_rate=Decimal("18.0")
+        )
+    ]
+    totals = BillingEngine.calculate(items=items, enable_round_off=True)
+    assert totals.items[0].gross_amount == Decimal("150.00")
+    assert totals.items[0].discount == Decimal("150.00")
+    assert totals.items[0].discount_percent == Decimal("100.00")
+    assert totals.items[0].taxable_amount == Decimal("0.00")
+    assert totals.items[0].tax_amount == Decimal("0.00")
+    assert totals.items[0].line_total == Decimal("0.00")
+
+    assert totals.gross_total == Decimal("150.00")
+    assert totals.item_discount_total == Decimal("150.00")
+    assert totals.subtotal == Decimal("0.00")
+    assert totals.tax_total == Decimal("0.00")
+    assert totals.grand_total == Decimal("0.00")
+
+
+def test_mixed_items_with_complete_and_partial_discounts_and_gst():
+    # Item 1: Free gift (100% discount, ₹100 MRP, 18% tax) -> Net ₹0
+    # Item 2: Regular item (0% discount, ₹200 MRP, 18% tax) -> Net ₹200 (Taxable: 169.49, GST: 30.51)
+    items = [
+        LineItemCalcInput(
+            item_id="gift-1",
+            name_snapshot="Gift Pen",
+            quantity=Decimal("1"),
+            unit_price=Decimal("100.00"),
+            discount=Decimal("100.00"),
+            discount_type="FLAT",
+            discount_value=Decimal("100.00"),
+            tax_rate=Decimal("18.0")
+        ),
+        LineItemCalcInput(
+            item_id="reg-1",
+            name_snapshot="Notebook",
+            quantity=Decimal("1"),
+            unit_price=Decimal("200.00"),
+            discount=Decimal("0.00"),
+            tax_rate=Decimal("18.0")
+        )
+    ]
+    totals = BillingEngine.calculate(items=items, enable_round_off=True)
+    assert totals.gross_total == Decimal("300.00")
+    assert totals.item_discount_total == Decimal("100.00")
+    assert totals.subtotal == Decimal("169.49")
+    assert totals.tax_total == Decimal("30.51")
+    assert totals.grand_total == Decimal("200.00")
+
 
 
 

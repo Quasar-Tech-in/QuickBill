@@ -204,6 +204,7 @@ export interface InvoiceItem {
   returnDate?: string;
   returnStatus?: 'NONE' | 'PARTIAL' | 'FULL';
   unitPrice: number;
+  discount?: number;
   discountPercent: number;
   discountType?: 'PERCENT' | 'FLAT';
   discountValue?: number;
@@ -236,10 +237,13 @@ export interface Invoice {
   billedByRole?: string;
   type: 'SALE' | 'PURCHASE';
   items: InvoiceItem[];
+  grossTotal?: number;
   subtotal: number;
   taxTotal: number;
   itemDiscountTotal?: number;
   orderDiscountAmount?: number;
+  orderDiscountTotal?: number;
+  invoiceDiscount?: number;
   discountTotal: number;
   discountType?: 'PERCENT' | 'FLAT';
   discountValue?: number;

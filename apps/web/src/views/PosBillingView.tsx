@@ -1070,6 +1070,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       locationGstin: activeLocation.gstin || store.getActiveTenant()?.gstin || undefined,
       type: 'SALE',
       items: invoiceLines,
+      grossTotal: Number(grossSubtotal.toFixed(2)),
       subtotal: Number(taxBaseTotal.toFixed(2)),
       taxTotal: Number(taxTotal.toFixed(2)),
       itemDiscountTotal: Number(itemDiscountTotal.toFixed(2)),

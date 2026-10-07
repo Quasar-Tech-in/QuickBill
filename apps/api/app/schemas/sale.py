@@ -106,6 +106,7 @@ class SaleResponse(BaseSchema):
     status: str = "CONFIRMED"  # CONFIRMED, PARTIALLY_RETURNED, RETURNED, CANCELLED
     payment_status: Optional[str] = Field(default="PAID", alias="paymentStatus")  # PAID, PARTIAL, UNPAID, REFUNDED
     items: List[SaleItemSnapshot] = Field(default=[])
+    gross_total: Optional[Decimal] = Field(default=Decimal("0.00"), alias="grossTotal")
     subtotal: Decimal = Field(default=Decimal("0.00"))
     tax_total: Decimal = Field(default=Decimal("0.00"), alias="taxTotal")
     discount_total: Decimal = Field(default=Decimal("0.00"), alias="discountTotal")

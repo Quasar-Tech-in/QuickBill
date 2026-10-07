@@ -110,3 +110,100 @@ async def test_sale_return_cost_tax_and_db_persistence():
         assert full_data["returnStatus"] == "FULLY_RETURNED"
         assert full_data["status"] == "RETURNED"
         assert full_data["paymentStatus"] == "REFUNDED"
+
+
+@pytest.mark.asyncio
+async def test_sale_return_with_item_and_bill_discounts():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        token = create_access_token(TokenPayload(
+            sub="user_cashier_102",
+            email="cashier2@quickbill.com",
+            business_id="65f2a1b9a000000000000001",
+            role="CASHIER",
+            permissions=["pos", "sales", "inventory"]
+        ))
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Business-ID": "65f2a1b9a000000000000001"
+        }
+
+        # 1. Create sale:
+        # Item 1: 2 units @ 100 each, discount 20 => net 180
+        # Item 2: 1 unit @ 20 each, discount 0 => net 20
+        # Net subtotal = 200
+        # Bill discount = 40 (20% of net subtotal)
+        # Final Grand Total = 160
+        sale_payload = {
+            "partyNameInput": "Discount Customer",
+            "partyPhoneInput": "9123456780",
+            "locationId": "65f2a1b9a000000000000101",
+            "items": [
+                {
+                    "item_id": "item_ret_test_disc_1",
+                    "name": "Widget Discount A",
+                    "quantity": 2,
+                    "unit_price": 100.0,
+                    "discount": 20.0,
+                    "tax_rate": 0.0
+                },
+                {
+                    "item_id": "item_ret_test_disc_2",
+                    "name": "Widget Discount B",
+                    "quantity": 1,
+                    "unit_price": 20.0,
+                    "discount": 0.0,
+                    "tax_rate": 0.0
+                }
+            ],
+            "invoiceDiscount": 40.0, # Invoice-level discount
+            "paidAmount": 160.0,
+            "paymentMode": "CASH",
+            "enableRoundOff": True
+        }
+
+        create_res = await ac.post("/api/v1/sales", json=sale_payload, headers=headers)
+        assert create_res.status_code == 201, create_res.text
+        created_data = create_res.json()
+        sale_id = created_data["_id"]
+
+        assert Decimal(str(created_data["grandTotal"])) == Decimal("160.00")
+        assert Decimal(str(created_data["discountTotal"])) == Decimal("60.00")
+
+        # 2. Return 1 unit of Item 1:
+        # Original net for 2 units of Item 1 = 180.
+        # Bill discount allocated to Item 1 = 180 * (40 / 200) = 36.
+        # Total effective paid for 2 units of Item 1 = 180 - 36 = 144 ($72 per unit).
+        # Returning 1 unit: Return Total should be 72.00.
+        # Revised Grand Total should be 160 - 72 = 88.00.
+        return_payload = {
+            "items": [
+                {
+                    "itemId": created_data["items"][0]["itemId"],
+                    "quantity": 2,
+                    "returnedQuantity": 1,
+                    "returnReason": "RESTOCKABLE_RETURN",
+                    "returnNote": "Returned 1 unit with discounts",
+                    "unitPrice": 100.0,
+                    "taxRate": 0.0
+                },
+                {
+                    "itemId": created_data["items"][1]["itemId"],
+                    "quantity": 1,
+                    "returnedQuantity": 0,
+                    "unitPrice": 20.0,
+                    "taxRate": 0.0
+                }
+            ],
+            "returnNotes": "Return 1 unit of Item 1",
+            "enableRoundOff": True
+        }
+
+        return_res = await ac.put(f"/api/v1/sales/{sale_id}", json=return_payload, headers=headers)
+        assert return_res.status_code == 200, return_res.text
+        ret_data = return_res.json()
+
+        assert Decimal(str(ret_data["returnTotal"])) == Decimal("72.00")
+        assert Decimal(str(ret_data["grandTotal"])) == Decimal("88.00")
+        assert ret_data["returnStatus"] == "PARTIALLY_RETURNED"
+

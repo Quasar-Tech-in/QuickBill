@@ -3236,6 +3236,7 @@ class StoreService {
           originalTotal: Number(gross.toFixed(2)),
         };
       }),
+      grossTotal: doc.grossTotal !== undefined ? Number(doc.grossTotal) : (doc.gross_total !== undefined ? Number(doc.gross_total) : undefined),
       subtotal: Number(rawSubtotal),
       taxTotal: Number(rawTax),
       itemDiscountTotal: doc.itemDiscountTotal !== undefined ? Number(doc.itemDiscountTotal) : (doc.item_discount_total !== undefined ? Number(doc.item_discount_total) : undefined),
@@ -3311,25 +3312,53 @@ class StoreService {
       }
 
       const origGrand = existing.originalGrandTotal || existing.grandTotal;
+      const origInvDisc = Number(existing.invoiceDiscount || existing.orderDiscountTotal || 0);
+      
+      let origNetSubtotal = 0;
+      existing.items.forEach(it => {
+        const origGross = it.quantity * it.unitPrice;
+        const itemDisc = it.discountAmount !== undefined 
+          ? it.discountAmount 
+          : (it.discountPercent ? (origGross * (it.discountPercent / 100)) : (it.discount || 0));
+        origNetSubtotal += Math.max(0, origGross - itemDisc);
+      });
+
+      const billDiscFactor = (origNetSubtotal > 0 && origInvDisc > 0)
+        ? Math.min(1, origInvDisc / origNetSubtotal)
+        : 0;
+
       let netSubtotal = 0;
       let netTax = 0;
       let anyReturn = false;
       let allReturned = true;
+      let returnTotal = 0;
 
       const updatedItems = existing.items.map(item => {
         const up = updateData.items.find(u => u.itemId === item.itemId);
-        const retQty = up ? up.returnedQuantity : (item.returnedQuantity || 0);
+        const retQty = up ? Math.min(item.quantity, Math.max(0, Number(up.returnedQuantity || 0))) : (item.returnedQuantity || 0);
         const activeQty = Math.max(0, item.quantity - retQty);
         
         if (retQty > 0) anyReturn = true;
         if (activeQty > 0) allReturned = false;
 
-        const lineGross = activeQty * item.unitPrice;
-        const lineDisc = item.discountPercent ? (lineGross * (item.discountPercent / 100)) : 0;
-        const netLineInclusive = Math.max(0, lineGross - lineDisc);
+        const origGross = item.quantity * item.unitPrice;
+        const itemDisc = item.discountAmount !== undefined 
+          ? item.discountAmount 
+          : (item.discountPercent ? (origGross * (item.discountPercent / 100)) : (item.discount || 0));
+        const origNet = Math.max(0, origGross - itemDisc);
+
+        const lineBillDisc = origNet * billDiscFactor;
+        const effectiveLinePaid = Math.max(0, origNet - lineBillDisc);
+        const effectiveUnitPaid = item.quantity > 0 ? (effectiveLinePaid / item.quantity) : 0;
+
+        returnTotal += retQty * effectiveUnitPaid;
+
+        // Active remaining item totals
+        const activeItemDisc = item.quantity > 0 ? (activeQty / item.quantity) * itemDisc : 0;
+        const activeGross = activeQty * item.unitPrice;
+        const netLineInclusive = Math.max(0, activeGross - activeItemDisc);
         const lineTaxable = item.taxRate > 0 ? (netLineInclusive * 100 / (100 + item.taxRate)) : netLineInclusive;
         const lineTax = netLineInclusive - lineTaxable;
-        const lineTotal = netLineInclusive;
 
         netSubtotal += lineTaxable;
         netTax += lineTax;
@@ -3341,12 +3370,16 @@ class StoreService {
           returnNote: up?.returnNote || item.returnNote,
           returnDate: retQty > 0 ? (item.returnDate || new Date().toISOString()) : undefined,
           returnStatus: retQty >= item.quantity ? 'FULL' : (retQty > 0 ? 'PARTIAL' : 'NONE'),
-          total: Number(lineTotal.toFixed(2)),
+          total: Number(netLineInclusive.toFixed(2)),
         };
       });
 
-      const netGrand = Number((netSubtotal + netTax).toFixed(2));
-      const retTotal = Math.max(0, Number((origGrand - netGrand).toFixed(2)));
+      returnTotal = Number(returnTotal.toFixed(2));
+      if (allReturned && anyReturn) {
+        returnTotal = origGrand;
+      }
+
+      const netGrand = (allReturned && anyReturn) ? 0 : Math.max(0, Number((origGrand - returnTotal).toFixed(2)));
       const newStatus = allReturned && anyReturn ? 'RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : existing.status);
 
       updatedInvoice = {
@@ -3356,7 +3389,7 @@ class StoreService {
         taxTotal: Number(netTax.toFixed(2)),
         grandTotal: netGrand,
         originalGrandTotal: origGrand,
-        returnTotal: retTotal,
+        returnTotal: returnTotal,
         hasReturns: anyReturn,
         returnStatus: allReturned && anyReturn ? 'FULLY_RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : 'NONE'),
         returnNotes: updateData.returnNotes || existing.returnNotes,

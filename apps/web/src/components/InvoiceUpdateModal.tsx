@@ -119,41 +119,75 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
 
   // Compute live financial totals (tax-inclusive MRP standard)
   const originalGrand = invoice.originalGrandTotal || invoice.grandTotal;
-  let netSubtotal = 0;
-  let netTax = 0;
-  let netGrandTotal = 0;
-  let totalReturnedQty = 0;
-  let returnDeduction = 0;
+  const originalInvoiceDiscount = Number(invoice.invoiceDiscount || invoice.orderDiscountTotal || 0);
 
+  // 1. Calculate original subtotal across items
+  let origNetSubtotal = 0;
   itemsState.forEach(it => {
-    const activeQty = Math.max(0, Number((it.originalQty - it.returnedQty).toFixed(3)));
-    totalReturnedQty += it.returnedQty;
-    const gross = activeQty * it.unitPrice;
-    const originalLineGross = it.originalQty * it.unitPrice;
-    const itemDiscTotal = it.discountAmount !== undefined ? it.discountAmount : (it.discountPercent ? originalLineGross * (it.discountPercent / 100) : 0);
-    const effectiveDiscountRatio = originalLineGross > 0 ? (itemDiscTotal / originalLineGross) : 0;
-
-    const disc = gross * effectiveDiscountRatio;
-    const netLineInclusive = Math.max(0, gross - disc);
-    
-    // Extract taxable base from tax-inclusive amount: Base = Inclusive / (1 + TaxRate/100)
-    const taxable = it.taxRate > 0 ? (netLineInclusive * 100 / (100 + it.taxRate)) : netLineInclusive;
-    const tax = netLineInclusive - taxable;
-
-    netSubtotal += taxable;
-    netTax += tax;
-    netGrandTotal += netLineInclusive;
-
-    // Return value for returned quantity (tax-inclusive full product price)
-    const retGross = it.returnedQty * it.unitPrice;
-    const retDisc = retGross * effectiveDiscountRatio;
-    returnDeduction += Math.max(0, retGross - retDisc);
+    const origLineGross = it.originalQty * it.unitPrice;
+    const itemDiscTotal = it.discountAmount !== undefined 
+      ? it.discountAmount 
+      : (it.discountPercent ? origLineGross * (it.discountPercent / 100) : 0);
+    const origNetLine = Math.max(0, origLineGross - itemDiscTotal);
+    origNetSubtotal += origNetLine;
   });
 
-  netSubtotal = Number(netSubtotal.toFixed(2));
-  netTax = Number(netTax.toFixed(2));
-  netGrandTotal = Number(netGrandTotal.toFixed(2));
+  const billDiscountFactor = (origNetSubtotal > 0 && originalInvoiceDiscount > 0)
+    ? Math.min(1, originalInvoiceDiscount / origNetSubtotal)
+    : 0;
+
+  let totalReturnedQty = 0;
+  let returnDeduction = 0;
+  let totalGrossReturn = 0;
+  let totalItemDiscDeducted = 0;
+  let totalBillDiscDeducted = 0;
+  let activeNetSubtotal = 0;
+
+  itemsState.forEach(it => {
+    const origLineGross = it.originalQty * it.unitPrice;
+    const itemDiscTotal = it.discountAmount !== undefined 
+      ? it.discountAmount 
+      : (it.discountPercent ? origLineGross * (it.discountPercent / 100) : 0);
+    const origNetLine = Math.max(0, origLineGross - itemDiscTotal);
+
+    // Bill discount share for this line
+    const lineBillDisc = origNetLine * billDiscountFactor;
+    const effectiveLinePaid = Math.max(0, origNetLine - lineBillDisc);
+    const effectiveUnitPaid = it.originalQty > 0 ? (effectiveLinePaid / it.originalQty) : 0;
+
+    const retQty = Math.min(it.originalQty, Math.max(0, it.returnedQty));
+    totalReturnedQty += retQty;
+
+    // Returned amounts
+    const retGross = retQty * it.unitPrice;
+    const retItemDisc = it.originalQty > 0 ? (retQty / it.originalQty) * itemDiscTotal : 0;
+    const retBillDisc = it.originalQty > 0 ? (retQty / it.originalQty) * lineBillDisc : 0;
+    const lineReturnVal = retQty * effectiveUnitPaid;
+
+    totalGrossReturn += retGross;
+    totalItemDiscDeducted += retItemDisc;
+    totalBillDiscDeducted += retBillDisc;
+    returnDeduction += lineReturnVal;
+
+    // Active remaining
+    const activeQty = Math.max(0, it.originalQty - retQty);
+    const activeItemDisc = it.originalQty > 0 ? (activeQty / it.originalQty) * itemDiscTotal : 0;
+    const activeNet = Math.max(0, (activeQty * it.unitPrice) - activeItemDisc);
+    activeNetSubtotal += activeNet;
+  });
+
   returnDeduction = Number(returnDeduction.toFixed(2));
+  totalGrossReturn = Number(totalGrossReturn.toFixed(2));
+  totalItemDiscDeducted = Number(totalItemDiscDeducted.toFixed(2));
+  totalBillDiscDeducted = Number(totalBillDiscDeducted.toFixed(2));
+
+  // If all items are returned, return total is strictly originalGrand
+  const isAllReturned = itemsState.every(it => it.returnedQty >= it.originalQty) && totalReturnedQty > 0;
+  if (isAllReturned) {
+    returnDeduction = originalGrand;
+  }
+
+  const netGrandTotal = isAllReturned ? 0 : Math.max(0, Number((originalGrand - returnDeduction).toFixed(2)));
   const refundDue = invoice.paidAmount > netGrandTotal ? Number((invoice.paidAmount - netGrandTotal).toFixed(2)) : 0;
 
   // Handle manual typing into quantity field (allows fractions & decimals)
@@ -567,11 +601,18 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
             borderRadius: 'var(--radius-md)', 
             padding: '16px 20px' 
           }}>
-            <h4 style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--neutral-800)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Financial Recalculation Preview
-            </h4>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h4 style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--neutral-800)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Financial Recalculation Preview (Tax-Inclusive MRP)
+              </h4>
+              {(totalItemDiscDeducted > 0 || totalBillDiscDeducted > 0) && (
+                <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--neutral-500)' }}>
+                  Discounts Cross-Deducted: -₹{(totalItemDiscDeducted + totalBillDiscDeducted).toFixed(2)} (Item: ₹{totalItemDiscDeducted.toFixed(2)}, Bill: ₹{totalBillDiscDeducted.toFixed(2)})
+                </span>
+              )}
+            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 12 }}>
               <div>
                 <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Original Bill Total</div>
                 <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
@@ -580,14 +621,21 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
               </div>
 
               <div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--danger-600)', fontWeight: 600 }}>Returned Value</div>
-                <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--danger-600)' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Gross Return Value</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
+                  ₹{totalGrossReturn.toFixed(2)}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--danger-600)', fontWeight: 600 }}>Net Refund / Return Total</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--danger-600)' }}>
                   -₹{returnDeduction.toFixed(2)}
                 </div>
               </div>
 
               <div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--primary-700)', fontWeight: 600 }}>Net Adjusted Total</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--primary-700)', fontWeight: 600 }}>Revised Bill Total</div>
                 <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--primary-700)' }}>
                   ₹{netGrandTotal.toFixed(2)}
                 </div>
@@ -595,7 +643,7 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
 
               {refundDue > 0 && (
                 <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--success-200)' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--success-700)', fontWeight: 700 }}>Refund / Credit Due</div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--success-700)', fontWeight: 700 }}>Refund Payable</div>
                   <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--success-700)' }}>
                     ₹{refundDue.toFixed(2)}
                   </div>
