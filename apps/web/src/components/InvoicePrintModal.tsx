@@ -15,6 +15,25 @@ const formatQty = (qty: number | undefined | null): string => {
   return Number(rounded.toFixed(3)).toString();
 };
 
+// Formats invoice date into DD/MM/YYYY format
+const formatInvoiceDate = (val?: string | null): string => {
+  if (!val) return '';
+  const str = String(val).trim();
+  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch;
+    return `${d}/${m}/${y}`;
+  }
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    const d = String(parsed.getDate()).padStart(2, '0');
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const y = parsed.getFullYear();
+    return `${d}/${m}/${y}`;
+  }
+  return str;
+};
+
 export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, onClose }) => {
   // Default to POS Thermal 80mm standard template as requested
   const [printFormat, setPrintFormat] = useState<'POS' | 'A4'>('POS');
@@ -47,6 +66,11 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const orderDiscountAmount = invoice.orderDiscountAmount !== undefined
     ? invoice.orderDiscountAmount
     : (invoice.invoiceDiscount !== undefined ? invoice.invoiceDiscount : Math.max(0, (invoice.discountTotal || 0) - itemDiscountsSum));
+
+  const totalItemsCount = invoice.items?.length || 0;
+  const totalQuantity = (invoice.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+  const returnedQuantitySum = (invoice.items || []).reduce((sum, it) => sum + (Number(it.returnedQuantity) || 0), 0);
+  const activeQuantity = Math.max(0, totalQuantity - returnedQuantitySum);
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
@@ -261,7 +285,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               {/* Consistent Invoice Number & Date */}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', fontWeight: 700, textAlign: 'left' }}>
                 <span>Receipt: {invoice.invoiceNumber}</span>
-                <span>Date: {invoice.date}</span>
+                <span>Date: {formatInvoiceDate(invoice.date)}</span>
               </div>
 
               {/* Dashed Separator */}
@@ -332,22 +356,26 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
               {/* Totals Breakdown */}
               <div style={{ fontSize: '0.74rem', lineHeight: 1.45 }}>
-                {invoice.originalGrandTotal && invoice.originalGrandTotal !== invoice.grandTotal && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#333333', fontWeight: 600 }}>
+                  <span>Total Qty:</span>
+                  <span>{formatQty(totalQuantity)}{returnedQuantitySum > 0 ? ` (Ret: ${formatQty(returnedQuantitySum)})` : ''}</span>
+                </div>
+                {invoice.originalGrandTotal !== undefined && invoice.originalGrandTotal > 0 && invoice.originalGrandTotal !== invoice.grandTotal ? (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666666' }}>
                     <span>Original Total:</span>
-                    <span>₹{invoice.originalGrandTotal.toFixed(2)}</span>
-                  </div>
-                )}
-                {invoice.returnTotal && invoice.returnTotal > 0 ? (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#b91c1c' }}>
-                    <span>Less Returns:</span>
-                    <span>-₹{invoice.returnTotal.toFixed(2)}</span>
+                    <span>₹{Number(invoice.originalGrandTotal).toFixed(2)}</span>
                   </div>
                 ) : null}
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                {invoice.returnTotal !== undefined && invoice.returnTotal > 0 ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#b91c1c' }}>
+                    <span>Less Returns:</span>
+                    <span>-₹{Number(invoice.returnTotal).toFixed(2)}</span>
+                  </div>
+                ) : null}
+                {/* <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>Total Item Value (Actual):</span>
                   <span>₹{grossSubtotal.toFixed(2)}</span>
-                </div>
+                </div> */}
                 {itemDiscountsSum > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#047857' }}>
                     <span>Item Discounts:</span>
@@ -362,11 +390,11 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 )}
                 <div style={{ borderBottom: '1px dotted #dddddd', margin: '4px 0' }} />
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Taxable Base (Ex-Tax):</span>
+                  <span>Taxable Value:</span>
                   <span>₹{invoice.subtotal.toFixed(2)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>GST Taxes (Incl.):</span>
+                  <span>GST:</span>
                   <span>₹{invoice.taxTotal.toFixed(2)}</span>
                 </div>
                 {invoice.roundOff !== 0 && (
@@ -388,7 +416,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 fontSize: '0.98rem', 
                 fontWeight: 900 
               }}>
-                <span>NET GRAND TOTAL:</span>
+                <span>GRAND TOTAL:</span>
                 <span>₹{invoice.grandTotal.toFixed(2)}</span>
               </div>
 
@@ -449,7 +477,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                       TAX INVOICE
                     </div>
                     <p style={{ fontSize: '0.85rem', fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: 6, margin: '4px 0 0 0' }}>{invoice.invoiceNumber}</p>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', margin: '2px 0 0 0' }}>Date: {invoice.date}</p>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', margin: '2px 0 0 0' }}>Date: {formatInvoiceDate(invoice.date)}</p>
                     {invoice.hasReturns && (
                       <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--danger-700)', margin: '2px 0 0 0' }}>
                         ⚠️ Has Item Returns
@@ -528,27 +556,42 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     );
                   })}
                 </tbody>
+                <tfoot style={{ borderTop: '2px solid var(--neutral-300)', fontWeight: 700, backgroundColor: 'var(--neutral-50)' }}>
+                  <tr>
+                    <td style={{ padding: '7px 6px' }}>Total Qty</td>
+                    <td style={{ padding: '7px 6px', textAlign: 'center' }}>{formatQty(totalQuantity)}</td>
+                    <td style={{ padding: '7px 6px', textAlign: 'center', color: returnedQuantitySum > 0 ? 'var(--danger-700)' : 'var(--neutral-400)' }}>
+                      {returnedQuantitySum > 0 ? formatQty(returnedQuantitySum) : '-'}
+                    </td>
+                    <td colSpan={4}></td>
+                    <td style={{ padding: '7px 6px', textAlign: 'right' }}>₹{invoice.grandTotal.toFixed(2)}</td>
+                  </tr>
+                </tfoot>
               </table>
 
               {/* Totals Summary */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
                 <div style={{ width: '310px' }}>
-                  {invoice.originalGrandTotal && invoice.originalGrandTotal !== invoice.grandTotal && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: 'var(--neutral-700)', fontWeight: 600 }}>
+                    <span>Total Qty:</span>
+                    <span>{formatQty(totalQuantity)}</span>
+                  </div>
+                  {invoice.originalGrandTotal !== undefined && invoice.originalGrandTotal > 0 && invoice.originalGrandTotal !== invoice.grandTotal ? (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: 'var(--neutral-600)' }}>
                       <span>Original Billed Total:</span>
-                      <span>₹{invoice.originalGrandTotal.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {invoice.returnTotal && invoice.returnTotal > 0 ? (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: 'var(--danger-700)', fontWeight: 700 }}>
-                      <span>Less Returned Items:</span>
-                      <span>-₹{invoice.returnTotal.toFixed(2)}</span>
+                      <span>₹{Number(invoice.originalGrandTotal).toFixed(2)}</span>
                     </div>
                   ) : null}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
+                  {invoice.returnTotal !== undefined && invoice.returnTotal > 0 ? (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: 'var(--danger-700)', fontWeight: 700 }}>
+                      <span>Less Returned Items:</span>
+                      <span>-₹{Number(invoice.returnTotal).toFixed(2)}</span>
+                    </div>
+                  ) : null}
+                  {/* <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
                     <span style={{ color: 'var(--neutral-600)' }}>Total Item Value (Actual):</span>
                     <span>₹{grossSubtotal.toFixed(2)}</span>
-                  </div>
+                  </div> */}
                   {itemDiscountsSum > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: '#047857', fontWeight: 600 }}>
                       <span>Item Discounts:</span>
@@ -567,7 +610,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     <span>₹{invoice.subtotal.toFixed(2)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
-                    <span style={{ color: 'var(--neutral-600)' }}>GST Total (Incl.):</span>
+                    <span style={{ color: 'var(--neutral-600)' }}>GST:</span>
                     <span>₹{invoice.taxTotal.toFixed(2)}</span>
                   </div>
                   {invoice.roundOff !== 0 && (

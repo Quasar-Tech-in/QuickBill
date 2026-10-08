@@ -530,10 +530,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
                       <div className="amount-tax-sub" style={{ marginTop: 2 }}>
                         Tax: ₹{inv.taxTotal.toFixed(2)}
                       </div>
-                      {inv.returnTotal && inv.returnTotal > 0 ? (
+                      {inv.returnTotal !== undefined && inv.returnTotal > 0 ? (
                         <div style={{ marginTop: 2 }}>
                           <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--danger-700)', backgroundColor: 'rgba(239, 68, 68, 0.12)', padding: '1px 6px', borderRadius: 4 }}>
-                            🔄 Ret: -₹{inv.returnTotal.toFixed(2)}
+                            🔄 Ret: -₹{Number(inv.returnTotal).toFixed(2)}
                           </span>
                         </div>
                       ) : null}

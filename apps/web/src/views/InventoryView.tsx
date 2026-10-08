@@ -2421,7 +2421,7 @@ export const InventoryView: React.FC = () => {
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
                                 <div style={{ minWidth: 0 }}>
                                   <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
-                                    Base MRP / List Price (₹) *
+                                    MRP (Incl. GST) (₹) *
                                   </label>
                                   <input
                                     type="number"
