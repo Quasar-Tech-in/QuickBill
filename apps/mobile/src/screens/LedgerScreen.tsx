@@ -100,6 +100,7 @@ export const LedgerScreen: React.FC = () => {
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             const isCredit = item.type === 'PAYMENT_IN';
+            const isPO = Boolean(item.purchaseOrderId || item.purchaseOrderNumber || item.referenceType === 'PURCHASE_ORDER');
             const dateStr = new Date(item.date).toLocaleDateString('en-IN', {
               day: '2-digit',
               month: 'short',
@@ -109,14 +110,21 @@ export const LedgerScreen: React.FC = () => {
 
             return (
               <View style={styles.entryCard}>
-                <View style={styles.entryIconBox}>
+                <View style={[styles.entryIconBox, isPO && { backgroundColor: '#f3e8ff' }]}>
                   <Text style={{ fontSize: 18 }}>
-                    {isCredit ? '📥' : '📤'}
+                    {isCredit ? '📥' : isPO ? '📦' : '📤'}
                   </Text>
                 </View>
 
                 <View style={{ flex: 1, marginHorizontal: 10 }}>
-                  <Text style={styles.entryTitle}>{item.title}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.entryTitle}>{item.title}</Text>
+                    {isPO && (
+                      <View style={{ backgroundColor: '#ede9fe', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#6d28d9' }}>PO PAY</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={styles.entryParty}>
                     {item.partyOrPayee} • {item.paymentMode}
                   </Text>

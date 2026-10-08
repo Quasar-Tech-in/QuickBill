@@ -29,11 +29,12 @@ interface DateRangePickerProps {
 // Format 'YYYY-MM-DD' to 'DD-MM-YYYY'
 export const formatIsoToDisplay = (isoStr: string): string => {
   if (!isoStr) return '';
-  const parts = isoStr.split('-');
+  const clean = String(isoStr).split('T')[0].split(' ')[0];
+  const parts = clean.split('-');
   if (parts.length === 3) {
     return `${parts[2]}-${parts[1]}-${parts[0]}`;
   }
-  return isoStr;
+  return clean;
 };
 
 // Format 'DD-MM-YYYY' to 'YYYY-MM-DD'
@@ -46,15 +47,25 @@ export const formatDisplayToIso = (displayStr: string): string => {
   return displayStr;
 };
 
+// Helper to get local date string YYYY-MM-DD
+export const getLocalDateString = (d: Date = new Date()): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Helper to get yesterday local date string YYYY-MM-DD
+export const getYesterdayLocalDateString = (): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return getLocalDateString(d);
+};
+
 // Helper to compute ISO dates from presets using local calendar dates
 export const calculatePresetDates = (preset: DatePreset): { fromDate: string; toDate: string } => {
   const today = new Date();
-  const formatLocalDate = (d: Date): string => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
+  const formatLocalDate = (d: Date): string => getLocalDateString(d);
 
   const todayStr = formatLocalDate(today);
 

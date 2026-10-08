@@ -8,7 +8,8 @@ import {
   ChevronDown, 
   FolderPlus,
   Sparkles,
-  Layers
+  Layers,
+  Edit3
 } from 'lucide-react';
 import { ExpenseCategory } from '../types';
 
@@ -42,6 +43,7 @@ export const SearchableCategorySelect: React.FC<SearchableCategorySelectProps> =
   disabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [isManualMode, setIsManualMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreatingInline, setIsCreatingInline] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
@@ -50,6 +52,7 @@ export const SearchableCategorySelect: React.FC<SearchableCategorySelectProps> =
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const newCatInputRef = useRef<HTMLInputElement>(null);
+  const manualInputRef = useRef<HTMLInputElement>(null);
 
   // Filter categories by search query
   const filteredCategories = useMemo(() => {
@@ -98,6 +101,14 @@ export const SearchableCategorySelect: React.FC<SearchableCategorySelectProps> =
     }
   }, [isCreatingInline]);
 
+  useEffect(() => {
+    if (isManualMode) {
+      setTimeout(() => {
+        manualInputRef.current?.focus();
+      }, 50);
+    }
+  }, [isManualMode]);
+
   const handleSelect = (catName: string) => {
     onSelectCategory(catName);
     setIsOpen(false);
@@ -125,63 +136,123 @@ export const SearchableCategorySelect: React.FC<SearchableCategorySelectProps> =
     }
   };
 
+  // If in manual mode, render direct text input
+  if (isManualMode) {
+    return (
+      <div ref={containerRef} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <input
+              ref={manualInputRef}
+              type="text"
+              disabled={disabled}
+              className="form-input"
+              placeholder="Write expense category name (e.g. Chai, Printing, Courier)..."
+              value={selectedCategory}
+              onChange={(e) => onSelectCategory(e.target.value)}
+              style={{ width: '100%', height: 38, fontSize: '0.85rem', fontWeight: 600, paddingLeft: 12 }}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setIsManualMode(false)}
+            title="Switch back to category picker list"
+            style={{ height: 38, padding: '0 10px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
+          >
+            <Layers size={13} />
+            <span>Pick List</span>
+          </button>
+        </div>
+        <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Writing manually: &quot;{selectedCategory || '...'}&quot;</span>
+          <button
+            type="button"
+            onClick={() => setIsManualMode(false)}
+            style={{ border: 'none', background: 'none', color: 'var(--primary-600)', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', padding: 0 }}
+          >
+            Choose from preset list
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
-      {/* Trigger Button */}
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '9px 12px',
-          borderRadius: 'var(--radius-md, 8px)',
-          border: `1.5px solid ${isOpen ? 'var(--primary-500, #4f46e5)' : 'var(--neutral-300, #cbd5e1)'}`,
-          backgroundColor: disabled ? 'var(--neutral-100, #f1f5f9)' : '#ffffff',
-          color: selectedCategory ? 'var(--neutral-900, #0f172a)' : 'var(--neutral-400, #94a3b8)',
-          fontSize: '0.85rem',
-          fontWeight: selectedCategory ? 600 : 400,
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          boxShadow: isOpen ? '0 0 0 3px rgba(79, 70, 229, 0.15)' : 'var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05))',
-          transition: 'all 0.15s ease',
-          outline: 'none',
-          gap: 8,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
-          <div
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: 4,
-              backgroundColor: 'var(--danger-50, #fef2f2)',
-              color: 'var(--danger-600, #dc2626)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <Tag size={13} />
-          </div>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {selectedCategory || placeholder}
-          </span>
-        </div>
-
-        <ChevronDown
-          size={16}
-          color={isOpen ? 'var(--primary-600, #4f46e5)' : 'var(--neutral-400, #94a3b8)'}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
+        {/* Trigger Button */}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => !disabled && setIsOpen(!isOpen)}
           style={{
-            flexShrink: 0,
-            transform: isOpen ? 'rotate(180deg)' : 'none',
-            transition: 'transform 0.2s ease',
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '9px 12px',
+            borderRadius: 'var(--radius-md, 8px)',
+            border: `1.5px solid ${isOpen ? 'var(--primary-500, #4f46e5)' : 'var(--neutral-300, #cbd5e1)'}`,
+            backgroundColor: disabled ? 'var(--neutral-100, #f1f5f9)' : '#ffffff',
+            color: selectedCategory ? 'var(--neutral-900, #0f172a)' : 'var(--neutral-400, #94a3b8)',
+            fontSize: '0.85rem',
+            fontWeight: selectedCategory ? 600 : 400,
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            boxShadow: isOpen ? '0 0 0 3px rgba(79, 70, 229, 0.15)' : 'var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05))',
+            transition: 'all 0.15s ease',
+            outline: 'none',
+            gap: 8,
           }}
-        />
-      </button>
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 4,
+                backgroundColor: 'var(--danger-50, #fef2f2)',
+                color: 'var(--danger-600, #dc2626)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Tag size={13} />
+            </div>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {selectedCategory || placeholder}
+            </span>
+          </div>
+
+          <ChevronDown
+            size={16}
+            color={isOpen ? 'var(--primary-600, #4f46e5)' : 'var(--neutral-400, #94a3b8)'}
+            style={{
+              flexShrink: 0,
+              transform: isOpen ? 'rotate(180deg)' : 'none',
+              transition: 'transform 0.2s ease',
+            }}
+          />
+        </button>
+
+        {/* Quick Manual Toggle Button */}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            setIsOpen(false);
+            setIsManualMode(true);
+          }}
+          className="btn btn-secondary btn-sm"
+          title="Type category name manually"
+          style={{ height: 38, padding: '0 10px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
+        >
+          <Edit3 size={13} />
+          <span>Write Manual</span>
+        </button>
+      </div>
 
       {/* Dropdown Menu */}
       {isOpen && (

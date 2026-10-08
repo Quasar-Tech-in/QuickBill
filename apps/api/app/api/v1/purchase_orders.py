@@ -733,6 +733,11 @@ async def receive_purchase_order_goods(
         )
 
         if amount_paid_now > 0:
+            if (not supplier_name or supplier_name == "Supplier") and supplier_id:
+                sup_lookup = await db.parties.find_one(supplier_query)
+                if sup_lookup and sup_lookup.get("name"):
+                    supplier_name = sup_lookup.get("name")
+
             payment_doc = {
                 "businessId": b_oid,
                 "paymentNumber": payment_number,
@@ -746,6 +751,10 @@ async def receive_purchase_order_goods(
                 "referenceType": "PURCHASE_ORDER",
                 "referenceId": str(po_doc["_id"]),
                 "referenceNumber": ref_no or po_number,
+                "purchaseOrderId": str(po_doc["_id"]),
+                "purchaseOrderNumber": po_number,
+                "locationId": location_id,
+                "locationName": location_name,
                 "notes": f"Payment for PO {po_number} goods receipt",
                 "paidAt": now,
                 "createdAt": now
@@ -825,6 +834,16 @@ async def record_purchase_order_payment(
     supplier_name = str(po_doc.get("supplierName", "Supplier"))
     po_number = str(po_doc.get("poNumber", f"PO-{str(po_doc['_id'])[:8].upper()}"))
 
+    if (not supplier_name or supplier_name == "Supplier") and supplier_id:
+        sup_lookup = await db.parties.find_one({
+            "$and": [
+                {"$or": [{"businessId": b_oid}, {"businessId": business_id}]},
+                {"$or": [{"_id": ObjectId(supplier_id) if ObjectId.is_valid(supplier_id) else supplier_id}, {"id": supplier_id}]}
+            ]
+        })
+        if sup_lookup and sup_lookup.get("name"):
+            supplier_name = sup_lookup.get("name")
+
     payment_mode = payload.paymentMode or payload.payment_mode or "BANK_TRANSFER"
     ref_number = payload.referenceNumber or payload.reference_number
     notes = payload.notes or f"Payment towards PO {po_number}"
@@ -845,6 +864,10 @@ async def record_purchase_order_payment(
         "referenceType": "PURCHASE_ORDER",
         "referenceId": str(po_doc["_id"]),
         "referenceNumber": ref_number or po_number,
+        "purchaseOrderId": str(po_doc["_id"]),
+        "purchaseOrderNumber": po_number,
+        "locationId": po_doc.get("locationId"),
+        "locationName": po_doc.get("locationName"),
         "notes": notes,
         "paidAt": now,
         "createdAt": now

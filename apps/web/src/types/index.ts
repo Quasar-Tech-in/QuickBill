@@ -281,6 +281,10 @@ export interface Payment {
   referenceNumber?: string;
   purchaseOrderId?: string;
   purchaseOrderNumber?: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  locationId?: string;
+  locationName?: string;
   paidAt?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -402,11 +406,19 @@ export interface LedgerEntry {
   type: 'PAYMENT_IN' | 'PAYMENT_OUT' | 'EXPENSE';
   title: string;
   partyOrPayee: string;
+  partyId?: string;
   category?: string;
   paymentMode: string;
   referenceNumber?: string;
+  purchaseOrderId?: string;
+  purchaseOrderNumber?: string;
+  referenceType?: string;
+  referenceId?: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
   notes?: string;
   amount: number;
+  locationId?: string;
   locationName?: string;
 }
 

@@ -1055,6 +1055,32 @@ class MobileStore {
         notes: paymentData.notes,
         paymentDate: new Date().toISOString(),
       });
+
+      // Update supplier party balance
+      const sup = this.parties.find(p => p.id === po.supplierId);
+      if (sup) {
+        sup.currentBalance = (sup.currentBalance || 0) - paymentData.amount;
+      }
+
+      // Add to mobile financial ledger entries stream
+      this.ledgerEntries.unshift({
+        id: `led-po-${Date.now()}`,
+        date: new Date().toISOString(),
+        type: 'PAYMENT_OUT',
+        title: po.poNumber ? `PO Payment (${po.poNumber})` : 'PO Vendor Settlement',
+        partyOrPayee: po.supplierName || 'Supplier',
+        partyId: po.supplierId,
+        category: 'Purchase Order Settlement',
+        paymentMode: paymentData.paymentMode,
+        referenceNumber: paymentData.referenceNumber || po.poNumber,
+        purchaseOrderId: po.id,
+        purchaseOrderNumber: po.poNumber,
+        referenceType: 'PURCHASE_ORDER',
+        referenceId: po.id,
+        notes: paymentData.notes || `Payment towards PO ${po.poNumber}`,
+        amount: paymentData.amount,
+      });
+
       this.notify();
     }
   }

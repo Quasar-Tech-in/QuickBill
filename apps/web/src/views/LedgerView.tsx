@@ -29,7 +29,7 @@ import {
   Banknote,
   RefreshCw
 } from 'lucide-react';
-import { DateRangePicker, DateRangeValue, calculatePresetDates, formatIsoToDisplay } from '../components/DateRangePicker';
+import { DateRangePicker, DateRangeValue, calculatePresetDates, formatIsoToDisplay, getLocalDateString, getYesterdayLocalDateString } from '../components/DateRangePicker';
 import { store } from '../services/store';
 import { Expense, ExpenseCategory, LedgerEntry, Party, Payment } from '../types';
 import { Pagination } from '../components/Pagination';
@@ -56,7 +56,7 @@ export const LedgerView: React.FC = () => {
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [filterType, setFilterType] = useState<'ALL' | 'PAYMENT_IN' | 'PAYMENT_OUT' | 'EXPENSE'>('ALL');
+  const [filterType, setFilterType] = useState<'ALL' | 'PAYMENT_IN' | 'PAYMENT_OUT' | 'PO_PAYMENT' | 'EXPENSE'>('ALL');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
 
   // Debounce search query input (300ms) for responsive API searching
@@ -81,6 +81,14 @@ export const LedgerView: React.FC = () => {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
   const [isEditExpenseOpen, setIsEditExpenseOpen] = useState(false);
   const [isCategoriesModalOpen, setIsCategoriesModalOpen] = useState(false);
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    type: 'EXPENSE' | 'CATEGORY';
+    id: string;
+    title: string;
+    description: string;
+    amount?: number;
+  } | null>(null);
 
   // Record Entry Modal Active Tab
   const [activeTab, setActiveTab] = useState<'PAYMENT_IN' | 'PAYMENT_OUT' | 'EXPENSE'>('EXPENSE');
@@ -104,7 +112,7 @@ export const LedgerView: React.FC = () => {
     referenceNumber: '',
     description: '',
     locationId: activeLoc?.id || '',
-    expenseDate: new Date().toISOString().split('T')[0],
+    expenseDate: getLocalDateString(),
   });
 
   // Edit Expense Form
@@ -160,12 +168,20 @@ export const LedgerView: React.FC = () => {
       } else {
         await Promise.allSettled([
           store.fetchExpenses(loc),
+          store.fetchPayments(loc),
           store.fetchParties(loc),
           store.fetchExpenseCategories(),
         ]);
         const entries = store.getLedgerEntries(loc);
         const filtered = entries.filter(entry => {
-          if (filterType !== 'ALL' && entry.type !== filterType) return false;
+          const isPO = Boolean(entry.purchaseOrderId || entry.purchaseOrderNumber || entry.referenceType === 'PURCHASE_ORDER');
+          if (filterType === 'PO_PAYMENT') {
+            if (!isPO) return false;
+          } else if (filterType === 'PAYMENT_OUT') {
+            if (entry.type !== 'PAYMENT_OUT') return false;
+          } else if (filterType !== 'ALL' && entry.type !== filterType) {
+            return false;
+          }
           if (filterCategory !== 'ALL' && entry.category !== filterCategory) return false;
           if (dateRange.fromDate && (entry.date || '') < dateRange.fromDate) return false;
           if (dateRange.toDate && (entry.date || '') > dateRange.toDate) return false;
@@ -174,13 +190,15 @@ export const LedgerView: React.FC = () => {
             const matchParty = entry.partyOrPayee.toLowerCase().includes(q);
             const matchTitle = entry.title.toLowerCase().includes(q);
             const matchRef = entry.referenceNumber ? entry.referenceNumber.toLowerCase().includes(q) : false;
+            const matchPO = entry.purchaseOrderNumber ? entry.purchaseOrderNumber.toLowerCase().includes(q) : false;
             const matchNotes = entry.notes ? entry.notes.toLowerCase().includes(q) : false;
-            if (!matchParty && !matchTitle && !matchRef && !matchNotes) return false;
+            if (!matchParty && !matchTitle && !matchRef && !matchPO && !matchNotes) return false;
           }
           return true;
         });
         setTotalItems(filtered.length);
         setLedgerEntries(filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize));
+        setExpenses(store.getExpenses(loc));
       }
       setCategories(store.getExpenseCategories());
     } catch (e) {
@@ -194,6 +212,7 @@ export const LedgerView: React.FC = () => {
       }
       setTotalItems(entries.length);
       setLedgerEntries(entries.slice((currentPage - 1) * pageSize, currentPage * pageSize));
+      setExpenses(store.getExpenses(loc));
     }
   }, [currentPage, pageSize, selectedLocationId, filterType, filterCategory, debouncedSearch, dateRange]);
 
@@ -282,7 +301,7 @@ export const LedgerView: React.FC = () => {
           description: expenseForm.description.trim() || undefined,
           locationId: expenseForm.locationId || undefined,
           locationName: chosenLoc ? chosenLoc.name : undefined,
-          expenseDate: expenseForm.expenseDate || new Date().toISOString().split('T')[0],
+          expenseDate: expenseForm.expenseDate || getLocalDateString(),
         });
 
         // Reset expense form
@@ -295,7 +314,7 @@ export const LedgerView: React.FC = () => {
           referenceNumber: '',
           description: '',
           locationId: activeLoc?.id || '',
-          expenseDate: new Date().toISOString().split('T')[0],
+          expenseDate: getLocalDateString(),
         });
       } else {
         // Payment In / Payment Out
@@ -306,7 +325,7 @@ export const LedgerView: React.FC = () => {
         if (!targetParty) return;
 
         store.recordPayment({
-          date: new Date().toISOString().split('T')[0],
+          date: getLocalDateString(),
           partyId: targetParty.id,
           partyName: targetParty.name,
           type: activeTab,
@@ -337,8 +356,31 @@ export const LedgerView: React.FC = () => {
 
   // Open Edit Expense Modal
   const handleOpenEditExpense = (expenseId: string) => {
-    const exp = expenses.find(e => e.id === expenseId);
-    if (!exp) return;
+    let exp = expenses.find(e => e.id === expenseId);
+    if (!exp) {
+      exp = store.getExpenses().find(e => e.id === expenseId);
+    }
+    if (!exp) {
+      const entry = ledgerEntries.find(e => e.id === expenseId && e.type === 'EXPENSE');
+      if (entry) {
+        exp = {
+          id: entry.id,
+          category: entry.category || entry.title,
+          amount: entry.amount,
+          payee: entry.partyOrPayee === 'Direct Expense' ? '' : entry.partyOrPayee,
+          paymentMode: (entry.paymentMode as any) || 'CASH',
+          referenceNumber: entry.referenceNumber,
+          description: entry.notes,
+          locationId: entry.locationId,
+          locationName: entry.locationName,
+          expenseDate: entry.date,
+        };
+      }
+    }
+    if (!exp) {
+      console.warn('Expense record not found for editing:', expenseId);
+      return;
+    }
 
     setEditingExpense(exp);
     setEditExpenseForm({
@@ -348,8 +390,8 @@ export const LedgerView: React.FC = () => {
       paymentMode: exp.paymentMode || 'CASH',
       referenceNumber: exp.referenceNumber || '',
       description: exp.description || '',
-      locationId: exp.locationId || '',
-      expenseDate: exp.expenseDate,
+      locationId: exp.locationId || activeLoc?.id || '',
+      expenseDate: exp.expenseDate ? (exp.expenseDate.includes('T') ? exp.expenseDate.split('T')[0] : exp.expenseDate) : getLocalDateString(),
     });
     setIsEditExpenseOpen(true);
   };
@@ -388,13 +430,56 @@ export const LedgerView: React.FC = () => {
     }
   };
 
-  // Delete Expense
-  const handleDeleteExpense = async (expenseId: string) => {
-    const isConfirmed = window.confirm('Are you sure you want to delete this expense record? This will immediately update your cash ledger.');
-    if (!isConfirmed) return;
+  // Trigger Delete Expense Modal
+  const handleDeleteExpenseClick = (expenseId: string) => {
+    const exp = expenses.find(e => e.id === expenseId) || store.getExpenses().find(e => e.id === expenseId);
+    const entry = ledgerEntries.find(e => e.id === expenseId);
+    const categoryName = exp?.category || entry?.category || entry?.title || 'Expense';
+    const amountVal = exp?.amount || entry?.amount || 0;
 
-    await store.deleteExpense(expenseId);
-    refreshData();
+    setDeleteConfirmModal({
+      isOpen: true,
+      type: 'EXPENSE',
+      id: expenseId,
+      title: 'Delete Expense Record?',
+      description: `Are you sure you want to delete the "${categoryName}" expense of ₹${amountVal.toFixed(2)}? This action cannot be undone and will immediately update your cash ledger balances.`,
+      amount: amountVal,
+    });
+  };
+
+  // Trigger Delete Category Modal
+  const handleDeleteCategoryClick = (catId: string) => {
+    const target = categories.find(c => c.id === catId);
+    const catName = target ? `"${target.name}"` : 'this category';
+    setDeleteConfirmModal({
+      isOpen: true,
+      type: 'CATEGORY',
+      id: catId,
+      title: 'Delete Expense Category?',
+      description: `Are you sure you want to delete category ${catName}? This will permanently remove it from the registered categories list.`,
+    });
+  };
+
+  // Perform Confirmed Deletion
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmModal) return;
+    setIsSaving(true);
+    try {
+      if (deleteConfirmModal.type === 'EXPENSE') {
+        await store.deleteExpense(deleteConfirmModal.id);
+        setExpenses(store.getExpenses(loc));
+        await refreshData();
+      } else if (deleteConfirmModal.type === 'CATEGORY') {
+        await store.deleteExpenseCategory(deleteConfirmModal.id);
+        setCategories(store.getExpenseCategories());
+        await refreshData();
+      }
+      setDeleteConfirmModal(null);
+    } catch (err) {
+      console.error('Delete action failed:', err);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Handle adding new custom category from SearchableCategorySelect
@@ -440,17 +525,6 @@ export const LedgerView: React.FC = () => {
     setEditingCatDesc('');
   };
 
-  // Category Manager: Delete Category
-  const handleDeleteCategory = async (catId: string) => {
-    const target = categories.find(c => c.id === catId);
-    const catName = target ? ` "${target.name}"` : '';
-    const isConfirmed = window.confirm(`Are you sure you want to delete expense category${catName}? This will permanently remove it from the database.`);
-    if (!isConfirmed) return;
-    await store.deleteExpenseCategory(catId);
-    setCategories(store.getExpenseCategories());
-    refreshData();
-  };
-
   const openCategoriesModal = () => {
     setIsCategoriesModalOpen(true);
     store.fetchExpenseCategories().then(() => {
@@ -461,11 +535,12 @@ export const LedgerView: React.FC = () => {
   // Export CSV
   const handleExportCSV = () => {
     if (filteredEntries.length === 0) return;
-    const headers = ['Date', 'Type', 'Category / Title', 'Party / Payee', 'Payment Mode', 'Reference No', 'Notes', 'Amount'];
+    const headers = ['Date', 'Type', 'Category / Title', 'PO Number', 'Party / Payee', 'Payment Mode', 'Reference No', 'Notes', 'Amount'];
     const rows = filteredEntries.map(e => [
       `"${e.date}"`,
       `"${e.type}"`,
       `"${e.category || e.title}"`,
+      `"${e.purchaseOrderNumber || ''}"`,
       `"${e.partyOrPayee}"`,
       `"${e.paymentMode}"`,
       `"${e.referenceNumber || ''}"`,
@@ -630,7 +705,7 @@ export const LedgerView: React.FC = () => {
           {/* Entry Type Filter */}
           <select
             className="form-select"
-            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 130 }}
+            style={{ height: 35, fontSize: '0.8rem', width: 'auto', minWidth: 140 }}
             value={filterType}
             onChange={(e) => setFilterType(e.target.value as any)}
           >
@@ -638,6 +713,7 @@ export const LedgerView: React.FC = () => {
             <option value="EXPENSE">Operating Expenses</option>
             <option value="PAYMENT_IN">Receipts (Inflow)</option>
             <option value="PAYMENT_OUT">Payouts (Outflow)</option>
+            <option value="PO_PAYMENT">PO Payments (Vendor)</option>
           </select>
 
           {/* Category Dropdown */}
@@ -738,13 +814,13 @@ export const LedgerView: React.FC = () => {
                 gap: 5,
                 padding: '2px 8px',
                 borderRadius: 'var(--radius-full, 9999px)',
-                background: filterType === 'PAYMENT_IN' ? '#ecfdf5' : filterType === 'PAYMENT_OUT' ? '#fef3c7' : '#fee2e2',
-                color: filterType === 'PAYMENT_IN' ? '#047857' : filterType === 'PAYMENT_OUT' ? '#b45309' : '#b91c1c',
+                background: filterType === 'PAYMENT_IN' ? '#ecfdf5' : filterType === 'PO_PAYMENT' ? '#ede9fe' : filterType === 'PAYMENT_OUT' ? '#fef3c7' : '#fee2e2',
+                color: filterType === 'PAYMENT_IN' ? '#047857' : filterType === 'PO_PAYMENT' ? '#6d28d9' : filterType === 'PAYMENT_OUT' ? '#b45309' : '#b91c1c',
                 border: '1px solid var(--neutral-200)',
                 fontSize: '0.74rem',
                 fontWeight: 600
               }}>
-                <span>Type: {filterType === 'EXPENSE' ? 'Operating Expense' : filterType === 'PAYMENT_IN' ? 'Receipt (Inflow)' : 'Payout (Outflow)'}</span>
+                <span>Type: {filterType === 'EXPENSE' ? 'Operating Expense' : filterType === 'PAYMENT_IN' ? 'Receipt (Inflow)' : filterType === 'PO_PAYMENT' ? 'PO Payment' : 'Payout (Outflow)'}</span>
                 <button
                   type="button"
                   onClick={() => setFilterType('ALL')}
@@ -881,6 +957,7 @@ export const LedgerView: React.FC = () => {
                   const isInflow = entry.type === 'PAYMENT_IN';
                   const isOutflow = entry.type === 'PAYMENT_OUT';
                   const isExpense = entry.type === 'EXPENSE';
+                  const isPO = Boolean(entry.purchaseOrderId || entry.purchaseOrderNumber || entry.referenceType === 'PURCHASE_ORDER');
 
                   return (
                     <tr key={entry.id}>
@@ -893,35 +970,71 @@ export const LedgerView: React.FC = () => {
                         )}
                       </td>
                       <td>
-                        <span
-                          className="badge"
-                          style={{
-                            backgroundColor: isInflow ? '#ecfdf5' : isOutflow ? '#fef3c7' : '#fee2e2',
-                            color: isInflow ? '#059669' : isOutflow ? '#d97706' : '#dc2626',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 4
-                          }}
-                        >
-                          {isInflow && <ArrowDownLeft size={12} />}
-                          {isOutflow && <ArrowUpRight size={12} />}
-                          {isExpense && <Receipt size={12} />}
-                          {isInflow ? 'Payment In' : isOutflow ? 'Payment Out' : 'Shop Expense'}
-                        </span>
+                        {isPO ? (
+                          <span
+                            className="badge"
+                            style={{
+                              backgroundColor: '#ede9fe',
+                              color: '#6d28d9',
+                              border: '1px solid #ddd6fe',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4
+                            }}
+                          >
+                            <ArrowUpRight size={12} />
+                            PO Payment
+                          </span>
+                        ) : (
+                          <span
+                            className="badge"
+                            style={{
+                              backgroundColor: isInflow ? '#ecfdf5' : isOutflow ? '#fef3c7' : '#fee2e2',
+                              color: isInflow ? '#059669' : isOutflow ? '#d97706' : '#dc2626',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4
+                            }}
+                          >
+                            {isInflow && <ArrowDownLeft size={12} />}
+                            {isOutflow && <ArrowUpRight size={12} />}
+                            {isExpense && <Receipt size={12} />}
+                            {isInflow ? 'Payment In' : isOutflow ? 'Payment Out' : 'Shop Expense'}
+                          </span>
+                        )}
                       </td>
                       <td>
                         <div style={{ fontWeight: 700, color: 'var(--neutral-900)' }}>
                           {entry.title}
                         </div>
-                        {entry.category && entry.category !== entry.title && (
+                        {entry.purchaseOrderNumber && (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                            <span style={{
+                              fontSize: '0.7rem',
+                              padding: '1px 6px',
+                              borderRadius: 4,
+                              backgroundColor: '#f3e8ff',
+                              color: '#7e22ce',
+                              fontWeight: 700
+                            }}>
+                              #{entry.purchaseOrderNumber}
+                            </span>
+                          </div>
+                        )}
+                        {entry.category && !entry.purchaseOrderNumber && entry.category !== entry.title && (
                           <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>
                             {entry.category}
                           </div>
                         )}
                       </td>
                       <td>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--neutral-800)' }}>
-                          {entry.partyOrPayee}
+                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--neutral-800)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span>{entry.partyOrPayee}</span>
+                          {isPO && (
+                            <span style={{ fontSize: '0.66rem', padding: '1px 5px', borderRadius: 4, backgroundColor: 'var(--neutral-100)', color: 'var(--neutral-600)', fontWeight: 600 }}>
+                              Supplier
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td>
@@ -966,7 +1079,7 @@ export const LedgerView: React.FC = () => {
                               className="btn btn-secondary btn-sm"
                               title="Delete Expense"
                               style={{ fontSize: '0.75rem', padding: '4px 8px', color: 'var(--danger-600)' }}
-                              onClick={() => handleDeleteExpense(entry.id)}
+                              onClick={() => handleDeleteExpenseClick(entry.id)}
                             >
                               <Trash2 size={13} />
                             </button>
@@ -1228,7 +1341,7 @@ export const LedgerView: React.FC = () => {
                           <div style={{ display: 'flex', gap: 4 }}>
                             <button
                               type="button"
-                              onClick={() => setExpenseForm({ ...expenseForm, expenseDate: new Date().toISOString().split('T')[0] })}
+                              onClick={() => setExpenseForm({ ...expenseForm, expenseDate: getLocalDateString() })}
                               style={{
                                 border: 'none',
                                 background: 'none',
@@ -1244,10 +1357,7 @@ export const LedgerView: React.FC = () => {
                             <span style={{ fontSize: '0.68rem', color: 'var(--neutral-300)' }}>|</span>
                             <button
                               type="button"
-                              onClick={() => {
-                                const y = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-                                setExpenseForm({ ...expenseForm, expenseDate: y });
-                              }}
+                              onClick={() => setExpenseForm({ ...expenseForm, expenseDate: getYesterdayLocalDateString() })}
                               style={{
                                 border: 'none',
                                 background: 'none',
@@ -1562,7 +1672,7 @@ export const LedgerView: React.FC = () => {
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button
                           type="button"
-                          onClick={() => setEditExpenseForm({ ...editExpenseForm, expenseDate: new Date().toISOString().split('T')[0] })}
+                          onClick={() => setEditExpenseForm({ ...editExpenseForm, expenseDate: getLocalDateString() })}
                           style={{
                             border: 'none',
                             background: 'none',
@@ -1578,10 +1688,7 @@ export const LedgerView: React.FC = () => {
                         <span style={{ fontSize: '0.68rem', color: 'var(--neutral-300)' }}>|</span>
                         <button
                           type="button"
-                          onClick={() => {
-                            const y = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-                            setEditExpenseForm({ ...editExpenseForm, expenseDate: y });
-                          }}
+                          onClick={() => setEditExpenseForm({ ...editExpenseForm, expenseDate: getYesterdayLocalDateString() })}
                           style={{
                             border: 'none',
                             background: 'none',
@@ -1821,7 +1928,7 @@ export const LedgerView: React.FC = () => {
                                     type="button"
                                     className="btn btn-secondary btn-sm"
                                     title="Delete Category"
-                                    onClick={() => handleDeleteCategory(c.id)}
+                                    onClick={() => handleDeleteCategoryClick(c.id)}
                                     style={{ padding: '4px 8px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--danger-600, #dc2626)' }}
                                   >
                                     <Trash2 size={13} />
@@ -1842,6 +1949,75 @@ export const LedgerView: React.FC = () => {
             <div className="modal-footer" style={{ flexShrink: 0, padding: '14px 24px', borderTop: '1px solid var(--neutral-200)', background: 'var(--neutral-50)' }}>
               <button type="button" className="btn btn-primary" onClick={() => setIsCategoriesModalOpen(false)}>
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal Popup */}
+      {deleteConfirmModal && deleteConfirmModal.isOpen && (
+        <div className="modal-overlay" onClick={() => !isSaving && setDeleteConfirmModal(null)} style={{ zIndex: 1100 }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460, width: '100%', padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '24px 24px 18px 24px', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+              <div style={{
+                width: 44,
+                height: 44,
+                borderRadius: '50%',
+                backgroundColor: '#fee2e2',
+                color: '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <Trash2 size={22} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--neutral-900)', margin: '0 0 6px 0' }}>
+                  {deleteConfirmModal.title}
+                </h3>
+                <p style={{ fontSize: '0.84rem', color: 'var(--neutral-600)', margin: 0, lineHeight: 1.5 }}>
+                  {deleteConfirmModal.description}
+                </p>
+              </div>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 10,
+              padding: '14px 20px',
+              backgroundColor: 'var(--neutral-50)',
+              borderTop: '1px solid var(--neutral-200)'
+            }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDeleteConfirmModal(null)}
+                disabled={isSaving}
+                style={{ fontSize: '0.84rem' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConfirmDelete}
+                disabled={isSaving}
+                style={{
+                  backgroundColor: '#dc2626',
+                  borderColor: '#dc2626',
+                  color: '#ffffff',
+                  fontSize: '0.84rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 700
+                }}
+              >
+                <Trash2 size={14} />
+                <span>{isSaving ? 'Deleting...' : 'Yes, Delete'}</span>
               </button>
             </div>
           </div>

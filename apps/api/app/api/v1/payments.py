@@ -44,6 +44,7 @@ async def list_payments(
                 {"paymentNumber": {"$regex": s, "$options": "i"}},
                 {"partyName": {"$regex": s, "$options": "i"}},
                 {"partyNameSnapshot": {"$regex": s, "$options": "i"}},
+                {"purchaseOrderNumber": {"$regex": s, "$options": "i"}},
                 {"referenceNumber": {"$regex": s, "$options": "i"}},
                 {"notes": {"$regex": s, "$options": "i"}},
             ]
@@ -66,12 +67,17 @@ async def list_payments(
             d["partyId"] = str(d["partyId"])
         if d.get("invoiceId"):
             d["invoiceId"] = str(d["invoiceId"])
+        if d.get("purchaseOrderId"):
+            d["purchaseOrderId"] = str(d["purchaseOrderId"])
+        elif d.get("referenceType") == "PURCHASE_ORDER" and d.get("referenceId"):
+            d["purchaseOrderId"] = str(d["referenceId"])
         if d.get("referenceId"):
             d["referenceId"] = str(d["referenceId"])
+        if not d.get("partyName") and d.get("partyNameSnapshot"):
+            d["partyName"] = d["partyNameSnapshot"]
         if not d.get("direction") and d.get("type"):
             d["direction"] = "OUT" if "OUT" in d["type"] else "IN"
         payments.append(PaymentResponse(**d))
-
 
     return PaginatedResponse(
         data=payments,
@@ -105,10 +111,16 @@ async def create_payment(
         "businessId": b_oid,
         "paymentNumber": payment_number,
         "direction": payload.direction,
+        "type": f"PAYMENT_{payload.direction}",
         "partyId": party_oid,
         "partyNameSnapshot": party_name,
+        "partyName": party_name,
         "invoiceId": invoice_oid,
         "invoiceNumber": None,
+        "purchaseOrderId": payload.purchase_order_id,
+        "purchaseOrderNumber": payload.purchase_order_number,
+        "locationId": payload.location_id,
+        "locationName": payload.location_name,
         "amount": float(payload.amount),
         "paymentMode": payload.payment_mode,
         "referenceNumber": payload.reference_number,

@@ -250,9 +250,14 @@ export interface LedgerEntry {
   type: 'PAYMENT_IN' | 'PAYMENT_OUT' | 'EXPENSE';
   title: string;
   partyOrPayee: string;
+  partyId?: string;
   category?: string;
   paymentMode: string;
   referenceNumber?: string;
+  purchaseOrderId?: string;
+  purchaseOrderNumber?: string;
+  referenceType?: string;
+  referenceId?: string;
   notes?: string;
   amount: number;
   locationName?: string;

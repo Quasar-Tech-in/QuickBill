@@ -8,6 +8,10 @@ class PaymentCreate(BaseSchema):
     direction: str = Field(default="IN")  # IN (from customer) or OUT (to supplier)
     party_id: Optional[str] = None
     invoice_id: Optional[str] = None
+    purchase_order_id: Optional[str] = None
+    purchase_order_number: Optional[str] = None
+    location_id: Optional[str] = None
+    location_name: Optional[str] = None
     amount: Decimal = Field(..., gt=0)
     payment_mode: str = Field(default="CASH")  # CASH, UPI, CARD, BANK_TRANSFER, CHEQUE
     reference_number: Optional[str] = None
@@ -26,6 +30,10 @@ class PaymentResponse(BaseSchema):
     party_name_snapshot: Optional[str] = Field(None, alias="partyNameSnapshot")
     invoice_id: Optional[str] = Field(None, alias="invoiceId")
     invoice_number: Optional[str] = Field(None, alias="invoiceNumber")
+    purchase_order_id: Optional[str] = Field(None, alias="purchaseOrderId")
+    purchase_order_number: Optional[str] = Field(None, alias="purchaseOrderNumber")
+    location_id: Optional[str] = Field(None, alias="locationId")
+    location_name: Optional[str] = Field(None, alias="locationName")
     reference_type: Optional[str] = Field(None, alias="referenceType")
     reference_id: Optional[str] = Field(None, alias="referenceId")
     reference_number: Optional[str] = Field(None, alias="referenceNumber")
@@ -34,4 +42,5 @@ class PaymentResponse(BaseSchema):
     notes: Optional[str] = None
     paid_at: datetime = Field(..., alias="paidAt")
     created_at: datetime = Field(..., alias="createdAt")
+
 

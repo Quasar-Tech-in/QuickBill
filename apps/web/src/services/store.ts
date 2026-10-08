@@ -11,6 +11,31 @@ export const apiClient = axios.create({
   },
 });
 
+function formatCleanIsoDate(val: any): string {
+  if (!val) {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const str = String(val).trim();
+  if (str.includes('T')) {
+    return str.split('T')[0];
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    return str.substring(0, 10);
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return str;
+}
+
 class StoreService {
   private items: Item[] = [];
   private parties: Party[] = [];
@@ -2905,7 +2930,7 @@ class StoreService {
           description: d.description || undefined,
           locationId: d.locationId || undefined,
           locationName: d.locationName || undefined,
-          expenseDate: d.expenseDate ? new Date(d.expenseDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          expenseDate: formatCleanIsoDate(d.expenseDate || d.createdAt),
           createdAt: d.createdAt,
         }));
         this.expenses = liveExpenses;
@@ -2965,7 +2990,7 @@ class StoreService {
           description: d.description || undefined,
           locationId: d.locationId || undefined,
           locationName: d.locationName || undefined,
-          expenseDate: d.expenseDate ? new Date(d.expenseDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          expenseDate: formatCleanIsoDate(d.expenseDate || d.createdAt),
           createdAt: d.createdAt,
         }));
 
@@ -3007,14 +3032,15 @@ class StoreService {
   async addExpense(expenseData: Omit<Expense, 'id' | 'businessId'>): Promise<Expense> {
     const activeId = this.currentTenant?.id || '';
     const activeLoc = this.getActiveLocation();
-    
+    const cleanDate = formatCleanIsoDate(expenseData.expenseDate);
+
     const newExp: Expense = {
       ...expenseData,
       id: `exp_${Date.now()}`,
       businessId: activeId,
       locationId: expenseData.locationId || activeLoc.id,
       locationName: expenseData.locationName || activeLoc.name,
-      expenseDate: expenseData.expenseDate || new Date().toISOString().split('T')[0],
+      expenseDate: cleanDate,
       createdAt: new Date().toISOString(),
     };
 
@@ -3029,7 +3055,7 @@ class StoreService {
         description: newExp.description,
         locationId: newExp.locationId,
         locationName: newExp.locationName,
-        expenseDate: newExp.expenseDate ? new Date(newExp.expenseDate).toISOString() : new Date().toISOString(),
+        expenseDate: cleanDate ? `${cleanDate}T12:00:00Z` : new Date().toISOString(),
       });
       if (res.data?.id || res.data?._id) {
         newExp.id = res.data.id || res.data._id;
@@ -3050,7 +3076,13 @@ class StoreService {
     );
     if (idx === -1) return null;
 
-    this.expenses[idx] = { ...this.expenses[idx], ...updates };
+    const cleanUpdatedDate = updates.expenseDate ? formatCleanIsoDate(updates.expenseDate) : undefined;
+    const finalUpdates = {
+      ...updates,
+      ...(cleanUpdatedDate ? { expenseDate: cleanUpdatedDate } : {})
+    };
+
+    this.expenses[idx] = { ...this.expenses[idx], ...finalUpdates };
     this.saveToStorage();
 
     if (!id.startsWith('exp_')) {
@@ -3064,7 +3096,7 @@ class StoreService {
           description: updates.description,
           locationId: updates.locationId,
           locationName: updates.locationName,
-          expenseDate: updates.expenseDate ? new Date(updates.expenseDate).toISOString() : undefined,
+          expenseDate: cleanUpdatedDate ? `${cleanUpdatedDate}T12:00:00Z` : undefined,
         });
       } catch (err) {
         console.warn('Could not sync expense update to backend:', err);
@@ -3115,6 +3147,10 @@ class StoreService {
           referenceNumber: d.referenceNumber,
           purchaseOrderId: d.purchaseOrderId,
           purchaseOrderNumber: d.purchaseOrderNumber,
+          invoiceId: d.invoiceId,
+          invoiceNumber: d.invoiceNumber,
+          locationId: d.locationId,
+          locationName: d.locationName,
           paidAt: d.paidAt || d.date || d.createdAt,
           date: d.date || (d.paidAt ? new Date(d.paidAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
           notes: d.notes,
@@ -3140,15 +3176,33 @@ class StoreService {
 
     payments.forEach(p => {
       const paymentType: 'PAYMENT_IN' | 'PAYMENT_OUT' = (p.type === 'PAYMENT_IN' || p.direction === 'IN') ? 'PAYMENT_IN' : 'PAYMENT_OUT';
+      const isPO = Boolean(p.purchaseOrderId || p.purchaseOrderNumber || p.referenceType === 'PURCHASE_ORDER');
+
+      let title = paymentType === 'PAYMENT_IN' ? 'Customer Receipt' : 'Supplier Payout';
+      let category = paymentType === 'PAYMENT_IN' ? 'Receivable Inflow' : 'Payable Outflow';
+      if (isPO) {
+        title = p.purchaseOrderNumber ? `PO Payment (${p.purchaseOrderNumber})` : 'PO Vendor Settlement';
+        category = 'Purchase Order Settlement';
+      }
+
       entries.push({
         id: p.id,
         date: p.date || (p.paidAt ? new Date(p.paidAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
         type: paymentType,
-        title: paymentType === 'PAYMENT_IN' ? 'Customer Receipt' : 'Supplier Payout',
-        partyOrPayee: p.partyName || p.partyNameSnapshot || 'Unknown Party',
-        category: paymentType === 'PAYMENT_IN' ? 'Receivable Inflow' : 'Payable Outflow',
+        title,
+        partyId: p.partyId,
+        partyOrPayee: p.partyName || p.partyNameSnapshot || (isPO ? 'Vendor' : 'Unknown Party'),
+        category,
         paymentMode: p.paymentMode || 'CASH',
         referenceNumber: p.referenceNumber || p.purchaseOrderNumber,
+        purchaseOrderId: p.purchaseOrderId,
+        purchaseOrderNumber: p.purchaseOrderNumber,
+        referenceType: p.referenceType || (isPO ? 'PURCHASE_ORDER' : undefined),
+        referenceId: p.referenceId,
+        invoiceId: p.invoiceId,
+        invoiceNumber: p.invoiceNumber,
+        locationId: p.locationId,
+        locationName: p.locationName,
         notes: p.notes,
         amount: p.amount,
       });
@@ -3157,7 +3211,7 @@ class StoreService {
     expenses.forEach(e => {
       entries.push({
         id: e.id,
-        date: e.expenseDate,
+        date: formatCleanIsoDate(e.expenseDate || e.createdAt),
         type: 'EXPENSE',
         title: e.category,
         partyOrPayee: e.payee || 'Direct Expense',
@@ -3166,6 +3220,7 @@ class StoreService {
         referenceNumber: e.referenceNumber,
         notes: e.description,
         amount: e.amount,
+        locationId: e.locationId,
         locationName: e.locationName,
       });
     });
@@ -4264,9 +4319,10 @@ class StoreService {
         const updatedPO = this.mapPoDocToPurchaseOrder(res.data);
         this.purchaseOrders = this.purchaseOrders.map(p => p.id === id ? updatedPO : p);
         try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
-        // Refresh items/parties cache
+        // Refresh items/parties/payments cache
         this.fetchItems().catch(() => {});
         this.fetchParties().catch(() => {});
+        this.fetchPayments().catch(() => {});
         return updatedPO;
       }
     } catch (err: any) {
