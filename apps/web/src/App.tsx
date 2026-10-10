@@ -431,6 +431,12 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     store.checkHealth().then((online) => setIsBackendOnline(online));
+    const unsubscribe = store.subscribe(() => {
+      setCurrentUser(store.getCurrentUser());
+    });
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const handleLoginSuccess = (user: User) => {
@@ -542,8 +548,13 @@ export const App: React.FC = () => {
             <Route path="/" element={<Navigate to={getDefaultPathForRole(currentUser)} replace />} />
             <Route path="*" element={<Navigate to={getDefaultPathForRole(currentUser)} replace />} />
           </Route>
-        ) : (
-          /* Redirect any unauthenticated path to /login */
+        ) : null}
+
+        {/* Redirect for unauthenticated paths */}
+        {!currentUser && (
+          <Route path="/superadmin/*" element={<Navigate to="/superadmin/login" replace />} />
+        )}
+        {!currentUser && (
           <Route path="*" element={<Navigate to="/login" replace />} />
         )}
       </Routes>

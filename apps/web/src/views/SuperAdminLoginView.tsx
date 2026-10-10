@@ -88,6 +88,22 @@ export const SuperAdminLoginView: React.FC<SuperAdminLoginViewProps> = ({
     }
   }, [otpauthUri, step]);
 
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('expired') === '1' || params.get('reason') === 'session_expired') {
+        setAuthError({
+          type: 'warning',
+          title: 'Session Expired',
+          message: 'Your administrator session has expired. Please sign in again to continue.',
+          actionHint: 'Authenticate with your administrator credentials.'
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const validateStep1 = (): boolean => {
     const errors: { email?: string; password?: string } = {};
     const cleanEmail = email.trim().toLowerCase();

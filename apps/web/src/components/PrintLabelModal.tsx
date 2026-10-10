@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Printer, X, Tag, Gem, Check, Download, Eye, QrCode } from 'lucide-react';
 import axios from 'axios';
 import QRCode from 'qrcode';
+import { apiClient } from '../services/store';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -83,9 +84,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         storeName: 'QuickBill Store',
       };
 
-      const token = localStorage.getItem('token');
-      const response = await axios.post(`${API_BASE_URL}/labels/custom-pdf`, payload, {
-        headers: { Authorization: `Bearer ${token}` },
+      const response = await apiClient.post('/labels/custom-pdf', payload, {
         responseType: 'blob',
       });
 

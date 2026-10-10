@@ -88,6 +88,31 @@ class StoreService {
     });
   }
 
+  private isHandlingUnauthorized = false;
+
+  handleUnauthorized() {
+    if (this.isHandlingUnauthorized) return;
+    this.isHandlingUnauthorized = true;
+
+    const wasSuperAdmin = this.currentUser?.role === 'SUPER_ADMIN' || 
+      (typeof window !== 'undefined' && window.location.pathname.startsWith('/superadmin'));
+
+    this.logout();
+
+    if (typeof window !== 'undefined') {
+      const currentPath = window.location.pathname;
+      const isAlreadyOnLogin = currentPath === '/login' || currentPath === '/superadmin/login';
+      if (!isAlreadyOnLogin) {
+        const targetLogin = wasSuperAdmin ? '/superadmin/login?expired=1' : '/login?expired=1';
+        window.location.replace(targetLogin);
+      }
+    }
+
+    setTimeout(() => {
+      this.isHandlingUnauthorized = false;
+    }, 2000);
+  }
+
   private setupAxiosInterceptors() {
     apiClient.interceptors.request.use((config) => {
       const activeTenant = this.getActiveTenant();
@@ -103,6 +128,20 @@ class StoreService {
       }
       return config;
     });
+
+    apiClient.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        const status = error.response?.status;
+        const url = error.config?.url || '';
+        const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/superadmin/login');
+
+        if (status === 401 && !isAuthEndpoint) {
+          this.handleUnauthorized();
+        }
+        return Promise.reject(error);
+      }
+    );
   }
 
   private loadFromStorage() {
@@ -464,6 +503,7 @@ class StoreService {
     this.currentUser = null;
     this.isSuperAdminMode = false;
     this.saveToStorage();
+    this.notifyListeners();
   }
 
   async checkHealth(): Promise<boolean> {

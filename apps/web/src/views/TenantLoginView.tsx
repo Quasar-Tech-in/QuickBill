@@ -76,6 +76,21 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
 
   useEffect(() => {
     checkBackendStatus();
+
+    // Check if user was redirected due to an expired session
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('expired') === '1' || params.get('reason') === 'session_expired') {
+        setAuthError({
+          type: 'warning',
+          title: 'Session Expired',
+          message: 'Your login session has expired. Please sign in again to continue.',
+          actionHint: 'Enter your work credentials to resume your workspace session.'
+        });
+      }
+    } catch {
+      // ignore
+    }
   }, []);
 
   const validateForm = (): boolean => {

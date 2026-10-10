@@ -5,6 +5,7 @@
  */
 
 import { CompressionResult } from '../utils/imageCompressor';
+import { store } from './store';
 
 const SUPABASE_PROJECT_REF = import.meta.env.VITE_SUPABASE_PROJECT || 'dhuxosaclrchhfmvrria';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || `https://${SUPABASE_PROJECT_REF}.supabase.co`;
@@ -80,6 +81,11 @@ export async function uploadItemImage(
       headers,
       body: formData,
     });
+
+    if (backendRes.status === 401) {
+      store.handleUnauthorized();
+      throw new Error('Unauthorized - session expired');
+    }
 
     if (backendRes.ok) {
       const data = await backendRes.json();
@@ -206,6 +212,11 @@ export async function deleteItemImages(
       headers,
       body: JSON.stringify({ image_urls: validUrls }),
     });
+
+    if (res.status === 401) {
+      store.handleUnauthorized();
+      return { success: false, deletedPaths: [] };
+    }
 
     if (res.ok) {
       const data = await res.json();
