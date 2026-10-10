@@ -42,6 +42,7 @@ export interface ItemLocationInventory {
   mrp?: number; // Base MRP / List Price (defaults to salePrice if not set)
   salePrice: number; // Effective selling price (after discount)
   purchasePrice: number;
+  averageCostPrice?: number;
   currentStock: number;
   minStockAlert: number;
   isListed: boolean; // whether this item is active/sold at this branch

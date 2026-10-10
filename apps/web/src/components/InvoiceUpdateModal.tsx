@@ -564,6 +564,16 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
                                 value={it.returnNote}
                                 onChange={(e) => handleNoteChange(it.itemId, e.target.value)}
                               />
+
+                              {it.returnReason !== 'DEFECTIVE_DAMAGED' ? (
+                                <div style={{ fontSize: '0.72rem', color: '#059669', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <span>📦 +{it.returnedQty} will restock to branch inventory &amp; re-average cost</span>
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '0.72rem', color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <span>⚠️ {it.returnedQty} marked damaged (scrapped, not restocked)</span>
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <span style={{ fontSize: '0.76rem', color: 'var(--neutral-400)', fontStyle: 'italic' }}>

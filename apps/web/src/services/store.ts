@@ -3460,18 +3460,69 @@ class StoreService {
         const prevRet = Number(prevSnap?.returnedQuantity || 0);
         const currRet = Number(up.returnedQuantity || 0);
         const deltaRet = currRet - prevRet;
-        if (deltaRet > 0 && up.returnReason !== 'DEFECTIVE_DAMAGED') {
+        if (deltaRet > 0) {
           const it = this.items.find(i => i.id === up.itemId || i.publicItemId === up.itemId);
           if (it) {
-            const itStock = Number(it.currentStock || 0);
-            it.currentStock = Number((itStock + deltaRet).toFixed(3));
-            if (it.locations && existing.locationId) {
-              const loc = it.locations.find(l => l.locationId === existing.locationId);
-              if (loc) {
-                const locStock = Number(loc.currentStock || 0);
-                loc.currentStock = Number((locStock + deltaRet).toFixed(3));
+            const inwardCost = Number(it.averageCostPrice !== undefined && it.averageCostPrice > 0 ? it.averageCostPrice : (it.purchasePrice || 0));
+            const targetLoc = it.locations?.find(l => l.locationId === existing.locationId);
+            const locOldStock = Number(targetLoc ? (targetLoc.currentStock || 0) : (existing.locationId ? 0 : it.currentStock || 0));
+            const locOldAvgCost = Number(targetLoc?.purchasePrice || inwardCost);
+
+            const oldMasterStock = Number(it.currentStock || 0);
+            if (up.returnReason !== 'DEFECTIVE_DAMAGED') {
+              // 1. Branch Location WAC
+              const locEffectiveOldStock = Math.max(0, locOldStock);
+              const locNewAvgCost = (locEffectiveOldStock + deltaRet) > 0 && locEffectiveOldStock > 0 && locOldAvgCost > 0
+                ? ((locEffectiveOldStock * locOldAvgCost) + (deltaRet * inwardCost)) / (locEffectiveOldStock + deltaRet)
+                : inwardCost;
+
+              if (targetLoc) {
+                targetLoc.currentStock = Number((locOldStock + deltaRet).toFixed(3));
+                targetLoc.purchasePrice = Number(locNewAvgCost.toFixed(2));
+                targetLoc.averageCostPrice = Number(locNewAvgCost.toFixed(2));
               }
+
+              // 2. Master Item WAC
+              const oldMasterAvgCost = Number(it.averageCostPrice !== undefined && it.averageCostPrice > 0 ? it.averageCostPrice : (it.purchasePrice || inwardCost));
+              const effectiveOldMasterStock = Math.max(0, oldMasterStock);
+              const newMasterAvgCost = (effectiveOldMasterStock + deltaRet) > 0 && effectiveOldMasterStock > 0 && oldMasterAvgCost > 0
+                ? ((effectiveOldMasterStock * oldMasterAvgCost) + (deltaRet * inwardCost)) / (effectiveOldMasterStock + deltaRet)
+                : locNewAvgCost;
+
+              it.currentStock = Number((oldMasterStock + deltaRet).toFixed(3));
+              it.averageCostPrice = Number(newMasterAvgCost.toFixed(2));
+              it.purchasePrice = Number(newMasterAvgCost.toFixed(2));
             }
+
+            // Log local inventory movement
+            const qtyBefore = existing.locationId ? locOldStock : oldMasterStock;
+            const qtyAfter = Number((qtyBefore + (up.returnReason !== 'DEFECTIVE_DAMAGED' ? deltaRet : 0)).toFixed(3));
+            const mov: InventoryMovement = {
+              id: `mov_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+              businessId: this.currentTenant?.id || '',
+              itemId: it.id,
+              publicItemId: it.publicItemId,
+              itemName: it.name,
+              sku: it.sku,
+              locationId: existing.locationId,
+              locationName: existing.locationName,
+              type: up.returnReason !== 'DEFECTIVE_DAMAGED' ? 'SALE_RETURN' : 'DAMAGED',
+              referenceType: 'INVOICE',
+              referenceId: existing.id,
+              referenceNumber: existing.invoiceNumber,
+              quantityChange: deltaRet,
+              quantityBefore: qtyBefore,
+              quantityAfter: qtyAfter,
+              unitCost: inwardCost,
+              totalCost: Number((deltaRet * inwardCost).toFixed(2)),
+              reason: up.returnReason || 'RESTOCKABLE_RETURN',
+              notes: up.returnNote || `Customer return on invoice ${existing.invoiceNumber}`,
+              createdByUserId: this.currentUser?.id,
+              createdByName: this.currentUser?.name || 'Staff',
+              createdAt: new Date().toISOString(),
+            };
+            this.inventoryMovements.unshift(mov);
+            try { localStorage.setItem('qb_inventory_movements', JSON.stringify(this.inventoryMovements)); } catch {}
           }
         }
       });
@@ -3485,6 +3536,8 @@ class StoreService {
 
     this.invoices = this.invoices.map(inv => inv.id === invoiceId ? updatedInvoice! : inv);
     this.saveToStorage();
+    Promise.allSettled([this.fetchItems(), this.fetchInvoices(), this.fetchInventoryMovements()]);
+    this.notifyListeners();
     return updatedInvoice;
   }
 
@@ -4274,7 +4327,7 @@ class StoreService {
   }
 
   async receivePurchaseOrder(id: string, receiveData: {
-    items: { itemId: string; qty: number }[];
+    items: { itemId: string; qty: number; unitCost?: number }[];
     notes?: string;
     payment?: {
       amount: number;
@@ -4283,21 +4336,26 @@ class StoreService {
       notes?: string;
     };
   }): Promise<PurchaseOrder> {
+    const po = this.purchaseOrders.find(p => p.id === id);
+
+    const mappedReceivedItems = receiveData.items.map(it => {
+      const poLine = po?.items?.find(x => x.itemId === it.itemId);
+      const uCost = it.unitCost !== undefined ? it.unitCost : Number(poLine?.unitPrice || (poLine as any)?.unitCost || 0);
+      return {
+        itemId: it.itemId,
+        item_id: it.itemId,
+        quantityReceived: it.qty,
+        quantity_received: it.qty,
+        qty: it.qty,
+        unitCost: uCost,
+        unit_cost: uCost,
+        unitPrice: uCost,
+      };
+    });
+
     const payload = {
-      receivedItems: receiveData.items.map(it => ({
-        itemId: it.itemId,
-        item_id: it.itemId,
-        quantityReceived: it.qty,
-        quantity_received: it.qty,
-        qty: it.qty,
-      })),
-      items: receiveData.items.map(it => ({
-        itemId: it.itemId,
-        item_id: it.itemId,
-        quantityReceived: it.qty,
-        quantity_received: it.qty,
-        qty: it.qty,
-      })),
+      receivedItems: mappedReceivedItems,
+      items: mappedReceivedItems,
       receiptNotes: receiveData.notes,
       receipt_notes: receiveData.notes,
       notes: receiveData.notes,
@@ -4320,9 +4378,12 @@ class StoreService {
         this.purchaseOrders = this.purchaseOrders.map(p => p.id === id ? updatedPO : p);
         try { localStorage.setItem('qb_purchase_orders', JSON.stringify(this.purchaseOrders)); } catch {}
         // Refresh items/parties/payments cache
-        this.fetchItems().catch(() => {});
-        this.fetchParties().catch(() => {});
-        this.fetchPayments().catch(() => {});
+        await Promise.allSettled([
+          this.fetchItems(),
+          this.fetchParties(),
+          this.fetchPayments(),
+        ]);
+        this.notifyListeners();
         return updatedPO;
       }
     } catch (err: any) {
@@ -4336,7 +4397,6 @@ class StoreService {
     }
 
     // Local fallback receiving
-    const po = this.purchaseOrders.find(p => p.id === id);
     if (!po) throw new Error('Purchase order not found');
 
     const receiptItems: { itemId: string; name: string; qty: number }[] = [];
@@ -4348,18 +4408,39 @@ class StoreService {
       const addQty = rec ? rec.qty : 0;
       if (addQty > 0) {
         receiptItems.push({ itemId: item.itemId, name: item.name, qty: addQty });
-        const inwardCost = Number(item.unitPrice || item.totalAmount / (item.orderedQty || 1) || 0);
+        const inwardCost = Number(rec?.unitCost !== undefined ? rec.unitCost : (item.unitPrice || item.totalAmount / (item.orderedQty || 1) || 0));
         batchTotalCost += addQty * inwardCost;
 
         // Update local item stock and weighted average cost
         const targetItem = this.items.find(i => i.id === item.itemId);
         if (targetItem) {
-          const oldStock = Number(targetItem.currentStock || 0);
-          const oldAvgCost = Number(targetItem.averageCostPrice !== undefined ? targetItem.averageCostPrice : (targetItem.purchasePrice || 0));
-          const newStock = oldStock + addQty;
-          const newAvgCost = newStock > 0 ? ((Math.max(0, oldStock) * oldAvgCost) + (addQty * inwardCost)) / newStock : inwardCost;
-          targetItem.currentStock = Number(newStock.toFixed(3));
-          targetItem.averageCostPrice = Number(newAvgCost.toFixed(2));
+          // 1. Branch Location WAC
+          const targetLoc = targetItem.locations?.find(l => l.locationId === po.locationId);
+          const locOldStock = Number(targetLoc ? (targetLoc.currentStock || 0) : (po.locationId ? 0 : targetItem.currentStock || 0));
+          const locOldAvgCost = Number(targetLoc?.purchasePrice || (targetItem.averageCostPrice !== undefined && targetItem.averageCostPrice > 0 ? targetItem.averageCostPrice : (targetItem.purchasePrice || inwardCost)));
+          const locEffectiveOldStock = Math.max(0, locOldStock);
+          const locNewAvgCost = (locEffectiveOldStock + addQty) > 0 && locEffectiveOldStock > 0 && locOldAvgCost > 0
+            ? ((locEffectiveOldStock * locOldAvgCost) + (addQty * inwardCost)) / (locEffectiveOldStock + addQty)
+            : inwardCost;
+
+          if (targetLoc) {
+            targetLoc.currentStock = Number((locOldStock + addQty).toFixed(3));
+            targetLoc.purchasePrice = Number(locNewAvgCost.toFixed(2));
+            targetLoc.averageCostPrice = Number(locNewAvgCost.toFixed(2));
+            targetLoc.isListed = true;
+          }
+
+          // 2. Master Item WAC
+          const oldMasterStock = Number(targetItem.currentStock || 0);
+          const oldMasterAvgCost = Number(targetItem.averageCostPrice !== undefined && targetItem.averageCostPrice > 0 ? targetItem.averageCostPrice : (targetItem.purchasePrice || inwardCost));
+          const effectiveOldMasterStock = Math.max(0, oldMasterStock);
+          const newMasterAvgCost = (effectiveOldMasterStock + addQty) > 0 && effectiveOldMasterStock > 0 && oldMasterAvgCost > 0
+            ? ((effectiveOldMasterStock * oldMasterAvgCost) + (addQty * inwardCost)) / (effectiveOldMasterStock + addQty)
+            : locNewAvgCost;
+
+          targetItem.currentStock = Number((oldMasterStock + addQty).toFixed(3));
+          targetItem.averageCostPrice = Number(newMasterAvgCost.toFixed(2));
+          targetItem.purchasePrice = Number(newMasterAvgCost.toFixed(2));
 
           // Log local inventory movement
           const mov: InventoryMovement = {
@@ -4376,8 +4457,8 @@ class StoreService {
             referenceId: po.id,
             referenceNumber: po.poNumber,
             quantityChange: addQty,
-            quantityBefore: oldStock,
-            quantityAfter: Number(newStock.toFixed(3)),
+            quantityBefore: po.locationId ? locOldStock : oldMasterStock,
+            quantityAfter: Number(((po.locationId ? locOldStock : oldMasterStock) + addQty).toFixed(3)),
             unitCost: inwardCost,
             totalCost: Number((addQty * inwardCost).toFixed(2)),
             reason: `Goods received for PO ${po.poNumber} (${po.supplierName})`,

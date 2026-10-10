@@ -207,3 +207,123 @@ async def test_sale_return_with_item_and_bill_discounts():
         assert Decimal(str(ret_data["grandTotal"])) == Decimal("88.00")
         assert ret_data["returnStatus"] == "PARTIALLY_RETURNED"
 
+
+@pytest.mark.asyncio
+async def test_sale_return_wac_and_stock_movements():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        token = create_access_token(TokenPayload(
+            sub="user_cashier_103",
+            email="cashier3@quickbill.com",
+            business_id="65f2a1b9a000000000000001",
+            role="CASHIER",
+            permissions=["pos", "sales", "inventory"]
+        ))
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Business-ID": "65f2a1b9a000000000000001"
+        }
+
+        # 1. Create a catalog item with purchase price 100 and stock 10
+        item_create_payload = {
+            "name": "WAC Test Item Return",
+            "sku": "SKU-WAC-RET-01",
+            "mrp": 200.0,
+            "salePrice": 180.0,
+            "purchasePrice": 100.0,
+            "currentStock": 10.0,
+            "minStockAlert": 2.0,
+            "taxRate": 0.0,
+            "locations": [
+                {
+                    "locationId": "65f2a1b9a000000000000101",
+                    "locationName": "Main Branch",
+                    "purchasePrice": 100.0,
+                    "salePrice": 180.0,
+                    "currentStock": 10.0,
+                    "minStockAlert": 2.0,
+                    "isListed": True
+                }
+            ]
+        }
+        item_res = await ac.post("/api/v1/items", json=item_create_payload, headers=headers)
+        assert item_res.status_code == 201, item_res.text
+        item_data = item_res.json()
+        item_id = item_data["_id"]
+
+        # 2. Make a sale of 2 units (Stock reduces from 10 to 8)
+        sale_payload = {
+            "partyNameInput": "WAC Customer",
+            "partyPhoneInput": "9998887776",
+            "locationId": "65f2a1b9a000000000000101",
+            "locationName": "Main Branch",
+            "items": [
+                {
+                    "item_id": item_id,
+                    "name": "WAC Test Item Return",
+                    "quantity": 2.0,
+                    "unit_price": 180.0,
+                    "tax_rate": 0.0
+                }
+            ],
+            "paidAmount": 360.0,
+            "paymentMode": "CASH",
+            "enableRoundOff": True
+        }
+        sale_res = await ac.post("/api/v1/sales", json=sale_payload, headers=headers)
+        assert sale_res.status_code == 201, sale_res.text
+        sale_data = sale_res.json()
+        sale_id = sale_data["_id"]
+
+        # Check stock is now 8
+        get_item_res = await ac.get(f"/api/v1/items/{item_id}", headers=headers)
+        assert get_item_res.status_code == 200
+        assert float(get_item_res.json()["currentStock"]) == 8.0
+
+        # 3. Process a sales return of 1 unit
+        return_payload = {
+            "items": [
+                {
+                    "itemId": item_id,
+                    "quantity": 2.0,
+                    "returnedQuantity": 1.0,
+                    "returnReason": "RESTOCKABLE_RETURN",
+                    "returnNote": "Surplus unit returned",
+                    "unitPrice": 180.0,
+                    "taxRate": 0.0
+                }
+            ],
+            "returnNotes": "Return 1 unit",
+            "enableRoundOff": True
+        }
+        ret_res = await ac.put(f"/api/v1/sales/{sale_id}", json=return_payload, headers=headers)
+        assert ret_res.status_code == 200, ret_res.text
+
+        # 4. Verify item stock is incremented back to 9 and WAC remains intact at 100.00
+        get_item_after_ret = await ac.get(f"/api/v1/items/{item_id}", headers=headers)
+        assert get_item_after_ret.status_code == 200
+        after_data = get_item_after_ret.json()
+        assert float(after_data["currentStock"]) == 9.0
+        assert float(after_data["purchasePrice"]) == 100.0
+        assert float(after_data["averageCostPrice"]) == 100.0
+
+        # Verify branch location stock
+        loc = next((l for l in after_data["locations"] if l["locationId"] == "65f2a1b9a000000000000101"), None)
+        assert loc is not None
+        assert float(loc["currentStock"]) == 9.0
+        assert float(loc["purchasePrice"]) == 100.0
+
+        # 5. Verify Inventory Movement log entry
+        mov_res = await ac.get(f"/api/v1/inventory/movements?itemId={item_id}&type=SALE_RETURN", headers=headers)
+        assert mov_res.status_code == 200, mov_res.text
+        mov_data = mov_res.json()
+        assert mov_data["total"] >= 1
+        mov = mov_data["data"][0]
+        assert mov["type"] == "SALE_RETURN"
+        assert float(mov["quantityChange"]) == 1.0
+        assert float(mov["quantityBefore"]) == 8.0
+        assert float(mov["quantityAfter"]) == 9.0
+        assert float(mov["unitCost"]) == 100.0
+        assert mov["locationId"] == "65f2a1b9a000000000000101"
+
+

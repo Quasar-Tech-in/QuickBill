@@ -248,11 +248,20 @@ class SaleService:
         # Record stock decrements
         for it in totals.items:
             qty_sold = round(float(it.quantity), 3)
-            target_item_oid = ObjectId(it.item_id) if ObjectId.is_valid(it.item_id) else None
             item_doc_found = item_docs.get(it.item_id) or {}
+            target_item_oid = item_doc_found.get("_id") or (ObjectId(it.item_id) if ObjectId.is_valid(it.item_id) else None)
             cogs_cost = float(item_doc_found.get("averageCostPrice") or item_doc_found.get("purchasePrice") or 0.0)
 
             if target_item_oid:
+                # Update location-specific stock in loc_list
+                loc_list = list(item_doc_found.get("locations") or [])
+                if request.location_id:
+                    target_loc_str = str(request.location_id)
+                    for l in loc_list:
+                        if str(l.get("locationId")) == target_loc_str:
+                            l["currentStock"] = round(float(l.get("currentStock", 0.0) or 0.0) - qty_sold, 3)
+                            break
+
                 batches = list(item_doc_found.get("batches") or [])
                 if batches:
                     remaining_to_deduct = qty_sold
@@ -279,18 +288,12 @@ class SaleService:
 
                     await self.db.items.update_one(
                         {"_id": target_item_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
-                        {"$set": {"batches": batches}, "$inc": {"currentStock": -qty_sold}}
+                        {"$set": {"batches": batches, "locations": loc_list}, "$inc": {"currentStock": -qty_sold}}
                     )
                 else:
                     await self.db.items.update_one(
                         {"_id": target_item_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
-                        {"$inc": {"currentStock": -qty_sold}}
-                    )
-
-                if request.location_id:
-                    await self.db.items.update_one(
-                        {"_id": target_item_oid, "locations.locationId": request.location_id, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
-                        {"$inc": {"locations.$.currentStock": -qty_sold}}
+                        {"$set": {"locations": loc_list}, "$inc": {"currentStock": -qty_sold}}
                     )
 
             movement_doc = {
@@ -542,35 +545,117 @@ class SaleService:
                 item_doc = await self.db.items.find_one({"$and": [b_query, {"$or": or_clauses}]})
                 actual_item_oid = item_doc["_id"] if item_doc else (target_item_oid or it.item_id)
                 
-                # Compute unit purchase cost inclusive of tax
-                tax_rate_val = float(item_doc.get("taxRate", 0.0) if item_doc else calc_item.tax_rate)
-                base_purchase = float(item_doc.get("purchasePrice") or item_doc.get("averageCostPrice") or calc_item.unit_price) if item_doc else float(calc_item.unit_price)
-                unit_purchase_cost_with_tax = base_purchase * (1.0 + (tax_rate_val / 100.0))
+                target_loc_id = invoice.get("locationId")
+                location_name = invoice.get("locationName")
 
-                # If item is restockable, increment stock in catalog and location
-                if it.return_reason != "DEFECTIVE_DAMAGED":
+                # Compute genuine inward cost basis
+                unit_cost = float(item_doc.get("averageCostPrice") or item_doc.get("purchasePrice") or (calc_item.unit_price if calc_item.unit_price > 0 else 0.0)) if item_doc else float(calc_item.unit_price)
+
+                # Track prior stocks
+                master_old_stock = max(0.0, float(item_doc.get("currentStock", 0.0) or 0.0)) if item_doc else 0.0
+                loc_old_stock = 0.0
+
+                if item_doc and it.return_reason != "DEFECTIVE_DAMAGED":
+                    # 1. Location-Specific Stock & Weighted Average Cost
+                    loc_list = list(item_doc.get("locations") or [])
+                    found_loc = False
+                    loc_new_avg_cost = unit_cost
+
+                    if target_loc_id:
+                        for l in loc_list:
+                            if str(l.get("locationId")) == str(target_loc_id):
+                                loc_old_stock = max(0.0, float(l.get("currentStock", 0.0) or 0.0))
+                                loc_old_cost = float(l.get("purchasePrice") or l.get("averageCostPrice") or unit_cost)
+                                loc_new_stock = loc_old_stock + float(delta_ret_qty)
+                                if loc_new_stock > 0 and loc_old_stock > 0 and loc_old_cost > 0:
+                                    loc_new_avg_cost = ((loc_old_stock * loc_old_cost) + (float(delta_ret_qty) * unit_cost)) / loc_new_stock
+                                else:
+                                    loc_new_avg_cost = unit_cost
+
+                                l["currentStock"] = round(loc_new_stock, 3)
+                                l["purchasePrice"] = round(loc_new_avg_cost, 2)
+                                l["averageCostPrice"] = round(loc_new_avg_cost, 2)
+                                l["isListed"] = True
+                                found_loc = True
+                                break
+
+                        if not found_loc:
+                            loc_new_avg_cost = unit_cost
+                            loc_list.append({
+                                "locationId": target_loc_id,
+                                "locationName": location_name,
+                                "mrp": float(item_doc.get("mrp", item_doc.get("salePrice", unit_cost * 1.3))),
+                                "salePrice": float(item_doc.get("salePrice", unit_cost * 1.3)),
+                                "purchasePrice": round(loc_new_avg_cost, 2),
+                                "averageCostPrice": round(loc_new_avg_cost, 2),
+                                "currentStock": round(float(delta_ret_qty), 3),
+                                "minStockAlert": float(item_doc.get("minStockAlert", 5.0)),
+                                "isListed": True,
+                                "hasDiscount": False,
+                                "discountType": "PERCENT",
+                                "discountValue": 0.0
+                            })
+                    else:
+                        loc_old_stock = master_old_stock
+                        loc_new_avg_cost = unit_cost
+
+                    # 2. Master Item Stock & Weighted Average Cost
+                    master_old_cost = float(item_doc.get("averageCostPrice") or item_doc.get("purchasePrice") or unit_cost)
+                    master_new_stock = master_old_stock + float(delta_ret_qty)
+                    if master_new_stock > 0 and master_old_stock > 0 and master_old_cost > 0:
+                        master_new_avg_cost = ((master_old_stock * master_old_cost) + (float(delta_ret_qty) * unit_cost)) / master_new_stock
+                    else:
+                        master_new_avg_cost = loc_new_avg_cost
+
+                    # Update item in database
                     await self.db.items.update_one(
                         {"_id": actual_item_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
-                        {"$inc": {"currentStock": float(delta_ret_qty)}}
+                        {
+                            "$set": {
+                                "currentStock": round(master_new_stock, 3),
+                                "averageCostPrice": round(master_new_avg_cost, 2),
+                                "purchasePrice": round(master_new_avg_cost, 2),
+                                "locations": loc_list,
+                                "updatedAt": now
+                            }
+                        }
                     )
-                    if invoice.get("locationId"):
-                        await self.db.items.update_one(
-                            {"_id": actual_item_oid, "locations.locationId": invoice["locationId"], "$or": [{"businessId": b_oid}, {"businessId": business_id}]},
-                            {"$inc": {"locations.$.currentStock": float(delta_ret_qty)}}
-                        )
+                elif item_doc:
+                    # If DEFECTIVE_DAMAGED, determine loc_old_stock for movement ledger without modifying sellable stock
+                    if target_loc_id:
+                        loc_list = list(item_doc.get("locations") or [])
+                        for l in loc_list:
+                            if str(l.get("locationId")) == str(target_loc_id):
+                                loc_old_stock = max(0.0, float(l.get("currentStock", 0.0) or 0.0))
+                                break
+                    else:
+                        loc_old_stock = master_old_stock
 
-                # Record inventory movement with unit cost with tax
+                # Record comprehensive inventory movement
+                qty_before = round(loc_old_stock if target_loc_id else master_old_stock, 3)
+                qty_after = round(qty_before + (float(delta_ret_qty) if it.return_reason != "DEFECTIVE_DAMAGED" else 0.0), 3)
+
                 movement_doc = {
                     "businessId": b_oid,
                     "itemId": actual_item_oid,
+                    "publicItemId": item_doc.get("publicItemId") if item_doc else None,
+                    "itemName": calc_item.name_snapshot or (item_doc.get("name") if item_doc else "Item"),
+                    "sku": calc_item.sku_snapshot or (item_doc.get("sku") if item_doc else ""),
+                    "locationId": target_loc_id,
+                    "locationName": location_name,
                     "type": "SALE_RETURN" if it.return_reason != "DEFECTIVE_DAMAGED" else "DAMAGED",
                     "referenceType": "INVOICE",
                     "referenceId": s_oid,
                     "referenceNumber": invoice.get("invoiceNumber", ""),
                     "quantityChange": float(delta_ret_qty),
-                    "unitCost": round(unit_purchase_cost_with_tax, 2),
+                    "quantityBefore": qty_before,
+                    "quantityAfter": qty_after,
+                    "unitCost": round(unit_cost, 2),
+                    "totalCost": round(float(delta_ret_qty) * unit_cost, 2),
                     "reason": it.return_reason or "RESTOCKABLE_RETURN",
-                    "notes": it.return_note or f"Return on invoice {invoice.get('invoiceNumber', '')}",
+                    "notes": it.return_note or f"Customer return on invoice {invoice.get('invoiceNumber', '')}",
+                    "createdByUserId": user_id,
+                    "createdByName": invoice.get("billedByName") or "Staff",
                     "createdAt": now
                 }
                 await self.db.inventory_movements.insert_one(movement_doc)

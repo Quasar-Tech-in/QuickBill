@@ -1304,7 +1304,7 @@ export const InventoryView: React.FC = () => {
                       </div>
                     </td>
                     <td style={{ color: 'var(--neutral-600)', fontSize: '0.85rem', padding: '10px 12px' }}>
-                      <div style={{ fontWeight: 600 }}>₹{Number(item.purchasePrice || 0).toFixed(2)}</div>
+                      <div style={{ fontWeight: 600 }}>₹{Number(item.averageCostPrice !== undefined ? item.averageCostPrice : (item.purchasePrice || 0)).toFixed(2)}</div>
                     </td>
                     <td style={{ fontSize: '0.85rem', padding: '10px 12px' }}>{Number(item.taxRate || 0)}%</td>
                     <td style={{ padding: '10px 12px' }}>
@@ -2421,7 +2421,7 @@ export const InventoryView: React.FC = () => {
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
                                 <div style={{ minWidth: 0 }}>
                                   <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
-                                    MRP (Incl. GST) (₹) *
+                                    Selling Price ₹ (Incl. GST) *
                                   </label>
                                   <input
                                     type="number"

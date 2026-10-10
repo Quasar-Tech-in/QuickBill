@@ -555,7 +555,18 @@ async def receive_purchase_order_goods(
                 detail=f"Received quantity ({qty_received}) exceeds remaining ordered quantity ({remaining_qty}) for item '{target_po_item.get('itemName')}'."
             )
 
-        unit_cost = float(r_item.unitCost if r_item.unitCost is not None else (r_item.unit_cost if r_item.unit_cost is not None else target_po_item.get("unitCost", 0.0)))
+        raw_unit_cost = None
+        if hasattr(r_item, "unitCost") and r_item.unitCost is not None:
+            raw_unit_cost = r_item.unitCost
+        elif hasattr(r_item, "unit_cost") and r_item.unit_cost is not None:
+            raw_unit_cost = r_item.unit_cost
+        elif isinstance(r_item, dict):
+            raw_unit_cost = r_item.get("unitCost", r_item.get("unit_cost", r_item.get("unitPrice", r_item.get("unit_price"))))
+
+        if raw_unit_cost is None or float(raw_unit_cost) <= 0:
+            raw_unit_cost = target_po_item.get("unitCost") or target_po_item.get("unitPrice") or target_po_item.get("unit_cost") or target_po_item.get("unit_price") or 0.0
+
+        unit_cost = float(raw_unit_cost or 0.0)
         tax_rate = float(target_po_item.get("taxRate", 0.0))
         item_batch_cost = (qty_received * unit_cost) * (1.0 + tax_rate / 100.0)
         total_received_amount_this_batch += item_batch_cost
@@ -577,24 +588,38 @@ async def receive_purchase_order_goods(
             current_master_stock = float(item_doc.get("currentStock", 0.0) or 0.0)
             new_master_stock = current_master_stock + qty_received
 
-            # Update location-specific stock
+            # 1. Location-Specific Stock & Weighted Average Cost
             loc_list = list(item_doc.get("locations") or [])
             found_loc = False
+            target_loc_id = location_id or str(po_doc.get("locationId") or "")
+            loc_new_avg_cost = unit_cost
+
             for l in loc_list:
-                if str(l.get("locationId")) == location_id or str(l.get("locationId")) == po_doc.get("locationId"):
-                    l["currentStock"] = round(float(l.get("currentStock", 0.0) or 0.0) + qty_received, 3)
+                if str(l.get("locationId")) == target_loc_id:
+                    loc_old_stock = max(0.0, float(l.get("currentStock", 0.0) or 0.0))
+                    loc_old_cost = float(l.get("purchasePrice") or l.get("averageCostPrice") or item_doc.get("averageCostPrice") or item_doc.get("purchasePrice") or (unit_cost if unit_cost > 0 else 0.0))
+                    if (loc_old_stock + qty_received) > 0 and loc_old_stock > 0 and loc_old_cost > 0:
+                        loc_new_avg_cost = ((loc_old_stock * loc_old_cost) + (qty_received * unit_cost)) / (loc_old_stock + qty_received)
+                    else:
+                        loc_new_avg_cost = unit_cost
+
+                    l["currentStock"] = round(loc_old_stock + qty_received, 3)
+                    l["purchasePrice"] = round(loc_new_avg_cost, 2)
+                    l["averageCostPrice"] = round(loc_new_avg_cost, 2)
                     l["isListed"] = True
                     found_loc = True
                     break
 
             if not found_loc:
+                loc_new_avg_cost = unit_cost
                 loc_list.append({
                     "locationId": location_id,
                     "locationName": location_name,
                     "mrp": float(item_doc.get("mrp", item_doc.get("salePrice", unit_cost * 1.3))),
                     "salePrice": float(item_doc.get("salePrice", unit_cost * 1.3)),
-                    "purchasePrice": unit_cost,
-                    "currentStock": qty_received,
+                    "purchasePrice": round(loc_new_avg_cost, 2),
+                    "averageCostPrice": round(loc_new_avg_cost, 2),
+                    "currentStock": round(qty_received, 3),
                     "minStockAlert": float(item_doc.get("minStockAlert", 5.0)),
                     "isListed": True,
                     "hasDiscount": False,
@@ -602,10 +627,13 @@ async def receive_purchase_order_goods(
                     "discountValue": 0.0
                 })
 
-            # Calculate Weighted Average Cost
-            old_avg_cost = float(item_doc.get("averageCostPrice") or item_doc.get("purchasePrice") or unit_cost)
-            old_stock = max(0.0, current_master_stock)
-            new_avg_cost = ((old_stock * old_avg_cost) + (qty_received * unit_cost)) / new_master_stock if new_master_stock > 0 else unit_cost
+            # 2. Master Item Weighted Average Cost (Enterprise rollup)
+            old_master_cost = float(item_doc.get("averageCostPrice") or item_doc.get("purchasePrice") or (unit_cost if unit_cost > 0 else 0.0))
+            old_master_stock = max(0.0, current_master_stock)
+            if (old_master_stock + qty_received) > 0 and old_master_stock > 0 and old_master_cost > 0:
+                master_new_avg_cost = ((old_master_stock * old_master_cost) + (qty_received * unit_cost)) / (old_master_stock + qty_received)
+            else:
+                master_new_avg_cost = loc_new_avg_cost
 
             # Append or update FIFO Batch Record
             existing_batches = list(item_doc.get("batches") or [])
@@ -628,8 +656,8 @@ async def receive_purchase_order_goods(
 
             item_updates = {
                 "currentStock": round(new_master_stock, 3),
-                "averageCostPrice": round(new_avg_cost, 2),
-                "purchasePrice": round(new_avg_cost, 2),
+                "averageCostPrice": round(master_new_avg_cost, 2),
+                "purchasePrice": round(master_new_avg_cost, 2),
                 "batches": existing_batches,
                 "locations": loc_list,
                 "updatedAt": now
@@ -637,7 +665,6 @@ async def receive_purchase_order_goods(
 
             if payload.updateMasterPurchasePrice or target_po_item.get("updateMasterPurchasePrice"):
                 item_updates["purchasePrice"] = unit_cost
-
 
             await db.items.update_one({"_id": item_oid}, {"$set": item_updates})
 
