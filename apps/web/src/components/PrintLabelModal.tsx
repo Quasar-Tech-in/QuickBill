@@ -1,32 +1,34 @@
-import React, { useState, useEffect } from 'react';
-import { Printer, X, Tag, Gem, Check, Download, Eye, QrCode } from 'lucide-react';
-import axios from 'axios';
-import QRCode from 'qrcode';
+import React, { useState, useRef } from 'react';
+import { Printer, X, Tag, Gem, Download, Eye, QrCode, FileText } from 'lucide-react';
 import { apiClient } from '../services/store';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+import { BarcodeRenderer, BarcodeRendererRef } from './BarcodeRenderer';
 
 interface PrintLabelModalProps {
   isOpen: boolean;
   onClose: () => void;
   itemName?: string;
   itemSku?: string;
+  itemBarcode?: string;
   itemPrice?: number;
   itemMrp?: number;
   publicItemId?: string;
   defaultStockCount?: number;
+  initialCodeType?: 'BARCODE' | 'QR';
 }
 
 export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   isOpen,
   onClose,
-  itemName = 'Organic Almond Milk 1L',
-  itemSku = 'SKU-MILK-1',
-  itemPrice = 240,
-  itemMrp = 260,
+  itemName = 'Product Item',
+  itemSku = 'SKU-001',
+  itemBarcode = '',
+  itemPrice = 0,
+  itemMrp = 0,
   publicItemId = 'ITM-1001',
   defaultStockCount = 10,
+  initialCodeType = 'BARCODE',
 }) => {
+  const [codeType, setCodeType] = useState<'BARCODE' | 'QR'>(initialCodeType);
   const [style, setStyle] = useState<'STANDARD' | 'JEWELRY_STRING_TAG' | 'SHELF' | 'SHIPPING'>('STANDARD');
   const [paperSize, setPaperSize] = useState<'THERMAL_50x30' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40' | 'SHIPPING_4x6'>('THERMAL_50x30');
   const [quantity, setQuantity] = useState(defaultStockCount || 10);
@@ -35,22 +37,17 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   const [showSku, setShowSku] = useState(true);
   const [showStoreName, setShowStoreName] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [isDownloadingImage, setIsDownloadingImage] = useState(false);
 
-  const barcodePayload = publicItemId ? `ITEM:${publicItemId}` : (itemSku || 'ITM-1001');
+  const barcodeRendererRef = useRef<BarcodeRendererRef | null>(null);
 
-  // Generate crisp real QR code image for live preview
-  useEffect(() => {
-    if (isOpen && barcodePayload) {
-      QRCode.toDataURL(barcodePayload, {
-        width: 200,
-        margin: 1,
-        color: { dark: '#0f172a', light: '#ffffff' },
-      })
-        .then((url) => setQrDataUrl(url))
-        .catch((err) => console.warn('Preview QR error:', err));
-    }
-  }, [isOpen, barcodePayload]);
+  // Determine standard payload strings
+  const barcodeValue = (itemBarcode || itemSku || publicItemId || 'ITM-1001').replace(/^ITEM:/, '').trim();
+  const qrValue = publicItemId 
+    ? (publicItemId.startsWith('ITEM:') ? publicItemId : `ITEM:${publicItemId}`) 
+    : (itemBarcode || itemSku || 'ITM-1001');
+
+  const activePayload = codeType === 'QR' ? qrValue : barcodeValue;
 
   if (!isOpen) return null;
 
@@ -65,17 +62,40 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     }
   };
 
+  const handleDownloadCodeImage = async () => {
+    if (!barcodeRendererRef.current) return;
+    setIsDownloadingImage(true);
+    try {
+      const dataUrl = await barcodeRendererRef.current.getDataUrl();
+      if (dataUrl) {
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        const safeName = (itemName || 'Product').replace(/[^a-zA-Z0-9_-]/g, '_');
+        link.download = `${codeType}_${barcodeValue}_${safeName}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (err) {
+      console.warn('Failed to export code image:', err);
+    } finally {
+      setIsDownloadingImage(false);
+    }
+  };
+
   const handleDownloadPdf = async () => {
     setIsGenerating(true);
     try {
       const payload = {
         itemName,
         sku: itemSku,
+        barcode: itemBarcode || barcodeValue,
         salePrice: itemPrice,
         mrp: itemMrp,
         publicItemId,
         style,
         paperSize,
+        codeType,
         quantity,
         showPrice,
         showMrp,
@@ -88,12 +108,11 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         responseType: 'blob',
       });
 
-      // Create downloadable PDF Blob URL
       const blob = new Blob([response.data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `Label_${itemSku || 'Item'}_${paperSize}.pdf`);
+      link.setAttribute('download', `Label_${codeType}_${itemSku || barcodeValue}_${paperSize}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -102,7 +121,6 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       onClose();
     } catch (err) {
       console.warn('PDF generation endpoint error:', err);
-      // Fallback: Trigger browser direct print window
       window.print();
       onClose();
     } finally {
@@ -121,7 +139,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         onClick={(e) => e.stopPropagation()} 
         style={{ 
           width: '100%',
-          maxWidth: 680, 
+          maxWidth: 720, 
           maxHeight: '92vh', 
           display: 'flex', 
           flexDirection: 'column', 
@@ -155,14 +173,14 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               alignItems: 'center',
               justifyContent: 'center'
             }}>
-              <Printer size={22} />
+              {codeType === 'QR' ? <QrCode size={22} /> : <Tag size={22} />}
             </div>
             <div>
               <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--neutral-900)', margin: 0 }}>
-                Item Barcode & String Tag Printer
+                Item Barcode & QR Studio
               </h3>
               <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
-                Customize label templates, paper formats, copies, and display elements
+                Preview, download high-res images, and print thermal stickers or A4 label sheets
               </p>
             </div>
           </div>
@@ -174,157 +192,116 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         {/* Modal Scroll Body */}
         <div className="no-print" style={{ padding: 24, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          {/* 1. Label Style Selection */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              1. Select Label Style & Template
-            </label>
-            
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-              {/* Standard Retail Tag */}
-              <div 
-                onClick={() => handleStyleSelect('STANDARD')}
-                style={{
-                  padding: 12,
-                  borderRadius: 'var(--radius-md)',
-                  border: `2px solid ${style === 'STANDARD' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                  backgroundColor: style === 'STANDARD' ? 'var(--primary-50)' : '#ffffff',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <div style={{ width: 32, height: 32, borderRadius: 6, backgroundColor: style === 'STANDARD' ? 'var(--primary-600)' : 'var(--neutral-100)', color: style === 'STANDARD' ? '#ffffff' : 'var(--neutral-600)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Tag size={18} />
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: style === 'STANDARD' ? 'var(--primary-900, #1e1b4b)' : 'var(--neutral-900)' }}>
-                    Standard Retail Sticker
-                  </div>
-                  <div style={{ fontSize: '0.73rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-                    Thermal roll stickers for items & boxes
-                  </div>
-                </div>
-              </div>
-
-              {/* Jewelry / Dumbbell String Tag */}
-              <div 
-                onClick={() => handleStyleSelect('JEWELRY_STRING_TAG')}
-                style={{
-                  padding: 12,
-                  borderRadius: 'var(--radius-md)',
-                  border: `2px solid ${style === 'JEWELRY_STRING_TAG' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                  backgroundColor: style === 'JEWELRY_STRING_TAG' ? 'var(--primary-50)' : '#ffffff',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <div style={{ width: 32, height: 32, borderRadius: 6, backgroundColor: style === 'JEWELRY_STRING_TAG' ? '#d97706' : 'var(--neutral-100)', color: style === 'JEWELRY_STRING_TAG' ? '#ffffff' : 'var(--neutral-600)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Gem size={18} />
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: style === 'JEWELRY_STRING_TAG' ? 'var(--primary-900, #1e1b4b)' : 'var(--neutral-900)' }}>
-                    Jewelry / String Tag
-                  </div>
-                  <div style={{ fontSize: '0.73rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-                    Dumbbell dual-wing with non-adhesive bridge
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 2. Paper Size & Grid Format */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              2. Paper Size & Layout Format
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setPaperSize('THERMAL_50x30')}
-                style={{
-                  padding: '10px 8px',
-                  borderRadius: 'var(--radius-md)',
-                  border: `1.5px solid ${paperSize === 'THERMAL_50x30' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                  backgroundColor: paperSize === 'THERMAL_50x30' ? 'var(--primary-50)' : '#ffffff',
-                  color: paperSize === 'THERMAL_50x30' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                }}
-              >
-                <div style={{ fontSize: '0.82rem', fontWeight: 800 }}>50 x 30 mm</div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>Thermal Roll</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPaperSize('DUMBBELL_70x12')}
-                style={{
-                  padding: '10px 8px',
-                  borderRadius: 'var(--radius-md)',
-                  border: `1.5px solid ${paperSize === 'DUMBBELL_70x12' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                  backgroundColor: paperSize === 'DUMBBELL_70x12' ? 'var(--primary-50)' : '#ffffff',
-                  color: paperSize === 'DUMBBELL_70x12' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                }}
-              >
-                <div style={{ fontSize: '0.82rem', fontWeight: 800 }}>70 x 12 mm</div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>Dumbbell Tag</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPaperSize('A4_GRID_24')}
-                style={{
-                  padding: '10px 8px',
-                  borderRadius: 'var(--radius-md)',
-                  border: `1.5px solid ${paperSize === 'A4_GRID_24' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                  backgroundColor: paperSize === 'A4_GRID_24' ? 'var(--primary-50)' : '#ffffff',
-                  color: paperSize === 'A4_GRID_24' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                }}
-              >
-                <div style={{ fontSize: '0.82rem', fontWeight: 800 }}>A4 (24-Up)</div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>3x8 Grid Sheet</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPaperSize('A4_GRID_40')}
-                style={{
-                  padding: '10px 8px',
-                  borderRadius: 'var(--radius-md)',
-                  border: `1.5px solid ${paperSize === 'A4_GRID_40' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                  backgroundColor: paperSize === 'A4_GRID_40' ? 'var(--primary-50)' : '#ffffff',
-                  color: paperSize === 'A4_GRID_40' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                }}
-              >
-                <div style={{ fontSize: '0.82rem', fontWeight: 800 }}>A4 (40-Up)</div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>4x10 Grid Sheet</div>
-              </button>
-            </div>
-          </div>
-
-          {/* 3. Interactive Real Barcode & QR Preview Container */}
+          {/* 1. Code Type Format Selector (Barcode vs QR) */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                3. Live Vector Barcode & QR Preview
+                1. Code Representation Type
               </label>
-              <span style={{ fontSize: '0.72rem', color: 'var(--primary-600)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <Eye size={12} />
-                <span>Exact Layout Render</span>
+              <span style={{ fontSize: '0.73rem', color: 'var(--neutral-500)' }}>
+                Active Payload: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--neutral-800)' }}>{activePayload}</strong>
               </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              <div 
+                onClick={() => setCodeType('BARCODE')}
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  border: `2px solid ${codeType === 'BARCODE' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                  backgroundColor: codeType === 'BARCODE' ? 'var(--primary-50)' : '#ffffff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div style={{ 
+                  width: 34, 
+                  height: 34, 
+                  borderRadius: 6, 
+                  backgroundColor: codeType === 'BARCODE' ? 'var(--primary-600)' : 'var(--neutral-100)', 
+                  color: codeType === 'BARCODE' ? '#ffffff' : 'var(--neutral-600)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  flexShrink: 0 
+                }}>
+                  <Tag size={18} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.86rem', fontWeight: 800, color: codeType === 'BARCODE' ? 'var(--primary-900)' : 'var(--neutral-900)' }}>
+                    1D Linear Barcode (Code 128)
+                  </div>
+                  <div style={{ fontSize: '0.73rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    Standard handheld laser scanner format for retail
+                  </div>
+                </div>
+              </div>
+
+              <div 
+                onClick={() => setCodeType('QR')}
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  border: `2px solid ${codeType === 'QR' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                  backgroundColor: codeType === 'QR' ? 'var(--primary-50)' : '#ffffff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div style={{ 
+                  width: 34, 
+                  height: 34, 
+                  borderRadius: 6, 
+                  backgroundColor: codeType === 'QR' ? 'var(--primary-600)' : 'var(--neutral-100)', 
+                  color: codeType === 'QR' ? '#ffffff' : 'var(--neutral-600)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  flexShrink: 0 
+                }}>
+                  <QrCode size={18} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.86rem', fontWeight: 800, color: codeType === 'QR' ? 'var(--primary-900)' : 'var(--neutral-900)' }}>
+                    2D QR Code (ITEM Matrix)
+                  </div>
+                  <div style={{ fontSize: '0.73rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    Mobile phone camera & QuickBill App scanner format
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Interactive Live Vector Code & Sticker Preview */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                2. Live Layout Preview
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--primary-600)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Eye size={12} />
+                  <span>Exact Scale Render</span>
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleDownloadCodeImage}
+                  disabled={isDownloadingImage}
+                  style={{ padding: '3px 9px', fontSize: '0.73rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                >
+                  <Download size={13} />
+                  <span>{isDownloadingImage ? 'Exporting...' : 'Download Code PNG'}</span>
+                </button>
+              </div>
             </div>
 
             <div 
@@ -336,16 +313,16 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 display: 'flex', 
                 alignItems: 'center', 
                 justifyContent: 'center',
-                minHeight: 130
+                minHeight: 140
               }}
             >
               {style === 'JEWELRY_STRING_TAG' ? (
-                /* Dumbbell / Jewelry String Tag Graphic Preview with Real QR */
+                /* Dumbbell / Jewelry String Tag Graphic Preview */
                 <div 
                   style={{ 
                     width: '100%', 
-                    maxWidth: 500, 
-                    height: 70, 
+                    maxWidth: 520, 
+                    height: 74, 
                     backgroundColor: '#ffffff', 
                     border: '1.5px solid var(--neutral-300)', 
                     borderRadius: 8, 
@@ -360,20 +337,20 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   <div style={{ flex: '2', paddingRight: 8 }}>
                     {showStoreName && <div style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--neutral-800)' }}>QuickBill Store</div>}
                     <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--neutral-700)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{itemName}</div>
-                    {showPrice && <div style={{ fontSize: '0.85rem', fontWeight: 900, color: 'var(--primary-700)' }}>₹{itemPrice}.00</div>}
+                    {showPrice && <div style={{ fontSize: '0.85rem', fontWeight: 900, color: 'var(--primary-700)' }}>₹{itemPrice.toFixed(2)}</div>}
                   </div>
 
                   {/* Middle Non-Adhesive String Bridge */}
                   <div 
                     style={{ 
-                      width: 54, 
+                      width: 52, 
                       height: 28, 
                       borderTop: '1.5px solid var(--neutral-300)', 
                       borderBottom: '1.5px solid var(--neutral-300)', 
                       backgroundColor: 'var(--neutral-100)', 
                       display: 'flex', 
                       alignItems: 'center', 
-                      justifyContent: 'center',
+                      justifyContent: 'center', 
                       fontSize: '0.62rem',
                       color: 'var(--neutral-400)',
                       fontWeight: 600
@@ -382,58 +359,194 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     Bridge
                   </div>
 
-                  {/* Right Wing (Real QR Image & Barcode ID) */}
+                  {/* Right Wing (Dynamic Code) */}
                   <div style={{ flex: '2', paddingLeft: 8, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                    <div>
+                    <div style={{ textAlign: 'right' }}>
                       <div style={{ fontSize: '0.68rem', fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#000000' }}>
-                        {barcodePayload}
+                        {barcodeValue}
                       </div>
                       {showSku && <div style={{ fontSize: '0.62rem', color: 'var(--neutral-500)', fontWeight: 700 }}>SKU: {itemSku}</div>}
                     </div>
 
-                    {qrDataUrl && (
-                      <img src={qrDataUrl} alt="QR Code Tag" style={{ width: 44, height: 44, borderRadius: 4, border: '1px solid var(--neutral-200)' }} />
-                    )}
+                    <BarcodeRenderer
+                      ref={barcodeRendererRef}
+                      value={activePayload}
+                      codeType={codeType}
+                      width={codeType === 'BARCODE' ? 1.0 : undefined}
+                      height={codeType === 'BARCODE' ? 32 : 46}
+                      showText={false}
+                    />
                   </div>
                 </div>
               ) : (
-                /* Standard Sticker Preview with Real QR */
+                /* Standard Retail Sticker Preview */
                 <div 
                   style={{ 
-                    width: 240, 
-                    padding: 12, 
+                    width: 250, 
+                    padding: '12px 14px', 
                     backgroundColor: '#ffffff', 
                     border: '1.5px solid var(--neutral-300)', 
                     borderRadius: 8, 
                     boxShadow: 'var(--shadow-sm)', 
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center'
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'center',
+                    textAlign: 'center'
                   }}
                 >
                   {showStoreName && <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--neutral-900)' }}>QuickBill Store</div>}
-                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--neutral-800)', margin: '3px 0' }}>{itemName}</div>
-                  
-                  {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="QR Code Tag" style={{ width: 80, height: 80, margin: '4px 0' }} />
-                  ) : (
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem', fontWeight: 800 }}>{barcodePayload}</div>
-                  )}
-
-                  <div style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--neutral-600)', marginBottom: 4 }}>
-                    {barcodePayload}
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--neutral-800)', margin: '3px 0', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {itemName}
                   </div>
+                  
+                  <div style={{ margin: '6px 0', width: '100%', display: 'flex', justifyContent: 'center' }}>
+                    <BarcodeRenderer
+                      ref={barcodeRendererRef}
+                      value={activePayload}
+                      codeType={codeType}
+                      width={1.6}
+                      height={codeType === 'BARCODE' ? 44 : 96}
+                      showText={codeType === 'BARCODE'}
+                    />
+                  </div>
+
+                  {codeType === 'QR' && (
+                    <div style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--neutral-600)', marginBottom: 4 }}>
+                      {barcodeValue}
+                    </div>
+                  )}
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', fontSize: '0.72rem', color: 'var(--neutral-600)', paddingTop: 4, borderTop: '1px solid var(--neutral-200)' }}>
                     {showSku && <span>SKU: {itemSku}</span>}
-                    {showPrice && <span style={{ fontWeight: 800, color: 'var(--primary-700)', fontSize: '0.82rem' }}>₹{itemPrice}.00</span>}
+                    {showPrice && <span style={{ fontWeight: 800, color: 'var(--primary-700)', fontSize: '0.82rem' }}>₹{itemPrice.toFixed(2)}</span>}
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* 4. Print Quantity & Content Element Toggles */}
+          {/* 3. Label Style & Paper Layout Format */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+            {/* Style Selection */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                3. Label Template
+              </label>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => handleStyleSelect('STANDARD')}
+                  style={{
+                    padding: 10,
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${style === 'STANDARD' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: style === 'STANDARD' ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: style === 'STANDARD' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>Standard Sticker</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Rolls & Box tags</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleStyleSelect('JEWELRY_STRING_TAG')}
+                  style={{
+                    padding: 10,
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${style === 'JEWELRY_STRING_TAG' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: style === 'JEWELRY_STRING_TAG' ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: style === 'JEWELRY_STRING_TAG' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>Jewelry String</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Dumbbell tag</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Paper Format */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Paper Format
+              </label>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setPaperSize('THERMAL_50x30')}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${paperSize === 'THERMAL_50x30' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'THERMAL_50x30' ? 'var(--primary-50)' : '#ffffff',
+                    color: paperSize === 'THERMAL_50x30' ? 'var(--primary-700)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: '0.8rem', fontWeight: 800 }}>50 x 30 mm</div>
+                  <div style={{ fontSize: '0.67rem', color: 'var(--neutral-500)' }}>Thermal Roll</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPaperSize('DUMBBELL_70x12')}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${paperSize === 'DUMBBELL_70x12' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'DUMBBELL_70x12' ? 'var(--primary-50)' : '#ffffff',
+                    color: paperSize === 'DUMBBELL_70x12' ? 'var(--primary-700)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: '0.8rem', fontWeight: 800 }}>70 x 12 mm</div>
+                  <div style={{ fontSize: '0.67rem', color: 'var(--neutral-500)' }}>Dumbbell</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPaperSize('A4_GRID_24')}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${paperSize === 'A4_GRID_24' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'A4_GRID_24' ? 'var(--primary-50)' : '#ffffff',
+                    color: paperSize === 'A4_GRID_24' ? 'var(--primary-700)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: '0.8rem', fontWeight: 800 }}>A4 (24-Up)</div>
+                  <div style={{ fontSize: '0.67rem', color: 'var(--neutral-500)' }}>3x8 Grid Sheet</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPaperSize('A4_GRID_40')}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${paperSize === 'A4_GRID_40' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'A4_GRID_40' ? 'var(--primary-50)' : '#ffffff',
+                    color: paperSize === 'A4_GRID_40' ? 'var(--primary-700)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: '0.8rem', fontWeight: 800 }}>A4 (40-Up)</div>
+                  <div style={{ fontSize: '0.67rem', color: 'var(--neutral-500)' }}>4x10 Grid Sheet</div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Print Quantity & Element Toggles */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20 }}>
             {/* Quantity Stepper */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -464,7 +577,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setQuantity(defaultStockCount)}
+                  onClick={() => setQuantity(defaultStockCount || 1)}
                   style={{
                     padding: '6px 10px',
                     borderRadius: 'var(--radius-md)',
@@ -476,7 +589,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     cursor: 'pointer'
                   }}
                 >
-                  Sync Stock ({defaultStockCount})
+                  Sync Stock ({defaultStockCount || 0})
                 </button>
               </div>
             </div>
@@ -505,7 +618,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     onChange={(e) => setShowSku(e.target.checked)}
                     style={{ width: 15, height: 15, accentColor: 'var(--primary-600)' }}
                   />
-                  <span>Show SKU / Item Barcode ID</span>
+                  <span>Show SKU / Barcode ID</span>
                 </label>
 
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -515,7 +628,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     onChange={(e) => setShowStoreName(e.target.checked)}
                     style={{ width: 15, height: 15, accentColor: 'var(--primary-600)' }}
                   />
-                  <span>Show Business Header</span>
+                  <span>Show Store Header</span>
                 </label>
               </div>
             </div>
@@ -528,9 +641,11 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           <div style={{ textAlign: 'center', border: '1px solid #000', padding: 10, width: 220, margin: '0 auto' }}>
             {showStoreName && <div style={{ fontSize: 10, fontWeight: 'bold' }}>QuickBill Store</div>}
             <div style={{ fontSize: 12, fontWeight: 'bold', margin: '4px 0' }}>{itemName}</div>
-            {qrDataUrl && <img src={qrDataUrl} style={{ width: 100, height: 100, margin: '4px auto', display: 'block' }} />}
-            <div style={{ fontFamily: 'monospace', fontSize: 10 }}>{barcodePayload}</div>
-            {showPrice && <div style={{ fontSize: 12, fontWeight: 'bold', marginTop: 4 }}>₹{itemPrice}.00</div>}
+            <div style={{ margin: '6px 0', display: 'flex', justifyContent: 'center' }}>
+              <BarcodeRenderer value={activePayload} codeType={codeType} height={codeType === 'BARCODE' ? 35 : 70} />
+            </div>
+            {codeType === 'QR' && <div style={{ fontFamily: 'monospace', fontSize: 10 }}>{barcodeValue}</div>}
+            {showPrice && <div style={{ fontSize: 12, fontWeight: 'bold', marginTop: 4 }}>₹{itemPrice.toFixed(2)}</div>}
           </div>
         </div>
 
@@ -570,7 +685,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
             style={{ padding: '8px 18px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             <Download size={16} />
-            <span>{isGenerating ? 'Generating PDF...' : `Download ${quantity} Labels PDF`}</span>
+            <span>{isGenerating ? 'Generating PDF...' : `Download ${quantity} Labels PDF (${codeType})`}</span>
           </button>
         </div>
 

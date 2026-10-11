@@ -19,6 +19,10 @@ class PaperSize(str, Enum):
     A4_GRID_65 = "A4_GRID_65"
     SHIPPING_4x6 = "SHIPPING_4x6"
 
+class CodeType(str, Enum):
+    BARCODE = "BARCODE"
+    QR = "QR"
+
 class LabelPrintConfig(BaseSchema):
     item_id: Optional[str] = Field(None, alias="itemId")
     item_name: str = Field("Sample Item", max_length=200, alias="itemName")
@@ -29,6 +33,7 @@ class LabelPrintConfig(BaseSchema):
     mrp: Optional[Decimal] = Field(None, ge=0)
     style: LabelStyle = Field(default=LabelStyle.STANDARD)
     paper_size: PaperSize = Field(default=PaperSize.THERMAL_50x30, alias="paperSize")
+    code_type: CodeType = Field(default=CodeType.BARCODE, alias="codeType")
     quantity: int = Field(default=1, ge=1, le=1000)
     show_price: bool = Field(default=True, alias="showPrice")
     show_mrp: bool = Field(default=True, alias="showMrp")

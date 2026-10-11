@@ -37,13 +37,14 @@ import {
   RefreshCw,
   FileSpreadsheet,
   Lock,
-  Scale
+  Scale,
+  Scan
 } from 'lucide-react';
 import { Item, StoreLocation, ItemLocationInventory, ItemCategory, ItemImage, InventoryMovement } from '../types';
 import { store } from '../services/store';
 import { StatusBadge } from '../components/StatusBadge';
-import { QRModal } from '../components/QRModal';
 import { PrintLabelModal } from '../components/PrintLabelModal';
+import { WebcamScannerModal } from '../components/WebcamScannerModal';
 import { CustomSelect } from '../components/CustomSelect';
 import { Pagination } from '../components/Pagination';
 import { SyncInventoryModal } from '../components/SyncInventoryModal';
@@ -82,10 +83,35 @@ export const InventoryView: React.FC = () => {
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
 
   // Modals
-  const [selectedItemForQR, setSelectedItemForQR] = useState<Item | null>(null);
-  const [printLabelTarget, setPrintLabelTarget] = useState<Item | null>(null);
+  const [codeStudioTarget, setCodeStudioTarget] = useState<Item | null>(null);
+  const [activeScanField, setActiveScanField] = useState<'sku' | 'barcode' | null>(null);
+  const [scanDuplicateItem, setScanDuplicateItem] = useState<Item | null>(null);
+  const [scannedCodeValue, setScannedCodeValue] = useState<string>('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
+
+  const handleCodeScanned = (rawCode: string) => {
+    const code = rawCode.startsWith('ITEM:') ? rawCode.substring(5).trim() : rawCode.trim();
+    if (activeScanField === 'sku') {
+      setFormSku(code);
+    } else if (activeScanField === 'barcode') {
+      setFormBarcode(code);
+    }
+    setActiveScanField(null);
+
+    // Check if an existing product already uses this code
+    const existing = rawItems.find((item) => 
+      (editingItem ? item.id !== editingItem.id : true) &&
+      ((item.barcode && item.barcode.trim().toLowerCase() === code.toLowerCase()) || 
+       (item.sku && item.sku.trim().toLowerCase() === code.toLowerCase()) ||
+       (item.publicItemId && item.publicItemId.trim().toLowerCase() === code.toLowerCase()))
+    );
+
+    if (existing) {
+      setScannedCodeValue(code);
+      setScanDuplicateItem(existing);
+    }
+  };
 
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
   const [selectedItemForAdjust, setSelectedItemForAdjust] = useState<Item | null>(null);
@@ -1446,19 +1472,11 @@ export const InventoryView: React.FC = () => {
                         </button>
                         <button
                           className="btn btn-secondary btn-icon btn-sm"
-                          title="Generate QR Barcode"
-                          onClick={() => setSelectedItemForQR(item)}
+                          title="Barcode & QR Studio / Print Labels"
+                          onClick={() => setCodeStudioTarget(item)}
                           style={{ padding: 5 }}
                         >
                           <QrCode size={14} color="var(--primary-600)" />
-                        </button>
-                        <button
-                          className="btn btn-secondary btn-icon btn-sm"
-                          title="Print Barcode & String Labels"
-                          onClick={() => setPrintLabelTarget(item)}
-                          style={{ padding: 5 }}
-                        >
-                          <Printer size={14} color="var(--primary-600)" />
                         </button>
                         {canManage && (
                           <button
@@ -2044,22 +2062,83 @@ export const InventoryView: React.FC = () => {
         </div>
       )}
 
-      {/* QR Modal */}
-      {selectedItemForQR && (
-        <QRModal item={selectedItemForQR} onClose={() => setSelectedItemForQR(null)} />
-      )}
-
-      {/* Print Label Modal */}
+      {/* All-in-One Barcode & QR Studio / Label Printer Modal */}
       <PrintLabelModal
-        isOpen={!!printLabelTarget}
-        onClose={() => setPrintLabelTarget(null)}
-        itemName={printLabelTarget?.name}
-        itemSku={printLabelTarget?.sku}
-        itemPrice={printLabelTarget?.salePrice}
-        itemMrp={printLabelTarget?.mrp}
-        publicItemId={printLabelTarget?.publicItemId}
-        defaultStockCount={printLabelTarget?.currentStock}
+        isOpen={!!codeStudioTarget}
+        onClose={() => setCodeStudioTarget(null)}
+        itemName={codeStudioTarget?.name}
+        itemSku={codeStudioTarget?.sku}
+        itemBarcode={codeStudioTarget?.barcode}
+        itemPrice={codeStudioTarget?.salePrice}
+        itemMrp={codeStudioTarget?.mrp}
+        publicItemId={codeStudioTarget?.publicItemId}
+        defaultStockCount={codeStudioTarget?.currentStock}
       />
+
+      {/* Camera Scanner Modal for SKU / Barcode */}
+      <WebcamScannerModal
+        isOpen={!!activeScanField}
+        onClose={() => setActiveScanField(null)}
+        onScanSuccess={handleCodeScanned}
+        title={activeScanField === 'sku' ? 'Scan Product SKU Code' : 'Scan Product Barcode'}
+      />
+
+      {/* Existing Product Found Modal */}
+      {scanDuplicateItem && (
+        <div className="modal-overlay" style={{ zIndex: 10000 }}>
+          <div className="modal-content" style={{ maxWidth: 460, padding: 24, borderRadius: 'var(--radius-lg)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+              <div style={{ 
+                width: 44, 
+                height: 44, 
+                borderRadius: '50%', 
+                backgroundColor: 'var(--primary-50)', 
+                color: 'var(--primary-600)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                flexShrink: 0 
+              }}>
+                <Package size={22} />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                  Existing Product Found
+                </h4>
+                <p style={{ margin: '6px 0 10px 0', fontSize: '0.82rem', color: 'var(--neutral-600)', lineHeight: 1.5 }}>
+                  Code <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--neutral-900)' }}>{scannedCodeValue}</strong> is already registered to:
+                  <br />
+                  <strong style={{ color: 'var(--primary-700)', fontSize: '0.88rem' }}>{scanDuplicateItem.name}</strong> ({scanDuplicateItem.sku || scanDuplicateItem.barcode})
+                </p>
+                <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
+                  Do you want to load that existing product into the editor or continue creating a new one?
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setScanDuplicateItem(null)}
+              >
+                Continue Creating New
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const itemToLoad = scanDuplicateItem;
+                  setScanDuplicateItem(null);
+                  openEditModal(itemToLoad);
+                }}
+              >
+                Load Existing Product
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add / Edit Product Modal */}
       {isAddModalOpen && (
@@ -2150,9 +2229,31 @@ export const InventoryView: React.FC = () => {
                   {/* Row 2: SKU, Barcode, GST Rate, Unit */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
                     <div style={{ minWidth: 0 }}>
-                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
-                        SKU Code
-                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                        <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)' }}>
+                          SKU Code
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setActiveScanField('sku')}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            padding: '0 4px',
+                            color: 'var(--primary-600)',
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3
+                          }}
+                          title="Scan SKU using camera or barcode gun"
+                        >
+                          <Scan size={12} />
+                          <span>Scan</span>
+                        </button>
+                      </div>
                       <input
                         type="text"
                         className="form-input"
@@ -2163,9 +2264,31 @@ export const InventoryView: React.FC = () => {
                       />
                     </div>
                     <div style={{ minWidth: 0 }}>
-                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
-                        Barcode Number
-                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                        <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)' }}>
+                          Barcode Number
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setActiveScanField('barcode')}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            padding: '0 4px',
+                            color: 'var(--primary-600)',
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3
+                          }}
+                          title="Scan Barcode using camera or barcode gun"
+                        >
+                          <Scan size={12} />
+                          <span>Scan</span>
+                        </button>
+                      </div>
                       <input
                         type="text"
                         className="form-input"

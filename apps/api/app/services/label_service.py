@@ -5,9 +5,20 @@ from reportlab.graphics.barcode import code128, qr
 from reportlab.graphics.shapes import Drawing
 from reportlab.lib.pagesizes import A4, mm
 from reportlab.pdfgen import canvas
-from app.schemas.label import LabelPrintConfig, LabelStyle, PaperSize
+from app.schemas.label import LabelPrintConfig, LabelStyle, PaperSize, CodeType
 
 class LabelService:
+
+    @staticmethod
+    def _draw_qr(c: canvas.Canvas, payload: str, x: float, y: float, size: float) -> None:
+        """Helper to render scalable ReportLab QR Code drawing at given canvas coordinates."""
+        qr_obj = qr.QrCodeWidget(payload)
+        bounds = qr_obj.getBounds()
+        w = max(bounds[2] - bounds[0], 1)
+        h = max(bounds[3] - bounds[1], 1)
+        drawing = Drawing(size, size, transform=[size / w, 0, 0, size / h, 0, 0])
+        drawing.add(qr_obj)
+        drawing.drawOn(c, x, y)
 
     @staticmethod
     def generate_single_thermal_50x30(
@@ -15,14 +26,22 @@ class LabelService:
     ) -> bytes:
         """
         Generates a 50mm x 30mm standard product thermal sticker PDF.
-        Clean 2-column layout preventing MRP & Price collision.
+        Supports both 1D Code128 Barcode and 2D QR Code based on config.code_type.
         """
         buffer = BytesIO()
         width, height = 50 * mm, 30 * mm
         c = canvas.Canvas(buffer, pagesize=(width, height))
 
         display_store = config.store_name or store_name or "QuickBill Store"
-        raw_payload = (config.public_item_id or config.barcode or config.sku or "ITM-1001").replace("ITEM:", "").strip()
+        is_qr = config.code_type == CodeType.QR
+        
+        # QR payload uses official ITEM:<publicItemId> prefix for POS scanning; Barcode uses raw alphanumeric
+        if is_qr:
+            code_payload = f"ITEM:{config.public_item_id}" if config.public_item_id else (config.barcode or config.sku or "ITM-1001")
+            display_code = (config.public_item_id or config.barcode or config.sku or "ITM-1001").replace("ITEM:", "").strip()
+        else:
+            code_payload = (config.barcode or config.sku or config.public_item_id or "ITM-1001").replace("ITEM:", "").strip()
+            display_code = code_payload
 
         for _ in range(config.quantity):
             # Outer boundary line guide
@@ -39,15 +58,21 @@ class LabelService:
             c.setFont("Helvetica-Bold", 8)
             c.drawCentredString(25 * mm, 21.5 * mm, config.item_name[:26])
 
-            # 3. Centered Code128 Barcode (barWidth=0.45)
-            try:
-                bc = code128.Code128(raw_payload, barHeight=7.5 * mm, barWidth=0.45)
-                bc.drawOn(c, 11 * mm, 11 * mm)
+            # 3. Code Generation (QR vs 1D Barcode)
+            if is_qr:
+                qr_size = 11.5 * mm
+                LabelService._draw_qr(c, code_payload, (25 * mm) - (qr_size / 2), 8.5 * mm, qr_size)
                 c.setFont("Helvetica", 5.5)
-                c.drawCentredString(25 * mm, 8 * mm, raw_payload)
-            except Exception:
-                c.setFont("Helvetica", 5.5)
-                c.drawCentredString(25 * mm, 11 * mm, raw_payload)
+                c.drawCentredString(25 * mm, 7 * mm, display_code)
+            else:
+                try:
+                    bc = code128.Code128(code_payload, barHeight=7.5 * mm, barWidth=0.45)
+                    bc.drawOn(c, 11 * mm, 11 * mm)
+                    c.setFont("Helvetica", 5.5)
+                    c.drawCentredString(25 * mm, 8 * mm, display_code)
+                except Exception:
+                    c.setFont("Helvetica", 5.5)
+                    c.drawCentredString(25 * mm, 11 * mm, display_code)
 
             # 4. Footer Layout (Clean 2-column alignment)
             c.setFont("Helvetica", 5.5)
@@ -75,16 +100,21 @@ class LabelService:
     ) -> bytes:
         """
         Generates 70mm x 12mm Dumbbell / Jewelry String Tag PDF.
-        Left Wing (0 - 28mm): Store, Product Name, Bold Price.
-        Middle Bridge (28 - 42mm): Thin non-adhesive bridge outline.
-        Right Wing (42 - 70mm): Barcode + SKU (barWidth=0.23 for strict 22mm width).
+        Supports both Code128 Barcode and compact QR Code on the right wing.
         """
         buffer = BytesIO()
         width, height = 70 * mm, 12 * mm
         c = canvas.Canvas(buffer, pagesize=(width, height))
 
         display_store = config.store_name or store_name or "QuickBill"
-        raw_code = (config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+        is_qr = config.code_type == CodeType.QR
+        
+        if is_qr:
+            code_payload = f"ITEM:{config.public_item_id}" if config.public_item_id else (config.barcode or config.sku or "ITM-01")
+            raw_code = (config.public_item_id or config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+        else:
+            code_payload = (config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+            raw_code = code_payload
 
         for _ in range(config.quantity):
             # --- LEFT WING (0mm to 28mm) ---
@@ -105,16 +135,25 @@ class LabelService:
             c.rect(28 * mm, 3.5 * mm, 14 * mm, 5 * mm) # Bridge cutout guide
 
             # --- RIGHT WING (42mm to 70mm) ---
-            try:
-                bc = code128.Code128(raw_code, barHeight=5.5 * mm, barWidth=0.23)
-                bc.drawOn(c, 44 * mm, 4.5 * mm)
-            except Exception:
-                c.setFont("Helvetica", 5)
-                c.drawString(44 * mm, 5 * mm, raw_code)
-
-            if config.show_sku and config.sku:
+            if is_qr:
+                qr_size = 8 * mm
+                LabelService._draw_qr(c, code_payload, 60 * mm, 2 * mm, qr_size)
                 c.setFont("Helvetica-Bold", 5)
-                c.drawString(44 * mm, 1.5 * mm, f"SKU: {config.sku[:14]}")
+                c.drawString(44 * mm, 6.5 * mm, raw_code[:12])
+                if config.show_sku and config.sku:
+                    c.setFont("Helvetica", 4.5)
+                    c.drawString(44 * mm, 2.5 * mm, f"SKU:{config.sku[:10]}")
+            else:
+                try:
+                    bc = code128.Code128(raw_code, barHeight=5.5 * mm, barWidth=0.23)
+                    bc.drawOn(c, 44 * mm, 4.5 * mm)
+                except Exception:
+                    c.setFont("Helvetica", 5)
+                    c.drawString(44 * mm, 5 * mm, raw_code)
+
+                if config.show_sku and config.sku:
+                    c.setFont("Helvetica-Bold", 5)
+                    c.drawString(44 * mm, 1.5 * mm, f"SKU: {config.sku[:14]}")
 
             c.showPage()
 
@@ -126,7 +165,7 @@ class LabelService:
     def generate_a4_sticker_grid(
         configs: List[LabelPrintConfig], store_name: str, paper_size: PaperSize
     ) -> bytes:
-        """Generates multi-page A4 sticker sheet (24-up, 40-up, or 65-up)."""
+        """Generates multi-page A4 sticker sheet (24-up, 40-up, or 65-up) with dynamic Code128/QR."""
         buffer = BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4)
         page_w, page_h = A4
@@ -172,6 +211,7 @@ class LabelService:
 
             display_store = cfg.store_name or store_name or "QuickBill"
             cx = cell_x + (cell_w / 2)
+            is_qr = cfg.code_type == CodeType.QR
 
             # Title & Price
             c.setFont("Helvetica-Bold", 7 if cols >= 4 else 8)
@@ -179,15 +219,20 @@ class LabelService:
             c.setFont("Helvetica", 7 if cols >= 4 else 8)
             c.drawCentredString(cx, cell_y + cell_h - (7.5 * mm), cfg.item_name[:24])
 
-            # Barcode
-            raw_code = (cfg.barcode or cfg.public_item_id or cfg.sku or "ITEM-101").replace("ITEM:", "")
-            try:
-                bar_h = 7 * mm if cols >= 4 else 9 * mm
-                bc = code128.Code128(raw_code, barHeight=bar_h, barWidth=0.45 if cols >= 4 else 0.55)
-                bc.drawOn(c, cell_x + (4 * mm), cell_y + (6 * mm))
-            except Exception:
-                c.setFont("Helvetica", 6)
-                c.drawCentredString(cx, cell_y + (8 * mm), raw_code)
+            # Code Generation (QR vs 1D Barcode)
+            if is_qr:
+                qr_payload = f"ITEM:{cfg.public_item_id}" if cfg.public_item_id else (cfg.barcode or cfg.sku or "ITEM-101")
+                qr_s = 8 * mm if cols >= 4 else 10 * mm
+                LabelService._draw_qr(c, qr_payload, cx - (qr_s / 2), cell_y + (5 * mm), qr_s)
+            else:
+                raw_code = (cfg.barcode or cfg.public_item_id or cfg.sku or "ITEM-101").replace("ITEM:", "")
+                try:
+                    bar_h = 7 * mm if cols >= 4 else 9 * mm
+                    bc = code128.Code128(raw_code, barHeight=bar_h, barWidth=0.45 if cols >= 4 else 0.55)
+                    bc.drawOn(c, cell_x + (4 * mm), cell_y + (6 * mm))
+                except Exception:
+                    c.setFont("Helvetica", 6)
+                    c.drawCentredString(cx, cell_y + (8 * mm), raw_code)
 
             if cfg.show_price and cfg.sale_price:
                 c.setFont("Helvetica-Bold", 8)

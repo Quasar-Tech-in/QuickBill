@@ -20,23 +20,26 @@ def auth_headers():
 
 @pytest.mark.asyncio
 async def test_generate_custom_thermal_label_pdf(auth_headers):
-    payload = {
-        "itemName": "Organic Almond Milk 1L",
-        "sku": "SKU-MILK-1",
-        "salePrice": 240.0,
-        "mrp": 260.0,
-        "paperSize": "THERMAL_50x30",
-        "style": "STANDARD",
-        "quantity": 2,
-        "showPrice": True,
-        "showMrp": True
-    }
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post("/api/v1/labels/custom-pdf", json=payload, headers=auth_headers)
-        assert response.status_code == 200
-        assert response.headers["content-type"] == "application/pdf"
-        assert len(response.content) > 100
+    for code_type in ["BARCODE", "QR"]:
+        payload = {
+            "itemName": "Organic Almond Milk 1L",
+            "sku": "SKU-MILK-1",
+            "publicItemId": "itm_milk_123",
+            "salePrice": 240.0,
+            "mrp": 260.0,
+            "paperSize": "THERMAL_50x30",
+            "style": "STANDARD",
+            "codeType": code_type,
+            "quantity": 2,
+            "showPrice": True,
+            "showMrp": True
+        }
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/api/v1/labels/custom-pdf", json=payload, headers=auth_headers)
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "application/pdf"
+            assert len(response.content) > 100
 
 @pytest.mark.asyncio
 async def test_generate_jewelry_dumbbell_tag_pdf(auth_headers):
