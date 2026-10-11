@@ -18,6 +18,7 @@ import {
   FolderPlus,
   Filter,
   ChevronDown,
+  ChevronUp,
   Image as ImageIcon,
   Upload,
   ArrowLeft,
@@ -149,6 +150,38 @@ export const InventoryView: React.FC = () => {
   const [movementPageSize, setMovementPageSize] = useState<number>(25);
   const [movementTotal, setMovementTotal] = useState<number>(0);
 
+  // Add / Edit Modal UI Optimization State
+  const [isImagesSectionOpen, setIsImagesSectionOpen] = useState<boolean>(false);
+  const [activeModalBranchId, setActiveModalBranchId] = useState<string>('');
+
+  // Modal layout auto-scroll & section refs
+  const addModalBodyRef = useRef<HTMLDivElement>(null);
+  const imagesSectionRef = useRef<HTMLDivElement>(null);
+  const discountSectionRef = useRef<HTMLDivElement>(null);
+
+  const ensureElementVisible = useCallback((element: HTMLElement | null) => {
+    if (!element) return;
+    setTimeout(() => {
+      if (!element) return;
+      const modalBody = addModalBodyRef.current || (element.closest('.modal-body') as HTMLElement | null);
+      if (modalBody) {
+        modalBody.scrollTo({
+          top: modalBody.scrollHeight,
+          behavior: 'smooth'
+        });
+      }
+      try {
+        element.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      } catch (_) {}
+    }, 60);
+  }, []);
+
+  useEffect(() => {
+    if (isImagesSectionOpen && imagesSectionRef.current) {
+      ensureElementVisible(imagesSectionRef.current);
+    }
+  }, [isImagesSectionOpen, ensureElementVisible]);
+
 
 
   // Pagination State
@@ -261,6 +294,10 @@ export const InventoryView: React.FC = () => {
     setIsUploadingImage(false);
     setUploadStatusMsg('');
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (newStagedImages.length > 0) {
+      setIsImagesSectionOpen(true);
+      ensureElementVisible(imagesSectionRef.current);
+    }
   };
 
   const moveImage = (index: number, direction: 'LEFT' | 'RIGHT') => {
@@ -580,6 +617,8 @@ export const InventoryView: React.FC = () => {
     });
     setLocationOverrides(initialOverrides);
     setInitialSnapshot('');
+    setIsImagesSectionOpen(false);
+    setActiveModalBranchId(selectedLocationId !== 'ALL' ? selectedLocationId : (locations[0]?.id || ''));
     setIsAddModalOpen(true);
   };
 
@@ -661,7 +700,8 @@ export const InventoryView: React.FC = () => {
       locationOverrides: initialOverrides,
     });
     setInitialSnapshot(snapshot);
-
+    setIsImagesSectionOpen(loadedImages.length > 0);
+    setActiveModalBranchId(selectedLocationId !== 'ALL' ? selectedLocationId : (locations[0]?.id || ''));
     setIsAddModalOpen(true);
   };
 
@@ -2027,54 +2067,70 @@ export const InventoryView: React.FC = () => {
           <div
             className="modal-content"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: 860, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
+            style={{ maxWidth: 920, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
           >
-            <div className="card-header" style={{ flexShrink: 0, padding: '16px 24px', borderBottom: '1px solid var(--neutral-200)' }}>
+            <div className="card-header" style={{ flexShrink: 0, padding: '12px 20px', borderBottom: '1px solid var(--neutral-200)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: 'var(--primary-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-600)' }}>
-                  <Package size={20} />
+                <div style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: 'var(--primary-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-600)' }}>
+                  <Package size={18} />
                 </div>
                 <div>
-                  <h3 className="card-title" style={{ fontSize: '1.05rem', margin: 0 }}>
+                  <h3 className="card-title" style={{ fontSize: '1rem', margin: 0, fontWeight: 700 }}>
                     {editingItem ? 'Edit Product & Branch Settings' : 'Add New Product'}
                   </h3>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
-                    Configure master details and branch-wise MRP, discounts, final selling prices, and stock
+                  <p style={{ fontSize: '0.73rem', color: 'var(--neutral-500)', margin: '1px 0 0 0' }}>
+                    Master product details, pricing, stock, and location discounts
                   </p>
                 </div>
               </div>
-              <button className="btn btn-secondary btn-icon" onClick={() => setIsAddModalOpen(false)}>
+              <button className="btn btn-secondary btn-icon" onClick={() => setIsAddModalOpen(false)} style={{ padding: 6 }}>
                 <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleSaveItem} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              <div className="modal-body" style={{ overflowY: 'auto', flex: 1, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-                {/* 1. General Master Info */}
-                <div style={{ background: 'var(--neutral-50)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-600)' }}>
+            <form onSubmit={handleSaveItem} style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
+              <div ref={addModalBodyRef} className="modal-body" style={{ overflowY: 'auto', flex: '1 1 auto', minHeight: 0, maxHeight: 'calc(90vh - 120px)', padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* 1. Common Product Details */}
+                <div style={{ background: 'var(--neutral-50)', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <span style={{ fontSize: '0.76rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-600)' }}>
                       1. Common Product Details
                     </span>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.76rem', color: 'var(--neutral-800)', userSelect: 'none' }}>
+                      <input
+                        type="checkbox"
+                        checked={formAllowParts}
+                        onChange={(e) => setFormAllowParts(e.target.checked)}
+                        style={{ accentColor: 'var(--primary-600)', width: 14, height: 14, cursor: 'pointer' }}
+                      />
+                      <span style={{ fontWeight: 600 }}>Allow Fractional / Decimal Qty</span>
+                      {formAllowParts && (
+                        <span style={{ fontSize: '0.65rem', padding: '1px 5px', borderRadius: 3, backgroundColor: 'var(--primary-600)', color: '#ffffff', fontWeight: 700 }}>
+                          ✓ Fractional POS
+                        </span>
+                      )}
+                    </label>
                   </div>
 
-                  <div className="form-group" style={{ marginBottom: 12 }}>
-                    <label className="form-label" style={{ fontSize: '0.78rem', fontWeight: 600 }}>Product / Item Name *</label>
-                    <input
-                      type="text"
-                      required
-                      className="form-input"
-                      placeholder="e.g. Basmati Rice (1kg Pack)"
-                      value={formName}
-                      onChange={(e) => setFormName(e.target.value)}
-                      autoFocus
-                      style={{ width: '100%', boxSizing: 'border-box' }}
-                    />
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 14 }}>
-                    <div className="form-group" style={{ minWidth: 0, margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 5 }}>
+                  {/* Row 1: Name & Category */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.8fr) minmax(0, 1.2fr)', gap: 10, marginBottom: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
+                        Product / Item Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        className="form-input"
+                        placeholder="e.g. Basmati Rice (1kg Pack)"
+                        value={formName}
+                        onChange={(e) => setFormName(e.target.value)}
+                        autoFocus
+                        style={{ width: '100%', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
                         Category *
                       </label>
                       <CustomSelect
@@ -2089,8 +2145,12 @@ export const InventoryView: React.FC = () => {
                         placeholder="Select Category"
                       />
                     </div>
-                    <div className="form-group" style={{ minWidth: 0, margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 5 }}>
+                  </div>
+
+                  {/* Row 2: SKU, Barcode, GST Rate, Unit */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
                         SKU Code
                       </label>
                       <input
@@ -2099,10 +2159,11 @@ export const InventoryView: React.FC = () => {
                         placeholder="RICE-001"
                         value={formSku}
                         onChange={(e) => setFormSku(e.target.value)}
+                        style={{ width: '100%', boxSizing: 'border-box' }}
                       />
                     </div>
-                    <div className="form-group" style={{ minWidth: 0, margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 5 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
                         Barcode Number
                       </label>
                       <input
@@ -2111,31 +2172,28 @@ export const InventoryView: React.FC = () => {
                         placeholder="8901234567890"
                         value={formBarcode}
                         onChange={(e) => setFormBarcode(e.target.value)}
+                        style={{ width: '100%', boxSizing: 'border-box' }}
                       />
                     </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
-                    <div className="form-group" style={{ minWidth: 0, margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 5 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
                         GST Tax Rate (%)
                       </label>
                       <CustomSelect
                         value={formTaxRate}
                         onChange={(val) => setFormTaxRate(Number(val))}
                         options={[
-                          { value: 0, label: '0% (Exempt / Nil Rated)', badge: '0%' },
-                          { value: 5, label: '5% GST (Standard Essentials)', badge: '5%' },
-                          { value: 12, label: '12% GST (Processed Foods / Apparel)', badge: '12%' },
-                          { value: 18, label: '18% GST (Standard Commercial)', badge: '18%' },
-                          { value: 28, label: '28% GST (Luxury / High Slab)', badge: '28%' },
+                          { value: 0, label: '0% (Exempt)', badge: '0%' },
+                          { value: 5, label: '5% GST', badge: '5%' },
+                          { value: 12, label: '12% GST', badge: '12%' },
+                          { value: 18, label: '18% GST', badge: '18%' },
+                          { value: 28, label: '28% GST', badge: '28%' },
                         ]}
                       />
                     </div>
-
-                    <div className="form-group" style={{ minWidth: 0, margin: 0 }}>
-                      <label className="form-label" style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 5 }}>
-                        Unit of Measurement
+                    <div style={{ minWidth: 0 }}>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
+                        Unit of Measure
                       </label>
                       <CustomSelect
                         value={formUnit}
@@ -2151,62 +2209,398 @@ export const InventoryView: React.FC = () => {
                       />
                     </div>
                   </div>
-
-                  {/* Sell in Parts / Fractional Quantities Switch */}
-                  <div style={{
-                    marginTop: 14,
-                    padding: '12px 14px',
-                    borderRadius: 'var(--radius-sm)',
-                    backgroundColor: formAllowParts ? 'var(--primary-50)' : '#ffffff',
-                    border: `1.5px solid ${formAllowParts ? 'var(--primary-400)' : 'var(--neutral-200)'}`,
-                    transition: 'all 0.2s ease',
-                  }}>
-                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', margin: 0 }}>
-                      <input
-                        type="checkbox"
-                        checked={formAllowParts}
-                        onChange={(e) => setFormAllowParts(e.target.checked)}
-                        style={{ marginTop: 3, width: 17, height: 17, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: formAllowParts ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
-                            Sell in Parts / Fractional Quantities (e.g. 1.506 kg, 0.750 ltr, 2.5 meters)
-                          </span>
-                          {formAllowParts && (
-                            <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, backgroundColor: 'var(--primary-600)', color: '#ffffff', fontWeight: 800 }}>
-                              ✓ Fractional POS Enabled
-                            </span>
-                          )}
-                        </div>
-                        <p style={{ fontSize: '0.75rem', color: formAllowParts ? 'var(--primary-700)' : 'var(--neutral-500)', margin: '3px 0 0 0' }}>
-                          Allow cashiers to enter partial decimal quantities (e.g. 1.506) during POS billing. The POS will automatically multiply the exact fractional quantity by the unit cost and compute line totals & GST.
-                        </p>
-                      </div>
-                    </label>
-                  </div>
                 </div>
 
-                {/* 2. Product Images & Gallery (Auto-Compression & Order Index) */}
-                <div style={{ background: 'var(--neutral-50)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-600)' }}>
-                        2. Product Images & Gallery
-                      </span>
-                      <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 12, backgroundColor: 'var(--primary-50)', color: 'var(--primary-700)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <Sparkles size={12} />
-                        Auto-Compression & Supabase Cloud
-                      </span>
-                    </div>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>
-                      {formImages.length} image{formImages.length !== 1 ? 's' : ''} uploaded
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', marginBottom: 14 }}>
-                    Upload item photos. Images are automatically resized/compressed under 100KB (Step 1) and stored in Supabase (Step 2). Maintain order index to determine cover and gallery sequence.
-                  </p>
+                {/* 2. Branch-Wise Pricing & Stock (Streamlined with Branch Tabs) */}
+                {(() => {
+                  const currentLocId = activeModalBranchId || locations[0]?.id || '';
+                  const activeLoc = locations.find(l => l.id === currentLocId) || locations[0];
+                  
+                  if (!activeLoc) return null;
 
+                  const currentLocData: ItemLocationInventory = locationOverrides[activeLoc.id] || {
+                    locationId: activeLoc.id,
+                    locationName: activeLoc.name,
+                    mrp: 100,
+                    salePrice: 100,
+                    purchasePrice: 80,
+                    currentStock: 10,
+                    minStockAlert: 5,
+                    isListed: true,
+                    hasDiscount: false,
+                    discountType: 'PERCENT',
+                    discountValue: 0,
+                  };
+
+                  const effectivePrice = calculateEffectiveSalePrice(currentLocData);
+
+                  return (
+                    <div style={{ background: 'var(--neutral-50)', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
+                      {/* Section Title & Branch Tabs */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                        <span style={{ fontSize: '0.76rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-600)' }}>
+                          2. Branch Pricing & Stock
+                        </span>
+
+                        {/* Branch Tabs if more than 1 location */}
+                        {locations.length > 1 && (
+                          <div style={{ display: 'inline-flex', background: 'var(--neutral-200)', padding: 2, borderRadius: 6, gap: 2 }}>
+                            {locations.map((loc) => {
+                              const isSelected = loc.id === activeLoc.id;
+                              const locData = locationOverrides[loc.id];
+                              const isLocListed = locData ? locData.isListed : true;
+                              const mrpDisplay = locData?.mrp ? `₹${locData.mrp}` : '';
+                              return (
+                                <button
+                                  key={loc.id}
+                                  type="button"
+                                  onClick={() => setActiveModalBranchId(loc.id)}
+                                  style={{
+                                    border: 'none',
+                                    borderRadius: 4,
+                                    padding: '4px 10px',
+                                    fontSize: '0.74rem',
+                                    fontWeight: isSelected ? 700 : 500,
+                                    backgroundColor: isSelected ? '#ffffff' : 'transparent',
+                                    color: isSelected ? 'var(--primary-700)' : 'var(--neutral-700)',
+                                    boxShadow: isSelected ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 5,
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                >
+                                  <MapPin size={12} color={isSelected ? 'var(--primary-600)' : 'var(--neutral-500)'} />
+                                  <span>{loc.name}</span>
+                                  {mrpDisplay && (
+                                    <span style={{ fontSize: '0.68rem', opacity: isSelected ? 0.9 : 0.7 }}>
+                                      ({mrpDisplay})
+                                    </span>
+                                  )}
+                                  {!isLocListed && (
+                                    <span style={{ fontSize: '0.62rem', color: 'var(--danger-600)', fontWeight: 700 }}>• Unlisted</span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Active Branch Card */}
+                      <div
+                        style={{
+                          padding: 12,
+                          borderRadius: 'var(--radius-sm)',
+                          border: `1px solid ${currentLocData.isListed ? 'var(--neutral-300)' : 'var(--neutral-200)'}`,
+                          backgroundColor: currentLocData.isListed ? '#ffffff' : 'var(--neutral-100)',
+                        }}
+                      >
+                        {/* Branch Bar: Branch identity + Listed toggle */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid var(--neutral-100)', flexWrap: 'wrap', gap: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <MapPin size={15} color="var(--primary-600)" />
+                            <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--neutral-900)' }}>
+                              {activeLoc.name}
+                            </span>
+                            <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 3, background: 'var(--neutral-100)', color: 'var(--neutral-700)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                              {activeLoc.code}
+                            </span>
+                          </div>
+
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={currentLocData.isListed}
+                              onChange={(e) => {
+                                setLocationOverrides({
+                                  ...locationOverrides,
+                                  [activeLoc.id]: {
+                                    ...currentLocData,
+                                    isListed: e.target.checked,
+                                  },
+                                });
+                              }}
+                            />
+                            <span style={{ color: currentLocData.isListed ? 'var(--success-700)' : 'var(--neutral-500)' }}>
+                              {currentLocData.isListed ? '✓ Listed at this Branch' : '✕ Unlisted (Hidden in POS)'}
+                            </span>
+                          </label>
+                        </div>
+
+                        {currentLocData.isListed ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            {/* 4-column compact Grid */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+                              <div style={{ minWidth: 0 }}>
+                                <label style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
+                                  Selling Price ₹ (MRP) *
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  className="form-input"
+                                  placeholder="100.00"
+                                  value={currentLocData.mrp ?? ''}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    const updatedLoc = { ...currentLocData, mrp: raw as any };
+                                    updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
+                                    setLocationOverrides({
+                                      ...locationOverrides,
+                                      [activeLoc.id]: updatedLoc,
+                                    });
+                                  }}
+                                  required
+                                  style={{ width: '100%', boxSizing: 'border-box' }}
+                                />
+                              </div>
+
+                              <div style={{ minWidth: 0 }}>
+                                <label style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
+                                  Purchase Cost (₹)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  className="form-input"
+                                  placeholder="80.00"
+                                  value={currentLocData.purchasePrice ?? ''}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    setLocationOverrides({
+                                      ...locationOverrides,
+                                      [activeLoc.id]: {
+                                        ...currentLocData,
+                                        purchasePrice: raw as any,
+                                      },
+                                    });
+                                  }}
+                                  style={{ width: '100%', boxSizing: 'border-box' }}
+                                />
+                              </div>
+
+                              <div style={{ minWidth: 0 }}>
+                                {editingItem ? (
+                                  <>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                                      <label style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--neutral-700)', margin: 0 }}>
+                                        Stock ({formUnit})
+                                      </label>
+                                      <span style={{ fontSize: '0.65rem', color: 'var(--primary-700)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                                        <Lock size={9} /> Locked
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                      <div
+                                        style={{
+                                          flex: 1,
+                                          padding: '5px 8px',
+                                          backgroundColor: 'var(--neutral-100)',
+                                          border: '1px solid var(--neutral-300)',
+                                          borderRadius: 'var(--radius-sm)',
+                                          fontWeight: 700,
+                                          fontSize: '0.82rem',
+                                          color: 'var(--neutral-800)',
+                                        }}
+                                      >
+                                        {Number(currentLocData.currentStock ?? 0).toFixed(formAllowParts ? 3 : 0)}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        style={{ whiteSpace: 'nowrap', padding: '5px 7px', fontSize: '0.71rem', fontWeight: 600 }}
+                                        title="Adjust Stock for this branch"
+                                        onClick={() => {
+                                          setIsAddModalOpen(false);
+                                          openStockAdjustment(editingItem, activeLoc.id);
+                                        }}
+                                      >
+                                        <SlidersHorizontal size={11} style={{ marginRight: 2 }} /> Adjust
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <label style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
+                                      Opening Stock ({formUnit}) *
+                                    </label>
+                                    <input
+                                      type="number"
+                                      step={formAllowParts ? "0.001" : "1"}
+                                      min="0"
+                                      className="form-input"
+                                      placeholder={formAllowParts ? "10.000" : "10"}
+                                      value={currentLocData.currentStock ?? ''}
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        setLocationOverrides({
+                                          ...locationOverrides,
+                                          [activeLoc.id]: {
+                                            ...currentLocData,
+                                            currentStock: raw as any,
+                                          },
+                                        });
+                                      }}
+                                      required
+                                      style={{ width: '100%', boxSizing: 'border-box' }}
+                                    />
+                                  </>
+                                )}
+                              </div>
+
+                              <div style={{ minWidth: 0 }}>
+                                <label style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
+                                  Low Stock Alert
+                                </label>
+                                <input
+                                  type="number"
+                                  step={formAllowParts ? "0.001" : "1"}
+                                  min="0"
+                                  className="form-input"
+                                  placeholder={formAllowParts ? "5.000" : "5"}
+                                  value={currentLocData.minStockAlert ?? ''}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    setLocationOverrides({
+                                      ...locationOverrides,
+                                      [activeLoc.id]: {
+                                        ...currentLocData,
+                                        minStockAlert: raw as any,
+                                      },
+                                    });
+                                  }}
+                                  style={{ width: '100%', boxSizing: 'border-box' }}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Inline Branch Discount Toggle & Fields */}
+                            <div
+                              ref={discountSectionRef}
+                              style={{ background: 'var(--neutral-50)', padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', color: 'var(--neutral-800)', userSelect: 'none' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!currentLocData.hasDiscount}
+                                    onChange={(e) => {
+                                      const isChecked = e.target.checked;
+                                      const updatedLoc = {
+                                        ...currentLocData,
+                                        hasDiscount: isChecked,
+                                      };
+                                      updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
+                                      setLocationOverrides({
+                                        ...locationOverrides,
+                                        [activeLoc.id]: updatedLoc,
+                                      });
+                                      if (isChecked) {
+                                        ensureElementVisible(discountSectionRef.current);
+                                      }
+                                    }}
+                                  />
+                                  <Tag size={13} color="var(--primary-600)" />
+                                  <span>Apply Branch Discount</span>
+                                </label>
+
+                                {currentLocData.hasDiscount && (
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.76rem' }}>
+                                    <span style={{ color: 'var(--neutral-600)' }}>Final POS Price:</span>
+                                    <span style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--success-700)' }}>
+                                      ₹{effectivePrice.toFixed(2)}
+                                    </span>
+                                    <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
+                                      (MRP: <del>₹{Number(currentLocData.mrp || 0).toFixed(2)}</del>)
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {currentLocData.hasDiscount && (
+                                <div
+                                  style={{
+                                    marginTop: 8,
+                                    paddingTop: 8,
+                                    borderTop: '1px dashed var(--neutral-200)',
+                                    display: 'grid',
+                                    gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)',
+                                    gap: 10,
+                                  }}
+                                >
+                                  <div style={{ minWidth: 0 }}>
+                                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--neutral-600)', display: 'block', marginBottom: 3 }}>
+                                      Discount Type
+                                    </label>
+                                    <CustomSelect
+                                      value={currentLocData.discountType || 'PERCENT'}
+                                      onChange={(val) => {
+                                        const updatedLoc = {
+                                          ...currentLocData,
+                                          discountType: val as 'PERCENT' | 'FLAT',
+                                        };
+                                        updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
+                                        setLocationOverrides({
+                                          ...locationOverrides,
+                                          [activeLoc.id]: updatedLoc,
+                                        });
+                                      }}
+                                      options={[
+                                        { value: 'PERCENT', label: '% Percentage Off MRP', icon: <Percent size={12} />, badge: '%' },
+                                        { value: 'FLAT', label: '₹ Flat Amount Off MRP', icon: <DollarSign size={12} />, badge: '₹' },
+                                      ]}
+                                    />
+                                  </div>
+
+                                  <div style={{ minWidth: 0 }}>
+                                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--neutral-600)', display: 'block', marginBottom: 3 }}>
+                                      Discount Value {currentLocData.discountType === 'PERCENT' ? '(%)' : '(₹)'}
+                                    </label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      className="form-input"
+                                      placeholder={currentLocData.discountType === 'PERCENT' ? 'e.g. 10' : 'e.g. 20'}
+                                      value={currentLocData.discountValue ?? ''}
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const updatedLoc = {
+                                          ...currentLocData,
+                                          discountValue: raw as any,
+                                        };
+                                        updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
+                                        setLocationOverrides({
+                                          ...locationOverrides,
+                                          [activeLoc.id]: updatedLoc,
+                                        });
+                                      }}
+                                      style={{ width: '100%', boxSizing: 'border-box' }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ padding: '8px 12px', background: 'var(--neutral-200)', borderRadius: 4, fontSize: '0.76rem', color: 'var(--neutral-600)' }}>
+                            This product is unlisted for {activeLoc.name} and will not appear in POS billing or branch catalogs.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 3. Product Photos & Gallery (Collapsible / On-Demand) */}
+                <div
+                  ref={imagesSectionRef}
+                  style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)', overflow: 'hidden', flexShrink: 0 }}
+                >
                   {/* Hidden File Input */}
                   <input
                     type="file"
@@ -2217,567 +2611,280 @@ export const InventoryView: React.FC = () => {
                     style={{ display: 'none' }}
                   />
 
-                  {/* Upload Drop Zone Trigger */}
+                  {/* Header Bar / Toggle */}
                   <div
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => {
+                      const willOpen = !isImagesSectionOpen;
+                      setIsImagesSectionOpen(willOpen);
+                      if (willOpen) {
+                        ensureElementVisible(imagesSectionRef.current);
+                      }
+                    }}
                     style={{
-                      border: '2px dashed var(--neutral-300)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '20px 16px',
-                      backgroundColor: '#ffffff',
-                      textAlign: 'center',
+                      padding: '10px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
                       cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      marginBottom: formImages.length > 0 ? 14 : 0,
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--primary-500)';
-                      e.currentTarget.style.backgroundColor = 'var(--primary-50)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--neutral-300)';
-                      e.currentTarget.style.backgroundColor = '#ffffff';
+                      userSelect: 'none',
+                      backgroundColor: isImagesSectionOpen ? '#ffffff' : 'transparent',
+                      borderBottom: isImagesSectionOpen ? '1px solid var(--neutral-200)' : 'none',
+                      transition: 'background-color 0.15s ease',
                     }}
                   >
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: 'var(--primary-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-600)' }}>
-                        <Upload size={20} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <ImageIcon size={15} color="var(--primary-600)" />
+                        <span style={{ fontSize: '0.76rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-600)' }}>
+                          3. Product Photos & Gallery (Optional)
+                        </span>
                       </div>
-                      <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--neutral-800)' }}>
-                        Click to Upload or Drag & Drop Product Photos
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)' }}>
-                        Supports JPG, PNG, WebP (Automatically reduced & optimized for lightning-fast POS loading)
-                      </div>
+
+                      {/* Mini Thumbnail Strip if images exist */}
+                      {formImages.length > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 6 }}>
+                          {formImages.slice(0, 4).map((img, i) => (
+                            <div key={img.id || i} style={{ width: 24, height: 24, borderRadius: 4, overflow: 'hidden', border: `1px solid ${img.isPrimary ? 'var(--primary-500)' : 'var(--neutral-300)'}`, backgroundColor: '#ffffff' }}>
+                              <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            </div>
+                          ))}
+                          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--neutral-600)', background: 'var(--neutral-200)', padding: '1px 6px', borderRadius: 10 }}>
+                            {formImages.length} {formImages.length === 1 ? 'photo' : 'photos'}
+                          </span>
+                        </div>
+                      )}
+
+                      {formImages.length === 0 && (
+                        <span style={{ fontSize: '0.72rem', color: 'var(--neutral-400)' }}>
+                          No photos added
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '3px 8px', fontSize: '0.72rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const willOpen = !isImagesSectionOpen;
+                          setIsImagesSectionOpen(willOpen);
+                          if (willOpen) {
+                            ensureElementVisible(imagesSectionRef.current);
+                          }
+                        }}
+                      >
+                        {isImagesSectionOpen ? (
+                          <><span>Collapse</span><ChevronUp size={13} /></>
+                        ) : (
+                          <><span>{formImages.length > 0 ? 'Manage Photos' : '+ Add Photos'}</span><ChevronDown size={13} /></>
+                        )}
+                      </button>
                     </div>
                   </div>
 
-                  {/* Uploading Status Progress */}
-                  {isUploadingImage && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--primary-50)', border: '1px solid var(--primary-200)', borderRadius: 'var(--radius-sm)', marginBottom: 12, fontSize: '0.78rem', color: 'var(--primary-800)', fontWeight: 600 }}>
-                      <Loader2 size={15} className="spin" />
-                      <span>{uploadStatusMsg || 'Processing image...'}</span>
-                    </div>
-                  )}
+                  {/* Expanded Image Management Content */}
+                  {isImagesSectionOpen && (
+                    <div style={{ padding: '12px 14px', backgroundColor: '#ffffff', maxHeight: 380, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {/* Compact Drop Zone */}
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{
+                          border: '1.5px dashed var(--neutral-300)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '12px 16px',
+                          backgroundColor: 'var(--neutral-50)',
+                          textAlign: 'center',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 10,
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--primary-500)';
+                          e.currentTarget.style.backgroundColor = 'var(--primary-50)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--neutral-300)';
+                          e.currentTarget.style.backgroundColor = 'var(--neutral-50)';
+                        }}
+                      >
+                        <Upload size={18} color="var(--primary-600)" />
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--neutral-800)' }}>
+                          Click to upload or drag & drop product photos
+                        </span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--neutral-500)' }}>
+                          (JPG, PNG, WebP • Auto-compressed &lt;100KB)
+                        </span>
+                      </div>
 
-                  {/* Uploaded Images Ordered Gallery */}
-                  {formImages.length > 0 && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
-                      {formImages.map((img, index) => {
-                        const isPrimary = !!img.isPrimary;
-                        return (
-                          <div
-                            key={img.id || index}
-                            style={{
-                              borderRadius: 'var(--radius-md)',
-                              border: `1.5px solid ${isPrimary ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                              backgroundColor: '#ffffff',
-                              overflow: 'hidden',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              boxShadow: isPrimary ? '0 0 0 2px var(--primary-glow)' : 'var(--shadow-sm)',
-                              position: 'relative',
-                            }}
-                          >
-                            {/* Image Header Badges */}
-                            <div style={{ position: 'relative', width: '100%', height: 115, backgroundColor: 'var(--neutral-100)' }}>
-                              <img
-                                src={img.url}
-                                alt={img.name || `Image #${index + 1}`}
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              />
-                              {/* Order Badge */}
-                              <div style={{
-                                position: 'absolute',
-                                top: 6,
-                                left: 6,
-                                padding: '2px 7px',
-                                borderRadius: 4,
-                                backgroundColor: isPrimary ? 'var(--primary-600)' : 'rgba(15, 23, 42, 0.75)',
-                                color: '#ffffff',
-                                fontSize: '0.68rem',
-                                fontWeight: 800,
-                                backdropFilter: 'blur(4px)',
-                              }}>
-                                #{index + 1} {isPrimary ? '• Primary' : ''}
-                              </div>
+                      {/* Upload Status */}
+                      {isUploadingImage && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--primary-50)', border: '1px solid var(--primary-200)', borderRadius: 'var(--radius-sm)', fontSize: '0.76rem', color: 'var(--primary-800)', fontWeight: 600 }}>
+                          <Loader2 size={14} className="spin" />
+                          <span>{uploadStatusMsg || 'Processing image...'}</span>
+                        </div>
+                      )}
 
-                              {/* Size Badge */}
-                              {img.sizeBytes && (
-                                <div style={{
-                                  position: 'absolute',
-                                  bottom: 6,
-                                  right: 6,
-                                  padding: '1px 6px',
-                                  borderRadius: 4,
-                                  backgroundColor: 'rgba(0, 0, 0, 0.65)',
-                                  color: '#ffffff',
-                                  fontSize: '0.65rem',
-                                  fontWeight: 600,
-                                }}>
-                                  {formatBytes(img.sizeBytes)}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Card Controls & Index Ordering */}
-                            <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1, justifyContent: 'space-between' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                {/* Primary Star Toggle */}
-                                <button
-                                  type="button"
-                                  onClick={() => setPrimaryImage(index)}
-                                  style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    fontSize: '0.72rem',
-                                    fontWeight: 700,
-                                    color: isPrimary ? 'var(--primary-600)' : 'var(--neutral-500)',
-                                    cursor: isPrimary ? 'default' : 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 4,
-                                    padding: 0,
-                                  }}
-                                  title={isPrimary ? 'Current primary photo' : 'Set as primary photo'}
-                                >
-                                  <Star size={13} fill={isPrimary ? 'var(--primary-600)' : 'none'} color={isPrimary ? 'var(--primary-600)' : 'var(--neutral-400)'} />
-                                  <span>{isPrimary ? 'Cover Photo' : 'Set Cover'}</span>
-                                </button>
-
-                                {/* Delete Button */}
-                                <button
-                                  type="button"
-                                  onClick={() => deleteImage(index)}
-                                  style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    color: 'var(--danger-500)',
-                                    cursor: 'pointer',
-                                    padding: '2px 4px',
-                                  }}
-                                  title="Delete image"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-
-                              {/* Order Movement Controls */}
-                              <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                                <button
-                                  type="button"
-                                  disabled={index === 0}
-                                  onClick={() => moveImage(index, 'LEFT')}
-                                  style={{
-                                    flex: 1,
-                                    padding: '3px 0',
-                                    fontSize: '0.7rem',
-                                    fontWeight: 600,
-                                    borderRadius: 4,
-                                    border: '1px solid var(--neutral-200)',
-                                    backgroundColor: index === 0 ? 'var(--neutral-100)' : '#ffffff',
-                                    color: index === 0 ? 'var(--neutral-400)' : 'var(--neutral-700)',
-                                    cursor: index === 0 ? 'not-allowed' : 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: 2,
-                                  }}
-                                  title="Move Left (Earlier in Order)"
-                                >
-                                  <ArrowLeft size={12} />
-                                  <span>Left</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={index === formImages.length - 1}
-                                  onClick={() => moveImage(index, 'RIGHT')}
-                                  style={{
-                                    flex: 1,
-                                    padding: '3px 0',
-                                    fontSize: '0.7rem',
-                                    fontWeight: 600,
-                                    borderRadius: 4,
-                                    border: '1px solid var(--neutral-200)',
-                                    backgroundColor: index === formImages.length - 1 ? 'var(--neutral-100)' : '#ffffff',
-                                    color: index === formImages.length - 1 ? 'var(--neutral-400)' : 'var(--neutral-700)',
-                                    cursor: index === formImages.length - 1 ? 'not-allowed' : 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: 2,
-                                  }}
-                                  title="Move Right (Later in Order)"
-                                >
-                                  <span>Right</span>
-                                  <ArrowRight size={12} />
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* 3. Branch-Wise Inventory & Pricing Configuration */}
-                <div>
-                  <div style={{ marginBottom: 12 }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary-600)' }}>
-                      3. Branch-Wise Pricing, Stock & Location Discounts
-                    </span>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-                      Set MRP, cost price, and optional branch discounts (% or ₹ amount) to calculate final POS sale price per branch.
-                    </p>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    {locations.map((loc) => {
-                      const currentLocData: ItemLocationInventory = locationOverrides[loc.id] || {
-                        locationId: loc.id,
-                        locationName: loc.name,
-                        mrp: 100,
-                        salePrice: 100,
-                        purchasePrice: 80,
-                        currentStock: 10,
-                        minStockAlert: 5,
-                        isListed: true,
-                        hasDiscount: false,
-                        discountType: 'PERCENT',
-                        discountValue: 0,
-                      };
-
-                      const effectivePrice = calculateEffectiveSalePrice(currentLocData);
-
-                      return (
-                        <div
-                          key={loc.id}
-                          style={{
-                            padding: 16,
-                            borderRadius: 'var(--radius-md)',
-                            border: `1px solid ${currentLocData.isListed ? 'var(--neutral-300)' : 'var(--neutral-200)'}`,
-                            backgroundColor: currentLocData.isListed ? '#ffffff' : 'var(--neutral-50)',
-                            boxShadow: currentLocData.isListed ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
-                          }}
-                        >
-                          {/* Branch Header */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, paddingBottom: 10, borderBottom: '1px solid var(--neutral-100)', flexWrap: 'wrap', gap: 8 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <MapPin size={17} color="var(--primary-600)" />
-                              <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--neutral-900)' }}>
-                                {loc.name}
-                              </span>
-                              <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 4, background: 'var(--neutral-100)', color: 'var(--neutral-700)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                                {loc.code}
-                              </span>
-                            </div>
-
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={currentLocData.isListed}
-                                onChange={(e) => {
-                                  setLocationOverrides({
-                                    ...locationOverrides,
-                                    [loc.id]: {
-                                      ...currentLocData,
-                                      isListed: e.target.checked,
-                                    },
-                                  });
+                      {/* Thumbnails Grid */}
+                      {formImages.length > 0 && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, maxHeight: 260, overflowY: 'auto', padding: '2px 4px 4px 2px' }}>
+                          {formImages.map((img, index) => {
+                            const isPrimary = !!img.isPrimary;
+                            return (
+                              <div
+                                key={img.id || index}
+                                style={{
+                                  borderRadius: 'var(--radius-sm)',
+                                  border: `1.5px solid ${isPrimary ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                                  backgroundColor: '#ffffff',
+                                  overflow: 'hidden',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  boxShadow: isPrimary ? '0 0 0 2px var(--primary-glow)' : 'var(--shadow-xs)',
+                                  position: 'relative',
                                 }}
-                              />
-                              <span style={{ color: currentLocData.isListed ? 'var(--success-700)' : 'var(--neutral-500)' }}>
-                                {currentLocData.isListed ? '✓ Listed for Sale at this Branch' : '✕ Unlisted (Hidden in POS)'}
-                              </span>
-                            </label>
-                          </div>
-
-                          {currentLocData.isListed ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                              {/* Pricing & Stock Grid */}
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-                                <div style={{ minWidth: 0 }}>
-                                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
-                                    Selling Price ₹ (Incl. GST) *
-                                  </label>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    className="form-input"
-                                    placeholder="100.00"
-                                    value={currentLocData.mrp ?? ''}
-                                    onChange={(e) => {
-                                      const raw = e.target.value;
-                                      const updatedLoc = { ...currentLocData, mrp: raw as any };
-                                      updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
-                                      setLocationOverrides({
-                                        ...locationOverrides,
-                                        [loc.id]: updatedLoc,
-                                      });
-                                    }}
-                                    required
-                                    style={{ width: '100%', boxSizing: 'border-box' }}
+                              >
+                                <div style={{ position: 'relative', width: '100%', height: 90, backgroundColor: 'var(--neutral-100)' }}>
+                                  <img
+                                    src={img.url}
+                                    alt={img.name || `Image #${index + 1}`}
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                   />
-                                </div>
-
-                                <div style={{ minWidth: 0 }}>
-                                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
-                                    Purchase / Cost Price (₹)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    className="form-input"
-                                    placeholder="80.00"
-                                    value={currentLocData.purchasePrice ?? ''}
-                                    onChange={(e) => {
-                                      const raw = e.target.value;
-                                      setLocationOverrides({
-                                        ...locationOverrides,
-                                        [loc.id]: {
-                                          ...currentLocData,
-                                          purchasePrice: raw as any,
-                                        },
-                                      });
-                                    }}
-                                    style={{ width: '100%', boxSizing: 'border-box' }}
-                                  />
-                                </div>
-
-                                <div style={{ minWidth: 0 }}>
-                                  {editingItem ? (
-                                    <>
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', margin: 0 }}>
-                                          Stock ({formUnit})
-                                        </label>
-                                        <span style={{ fontSize: '0.68rem', color: 'var(--primary-700)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                                          <Lock size={10} /> Locked
-                                        </span>
-                                      </div>
-                                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                        <div
-                                          style={{
-                                            flex: 1,
-                                            padding: '7px 10px',
-                                            backgroundColor: 'var(--neutral-100)',
-                                            border: '1px solid var(--neutral-300)',
-                                            borderRadius: 'var(--radius-sm)',
-                                            fontWeight: 700,
-                                            fontSize: '0.85rem',
-                                            color: 'var(--neutral-800)',
-                                          }}
-                                        >
-                                          {Number(currentLocData.currentStock ?? 0).toFixed(formAllowParts ? 3 : 0)} {formUnit}
-                                        </div>
-                                        <button
-                                          type="button"
-                                          className="btn btn-secondary btn-sm"
-                                          style={{ whiteSpace: 'nowrap', padding: '6px 8px', fontSize: '0.73rem', fontWeight: 600 }}
-                                          title="Adjust Stock for this branch"
-                                          onClick={() => {
-                                            setIsAddModalOpen(false);
-                                            openStockAdjustment(editingItem, loc.id);
-                                          }}
-                                        >
-                                          <SlidersHorizontal size={12} style={{ marginRight: 3 }} /> Adjust
-                                        </button>
-                                      </div>
-                                      <p style={{ fontSize: '0.65rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
-                                        Managed via Stock Adjustments & POs.
-                                      </p>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
-                                        Opening Stock ({formUnit}) *
-                                      </label>
-                                      <input
-                                        type="number"
-                                        step={formAllowParts ? "0.001" : "1"}
-                                        min="0"
-                                        className="form-input"
-                                        placeholder={formAllowParts ? "10.000" : "10"}
-                                        value={currentLocData.currentStock ?? ''}
-                                        onChange={(e) => {
-                                          const raw = e.target.value;
-                                          setLocationOverrides({
-                                            ...locationOverrides,
-                                            [loc.id]: {
-                                              ...currentLocData,
-                                              currentStock: raw as any,
-                                            },
-                                          });
-                                        }}
-                                        required
-                                        style={{ width: '100%', boxSizing: 'border-box' }}
-                                      />
-                                    </>
+                                  <div style={{
+                                    position: 'absolute',
+                                    top: 4,
+                                    left: 4,
+                                    padding: '1px 5px',
+                                    borderRadius: 3,
+                                    backgroundColor: isPrimary ? 'var(--primary-600)' : 'rgba(15, 23, 42, 0.75)',
+                                    color: '#ffffff',
+                                    fontSize: '0.64rem',
+                                    fontWeight: 800,
+                                  }}>
+                                    #{index + 1} {isPrimary ? '• Cover' : ''}
+                                  </div>
+                                  {img.sizeBytes && (
+                                    <div style={{
+                                      position: 'absolute',
+                                      bottom: 4,
+                                      right: 4,
+                                      padding: '1px 4px',
+                                      borderRadius: 3,
+                                      backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                                      color: '#ffffff',
+                                      fontSize: '0.62rem',
+                                      fontWeight: 600,
+                                    }}>
+                                      {formatBytes(img.sizeBytes)}
+                                    </div>
                                   )}
                                 </div>
 
-                                <div style={{ minWidth: 0 }}>
-                                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 4 }}>
-                                    Low Stock Alert
-                                  </label>
-                                  <input
-                                    type="number"
-                                    step={formAllowParts ? "0.001" : "1"}
-                                    min="0"
-                                    className="form-input"
-                                    placeholder={formAllowParts ? "5.000" : "5"}
-                                    value={currentLocData.minStockAlert ?? ''}
-                                    onChange={(e) => {
-                                      const raw = e.target.value;
-                                      setLocationOverrides({
-                                        ...locationOverrides,
-                                        [loc.id]: {
-                                          ...currentLocData,
-                                          minStockAlert: raw as any,
-                                        },
-                                      });
-                                    }}
-                                    style={{ width: '100%', boxSizing: 'border-box' }}
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Optional Discount Section */}
-                              <div style={{ background: 'var(--neutral-50)', padding: 12, borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer', color: 'var(--neutral-800)' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={!!currentLocData.hasDiscount}
-                                    onChange={(e) => {
-                                      const updatedLoc = {
-                                        ...currentLocData,
-                                        hasDiscount: e.target.checked,
-                                      };
-                                      updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
-                                      setLocationOverrides({
-                                        ...locationOverrides,
-                                        [loc.id]: updatedLoc,
-                                      });
-                                    }}
-                                  />
-                                  <Tag size={15} color="var(--primary-600)" />
-                                  <span>Apply Branch Discount (Optional)</span>
-                                </label>
-
-                                {currentLocData.hasDiscount && (
-                                  <div
-                                    style={{
-                                      marginTop: 10,
-                                      padding: '12px 14px',
-                                      background: '#ffffff',
-                                      border: '1px solid var(--neutral-200)',
-                                      borderRadius: 'var(--radius-sm)',
-                                      display: 'grid',
-                                      gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-                                      gap: 14,
-                                      alignItems: 'end',
-                                    }}
-                                  >
-                                    <div style={{ minWidth: 0 }}>
-                                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 5 }}>
-                                        Discount Type
-                                      </label>
-                                      <CustomSelect
-                                        value={currentLocData.discountType || 'PERCENT'}
-                                        onChange={(val) => {
-                                          const updatedLoc = {
-                                            ...currentLocData,
-                                            discountType: val as 'PERCENT' | 'FLAT',
-                                          };
-                                          updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
-                                          setLocationOverrides({
-                                            ...locationOverrides,
-                                            [loc.id]: updatedLoc,
-                                          });
-                                        }}
-                                        options={[
-                                          { value: 'PERCENT', label: '% Percentage Off MRP', icon: <Percent size={13} />, badge: '%' },
-                                          { value: 'FLAT', label: '₹ Flat Amount Off MRP', icon: <DollarSign size={13} />, badge: '₹' },
-                                        ]}
-                                      />
-                                    </div>
-
-                                    <div style={{ minWidth: 0 }}>
-                                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 5 }}>
-                                        Discount Value {currentLocData.discountType === 'PERCENT' ? '(%)' : '(₹)'}
-                                      </label>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        className="form-input"
-                                        placeholder={currentLocData.discountType === 'PERCENT' ? 'e.g. 10 (%)' : 'e.g. 20 (₹)'}
-                                        value={currentLocData.discountValue ?? ''}
-                                        onChange={(e) => {
-                                          const raw = e.target.value;
-                                          const updatedLoc = {
-                                            ...currentLocData,
-                                            discountValue: raw as any,
-                                          };
-                                          updatedLoc.salePrice = calculateEffectiveSalePrice(updatedLoc);
-                                          setLocationOverrides({
-                                            ...locationOverrides,
-                                            [loc.id]: updatedLoc,
-                                          });
-                                        }}
-                                      />
-                                    </div>
-
-                                    {/* Real-time Calculation Badge */}
-                                    <div
+                                <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPrimaryImage(index)}
                                       style={{
-                                        minWidth: 0,
-                                        padding: '8px 12px',
-                                        background: 'var(--success-50, #f0fdf4)',
-                                        border: '1px solid var(--success-200, #bbf7d0)',
-                                        borderRadius: 'var(--radius-sm)',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        justifyContent: 'center',
+                                        background: 'none',
+                                        border: 'none',
+                                        fontSize: '0.68rem',
+                                        fontWeight: 700,
+                                        color: isPrimary ? 'var(--primary-600)' : 'var(--neutral-500)',
+                                        cursor: isPrimary ? 'default' : 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 3,
+                                        padding: 0,
                                       }}
                                     >
-                                      <span style={{ fontSize: '0.7rem', color: 'var(--success-800)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.04em' }}>
-                                        Final POS Selling Price
-                                      </span>
-                                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
-                                        <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--success-700)' }}>
-                                          ₹{effectivePrice.toFixed(2)}
-                                        </span>
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--neutral-500)' }}>
-                                          (MRP: <del>₹{Number(currentLocData.mrp || 0).toFixed(2)}</del>)
-                                        </span>
-                                      </div>
-                                    </div>
+                                      <Star size={11} fill={isPrimary ? 'var(--primary-600)' : 'none'} color={isPrimary ? 'var(--primary-600)' : 'var(--neutral-400)'} />
+                                      <span>{isPrimary ? 'Cover' : 'Set Cover'}</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteImage(index)}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--danger-500)',
+                                        cursor: 'pointer',
+                                        padding: '1px 3px',
+                                      }}
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
                                   </div>
-                                )}
+
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <button
+                                      type="button"
+                                      disabled={index === 0}
+                                      onClick={() => moveImage(index, 'LEFT')}
+                                      style={{
+                                        flex: 1,
+                                        padding: '2px 0',
+                                        fontSize: '0.66rem',
+                                        borderRadius: 3,
+                                        border: '1px solid var(--neutral-200)',
+                                        backgroundColor: index === 0 ? 'var(--neutral-100)' : '#ffffff',
+                                        color: index === 0 ? 'var(--neutral-400)' : 'var(--neutral-700)',
+                                        cursor: index === 0 ? 'not-allowed' : 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 2,
+                                      }}
+                                    >
+                                      <ArrowLeft size={10} />
+                                      <span>Left</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={index === formImages.length - 1}
+                                      onClick={() => moveImage(index, 'RIGHT')}
+                                      style={{
+                                        flex: 1,
+                                        padding: '2px 0',
+                                        fontSize: '0.66rem',
+                                        borderRadius: 3,
+                                        border: '1px solid var(--neutral-200)',
+                                        backgroundColor: index === formImages.length - 1 ? 'var(--neutral-100)' : '#ffffff',
+                                        color: index === formImages.length - 1 ? 'var(--neutral-400)' : 'var(--neutral-700)',
+                                        cursor: index === formImages.length - 1 ? 'not-allowed' : 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 2,
+                                      }}
+                                    >
+                                      <span>Right</span>
+                                      <ArrowRight size={10} />
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          ) : (
-                            <div style={{ padding: '8px 12px', background: 'var(--neutral-100)', borderRadius: 4, fontSize: '0.78rem', color: 'var(--neutral-600)' }}>
-                              This product is marked as unlisted for this branch and will not appear in POS billing or branch catalogs.
-                            </div>
-                          )}
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="modal-footer" style={{ flexShrink: 0, padding: '14px 24px', borderTop: '1px solid var(--neutral-200)', background: 'var(--neutral-50)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                <div style={{ fontSize: '0.82rem', color: isSaving ? 'var(--primary-700)' : 'var(--neutral-500)', fontWeight: 600 }}>
+              {/* Modal Footer */}
+              <div className="modal-footer" style={{ flexShrink: 0, padding: '12px 20px', borderTop: '1px solid var(--neutral-200)', background: 'var(--neutral-50)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ fontSize: '0.8rem', color: isSaving ? 'var(--primary-700)' : 'var(--neutral-500)', fontWeight: 600 }}>
                   {uploadStatusMsg || (formImages.some(img => img.pendingCompressed) ? `📸 ${formImages.filter(img => img.pendingCompressed).length} new image(s) staged to upload on save` : '')}
                 </div>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button type="button" className="btn btn-secondary" onClick={() => setIsAddModalOpen(false)} disabled={isSaving}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setIsAddModalOpen(false)} disabled={isSaving} style={{ padding: '8px 14px' }}>
                     Cancel
                   </button>
                   <button 
@@ -2786,6 +2893,7 @@ export const InventoryView: React.FC = () => {
                     disabled={isSaving || isUploadingImage || (editingItem ? !hasChanges : !formName.trim())}
                     title={editingItem && !hasChanges ? 'No changes made to product or branch settings' : undefined}
                     style={{
+                      padding: '8px 16px',
                       opacity: (isSaving || isUploadingImage || (editingItem ? !hasChanges : !formName.trim())) ? 0.6 : 1,
                       cursor: (isSaving || isUploadingImage || (editingItem ? !hasChanges : !formName.trim())) ? 'not-allowed' : 'pointer'
                     }}
