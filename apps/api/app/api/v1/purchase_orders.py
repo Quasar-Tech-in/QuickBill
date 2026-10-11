@@ -4,7 +4,7 @@ import secrets
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.database import get_database, get_tenant_db
-from app.core.security import get_current_user, get_current_business_id, enforce_active_store_operations, TokenPayload
+from app.core.security import get_current_user, get_current_business_id, enforce_active_store_operations, TokenPayload, resolve_user_name
 from app.schemas.common import PaginatedResponse
 from app.schemas.purchase_orders import (
     PurchaseOrderCreate,
@@ -688,7 +688,7 @@ async def receive_purchase_order_goods(
                 "totalCost": round(item_batch_cost, 2),
                 "reason": f"Goods received from PO {po_number} ({supplier_name})",
                 "createdByUserId": current_user.sub,
-                "createdByName": current_user.email.split("@")[0] if current_user.email else "Admin",
+                "createdByName": await resolve_user_name(db, current_user),
                 "createdAt": now
             }
             await db.inventory_movements.insert_one(movement_doc)

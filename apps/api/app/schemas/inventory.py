@@ -13,6 +13,8 @@ class InventoryMovementType(str, Enum):
     DAMAGED_WRITE_OFF = "DAMAGED_WRITE_OFF"
     OPENING_STOCK = "OPENING_STOCK"
     PO_CANCEL = "PO_CANCEL"
+    PRICE_CHANGE = "PRICE_CHANGE"
+    PRODUCT_UPDATE = "PRODUCT_UPDATE"
 
 
 class InventoryMovementResponse(BaseModel):

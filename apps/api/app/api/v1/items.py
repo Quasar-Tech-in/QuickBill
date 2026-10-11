@@ -13,7 +13,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from app.core.config import settings
 from app.core.database import get_tenant_db
-from app.core.security import get_current_business_id, enforce_active_store_operations, get_current_user, TokenPayload
+from app.core.security import get_current_business_id, enforce_active_store_operations, get_current_user, TokenPayload, resolve_user_name
 from app.schemas.common import PaginatedResponse
 from app.schemas.item import ItemCreate, ItemUpdate, ItemResponse, StockAdjustmentRequest
 from app.repositories.item_repository import ItemRepository
@@ -198,7 +198,7 @@ async def create_item(
             "reason": "Initial Opening Stock on Product Creation",
             "notes": "System initialized product stock",
             "createdByUserId": str(current_user.sub) if current_user and current_user.sub else None,
-            "createdByName": current_user.email.split("@")[0] if current_user and current_user.email else "Admin",
+            "createdByName": await resolve_user_name(db, current_user) if current_user else "Admin",
             "createdAt": now
         }
         await db.inventory_movements.insert_one(movement_doc)
@@ -241,6 +241,7 @@ async def update_item(
     item_id: str,
     payload: ItemUpdate,
     business_id: str = Depends(enforce_active_store_operations),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
@@ -265,9 +266,16 @@ async def update_item(
         if float_field in update_data and update_data[float_field] is not None:
             update_data[float_field] = float(update_data[float_field])
 
+    # Detect price and configuration changes across branch and master levels
+    audit_records = []
+    now = datetime.now(timezone.utc)
+    b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else business_id
+    item_oid = existing.get("_id") if isinstance(existing.get("_id"), ObjectId) else (ObjectId(item_id) if ObjectId.is_valid(item_id) else item_id)
+
     if "locations" in update_data and update_data["locations"]:
         # Preserve existing location currentStock counts
         existing_loc_map = {str(l.get("locationId")): float(l.get("currentStock", 0.0) or 0.0) for l in (existing.get("locations") or [])}
+        existing_loc_full = {str(l.get("locationId")): l for l in (existing.get("locations") or [])}
         for loc in update_data["locations"]:
             loc_id_str = str(loc.get("locationId"))
             if loc_id_str in existing_loc_map:
@@ -276,11 +284,224 @@ async def update_item(
                 if float_field in loc and loc[float_field] is not None:
                     loc[float_field] = float(loc[float_field])
 
-    update_data["updatedAt"] = datetime.now(timezone.utc)
+            # Check branch-level differences
+            old_loc = existing_loc_full.get(loc_id_str)
+            if old_loc:
+                loc_stock = float(old_loc.get("currentStock", 0.0) or 0.0)
+                loc_name = loc.get("locationName") or old_loc.get("locationName") or "Store Branch"
+
+                # 1. Branch price & discount differences
+                old_sp = float(old_loc.get("salePrice") or 0.0)
+                new_sp = float(loc.get("salePrice", old_sp))
+                old_mrp = float(old_loc.get("mrp") or 0.0)
+                new_mrp = float(loc.get("mrp", old_mrp))
+                old_pp = float(old_loc.get("purchasePrice") or 0.0)
+                new_pp = float(loc.get("purchasePrice", old_pp))
+
+                old_has_disc = bool(old_loc.get("hasDiscount"))
+                new_has_disc = bool(loc.get("hasDiscount", old_has_disc))
+                old_disc_type = str(old_loc.get("discountType") or "PERCENT")
+                new_disc_type = str(loc.get("discountType") or old_disc_type)
+                old_disc_val = float(old_loc.get("discountValue") or 0.0)
+                new_disc_val = float(loc.get("discountValue", old_disc_val))
+
+                price_diffs = []
+                if abs(new_sp - old_sp) > 0.001:
+                    price_diffs.append(f"Selling Price: ₹{old_sp:.2f} → ₹{new_sp:.2f}")
+                if abs(new_mrp - old_mrp) > 0.001:
+                    price_diffs.append(f"MRP: ₹{old_mrp:.2f} → ₹{new_mrp:.2f}")
+                if abs(new_pp - old_pp) > 0.001:
+                    price_diffs.append(f"Purchase Cost: ₹{old_pp:.2f} → ₹{new_pp:.2f}")
+
+                if old_has_disc != new_has_disc:
+                    if new_has_disc:
+                        u = "%" if new_disc_type == "PERCENT" else " Flat"
+                        price_diffs.append(f"Discount: Enabled ({new_disc_val:g}{u})")
+                    else:
+                        price_diffs.append("Discount: Disabled")
+                elif new_has_disc and (abs(new_disc_val - old_disc_val) > 0.001 or old_disc_type != new_disc_type):
+                    old_u = "%" if old_disc_type == "PERCENT" else " Flat"
+                    new_u = "%" if new_disc_type == "PERCENT" else " Flat"
+                    price_diffs.append(f"Discount: {old_disc_val:g}{old_u} → {new_disc_val:g}{new_u}")
+
+                branch_unit_cost = new_pp if new_pp > 0 else (new_sp if new_sp > 0 else float(existing.get("purchasePrice") or 0.0))
+
+                if price_diffs:
+                    audit_records.append({
+                        "locationId": loc_id_str,
+                        "locationName": loc_name,
+                        "stock": loc_stock,
+                        "unitCost": branch_unit_cost,
+                        "type": "PRICE_CHANGE",
+                        "reason": f"Branch Price Revision ({' | '.join(price_diffs)})"
+                    })
+
+                # 2. Branch settings differences (Alerts & Listing Status)
+                setting_diffs = []
+                old_min_alert = float(old_loc.get("minStockAlert") if old_loc.get("minStockAlert") is not None else (existing.get("minStockAlert") or 5.0))
+                new_min_alert = float(loc.get("minStockAlert", old_min_alert))
+                if abs(new_min_alert - old_min_alert) > 0.001:
+                    setting_diffs.append(f"Low Stock Alert: {old_min_alert:g} → {new_min_alert:g}")
+
+                old_listed = bool(old_loc.get("isListed", True))
+                new_listed = bool(loc.get("isListed", old_listed))
+                if old_listed != new_listed:
+                    prev_str = "Listed" if old_listed else "Unlisted"
+                    curr_str = "Listed for Sale" if new_listed else "Unlisted (Hidden in POS)"
+                    setting_diffs.append(f"Store Status: {prev_str} → {curr_str}")
+
+                if setting_diffs:
+                    audit_records.append({
+                        "locationId": loc_id_str,
+                        "locationName": loc_name,
+                        "stock": loc_stock,
+                        "unitCost": branch_unit_cost,
+                        "type": "PRODUCT_UPDATE",
+                        "reason": f"Branch Settings ({' | '.join(setting_diffs)})"
+                    })
+
+    # Master-level checks
+    master_stock = float(existing.get("currentStock", 0.0) or 0.0)
+    master_unit_cost = float(update_data.get("purchasePrice") or existing.get("purchasePrice") or existing.get("salePrice") or 0.0)
+
+    # Master price differences
+    old_m_sp = float(existing.get("salePrice") or 0.0)
+    new_m_sp = float(update_data.get("salePrice", old_m_sp))
+    old_m_mrp = float(existing.get("mrp") or 0.0)
+    new_m_mrp = float(update_data.get("mrp", old_m_mrp))
+    old_m_pp = float(existing.get("purchasePrice") or 0.0)
+    new_m_pp = float(update_data.get("purchasePrice", old_m_pp))
+
+    master_price_diffs = []
+    if abs(new_m_sp - old_m_sp) > 0.001:
+        master_price_diffs.append(f"Master Sale Price: ₹{old_m_sp:.2f} → ₹{new_m_sp:.2f}")
+    if abs(new_m_mrp - old_m_mrp) > 0.001:
+        master_price_diffs.append(f"Master MRP: ₹{old_m_mrp:.2f} → ₹{new_m_mrp:.2f}")
+    if abs(new_m_pp - old_m_pp) > 0.001:
+        master_price_diffs.append(f"Master Cost Price: ₹{old_m_pp:.2f} → ₹{new_m_pp:.2f}")
+
+    # Only record master-level price revision if no branch-level price change was recorded
+    has_branch_price_change = any(r.get("type") == "PRICE_CHANGE" and r.get("locationId") for r in audit_records)
+    if not has_branch_price_change and master_price_diffs:
+        audit_records.append({
+            "locationId": None,
+            "locationName": "All Branches / Master",
+            "stock": master_stock,
+            "unitCost": new_m_pp if new_m_pp > 0 else (new_m_sp if new_m_sp > 0 else master_unit_cost),
+            "type": "PRICE_CHANGE",
+            "reason": f"Master Price Revision ({' | '.join(master_price_diffs)})"
+        })
+
+    # Master product / catalog attribute differences
+    master_catalog_diffs = []
+    old_name = (existing.get("name") or "").strip()
+    new_name = (update_data.get("name") or old_name).strip()
+    if old_name != new_name:
+        master_catalog_diffs.append(f"Name: '{old_name}' → '{new_name}'")
+
+    if "sku" in update_data:
+        old_sku = (existing.get("sku") or "").strip()
+        new_sku = (update_data.get("sku") or "").strip()
+        if old_sku != new_sku:
+            master_catalog_diffs.append(f"SKU: '{old_sku or 'None'}' → '{new_sku or 'None'}'")
+
+    if "barcode" in update_data:
+        old_bar = (existing.get("barcode") or "").strip()
+        new_bar = (update_data.get("barcode") or "").strip()
+        if old_bar != new_bar:
+            master_catalog_diffs.append(f"Barcode: '{old_bar or 'None'}' → '{new_bar or 'None'}'")
+
+    if "category" in update_data:
+        old_cat = (existing.get("category") or "").strip()
+        new_cat = (update_data.get("category") or old_cat).strip()
+        if old_cat != new_cat:
+            master_catalog_diffs.append(f"Category: '{old_cat}' → '{new_cat}'")
+
+    if "taxRate" in update_data:
+        old_tax = float(existing.get("taxRate") or 0.0)
+        new_tax = float(update_data.get("taxRate", old_tax))
+        if abs(new_tax - old_tax) > 0.001:
+            master_catalog_diffs.append(f"GST / Tax Rate: {old_tax:g}% → {new_tax:g}%")
+
+    if "unit" in update_data:
+        old_unit = (existing.get("unit") or "pcs").strip()
+        new_unit = (update_data.get("unit") or "").strip()
+        if old_unit != new_unit:
+            master_catalog_diffs.append(f"Unit: '{old_unit}' → '{new_unit}'")
+
+    if "allowParts" in update_data:
+        old_parts = bool(existing.get("allowParts"))
+        new_parts = bool(update_data.get("allowParts"))
+        if old_parts != new_parts:
+            master_catalog_diffs.append(f"Fractional Parts: {'Enabled' if new_parts else 'Disabled'}")
+
+    has_branch_alert_change = any(
+        r.get("type") == "PRODUCT_UPDATE" and r.get("locationId") and "Low Stock Alert" in r.get("reason", "")
+        for r in audit_records
+    )
+    if not has_branch_alert_change and "minStockAlert" in update_data:
+        old_m_alert = float(existing.get("minStockAlert") or 5.0)
+        new_m_alert = float(update_data.get("minStockAlert", old_m_alert))
+        if abs(new_m_alert - old_m_alert) > 0.001:
+            master_catalog_diffs.append(f"Master Low Stock Alert: {old_m_alert:g} → {new_m_alert:g}")
+
+    if "description" in update_data:
+        old_desc = (existing.get("description") or "").strip()
+        new_desc = (update_data.get("description") or "").strip()
+        if old_desc != new_desc:
+            master_catalog_diffs.append("Description updated")
+
+    if "images" in update_data:
+        old_imgs = existing.get("images") or []
+        new_imgs = update_data.get("images") or []
+        if len(old_imgs) != len(new_imgs):
+            master_catalog_diffs.append(f"Gallery Images updated ({len(new_imgs)} images)")
+
+    if master_catalog_diffs:
+        audit_records.append({
+            "locationId": None,
+            "locationName": "All Branches / Master",
+            "stock": master_stock,
+            "unitCost": master_unit_cost,
+            "type": "PRODUCT_UPDATE",
+            "reason": f"Product Master ({' | '.join(master_catalog_diffs)})"
+        })
+
+    update_data["updatedAt"] = now
 
     success = await repo.update_by_id(business_id, item_id, update_data)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to update item")
+
+    # Insert immutable inventory movement audit records for price & configuration changes
+    if audit_records:
+        user_id = str(current_user.sub) if current_user and current_user.sub else None
+        user_name = await resolve_user_name(db, current_user)
+        for rec in audit_records:
+            movement_doc = {
+                "businessId": b_oid,
+                "itemId": item_oid,
+                "publicItemId": existing.get("publicItemId"),
+                "itemName": update_data.get("name") or existing.get("name", "Product"),
+                "sku": update_data.get("sku") or existing.get("sku"),
+                "locationId": rec["locationId"],
+                "locationName": rec["locationName"],
+                "type": rec["type"],
+                "referenceType": "PRODUCT_UPDATE",
+                "referenceId": str(existing["_id"]),
+                "referenceNumber": f"REV-{now.strftime('%y%m%d%H%M')}",
+                "quantityChange": 0.0,
+                "quantityBefore": rec["stock"],
+                "quantityAfter": rec["stock"],
+                "unitCost": rec["unitCost"],
+                "totalCost": round(rec["stock"] * rec["unitCost"], 2),
+                "reason": rec["reason"],
+                "notes": f"Product settings updated by {user_name}",
+                "createdByUserId": user_id,
+                "createdByName": user_name,
+                "createdAt": now
+            }
+            await db.inventory_movements.insert_one(movement_doc)
 
     updated = await repo.get_by_id(business_id, item_id)
     updated["_id"] = str(updated["_id"])
@@ -367,7 +588,7 @@ async def adjust_item_stock(
 
     # User Tagging from Authenticated User Credentials
     user_id = current_user.sub
-    user_name = getattr(current_user, "name", None) or (current_user.email.split("@")[0] if current_user.email else "Admin")
+    user_name = await resolve_user_name(db, current_user)
 
     # Insert immutable inventory movement audit entry
     movement_doc = {

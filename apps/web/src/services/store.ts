@@ -2310,7 +2310,7 @@ class StoreService {
       reason: reason || (delta > 0 ? 'Manual Stock Addition' : 'Stock Reduction / Shrinkage'),
       notes: notes,
       createdByUserId: this.currentUser?.id,
-      createdByName: this.currentUser?.name || 'Admin',
+      createdByName: this.currentUser?.name || 'Staff',
       createdAt: nowIso,
     };
     this.inventoryMovements = [movement, ...(this.inventoryMovements || [])];

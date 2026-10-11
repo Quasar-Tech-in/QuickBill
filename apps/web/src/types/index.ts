@@ -532,7 +532,7 @@ export interface PurchasesSummaryReport {
   by_supplier: PurchasesBySupplierItem[];
 }
 
-export type InventoryMovementType = 'PURCHASE' | 'SALE' | 'SALE_RETURN' | 'MANUAL_ADJUSTMENT' | 'DAMAGED_WRITE_OFF' | 'OPENING_STOCK' | 'PO_CANCEL';
+export type InventoryMovementType = 'PURCHASE' | 'SALE' | 'SALE_RETURN' | 'MANUAL_ADJUSTMENT' | 'DAMAGED_WRITE_OFF' | 'OPENING_STOCK' | 'PO_CANCEL' | 'PRICE_CHANGE' | 'PRODUCT_UPDATE';
 
 export interface InventoryMovement {
   id: string;

@@ -46,7 +46,7 @@ import { PrintLabelModal } from '../components/PrintLabelModal';
 import { CustomSelect } from '../components/CustomSelect';
 import { Pagination } from '../components/Pagination';
 import { SyncInventoryModal } from '../components/SyncInventoryModal';
-import { DateRangePicker, DateRangeValue } from '../components/DateRangePicker';
+import { DateRangePicker, DateRangeValue, calculatePresetDates } from '../components/DateRangePicker';
 import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
 import { uploadItemImage, deleteItemImages } from '../services/supabaseStorage';
 
@@ -101,7 +101,10 @@ export const InventoryView: React.FC = () => {
     setAdjustLocationId(locationId || selectedLocationId);
     setAdjustDelta(raw.allowParts ? '1.000' : '1');
     setAdjustType('ADD');
-    const defaultCost = raw.purchasePrice !== undefined ? String(raw.purchasePrice) : (raw.averageCostPrice !== undefined ? String(raw.averageCostPrice) : '');
+    const targetLoc = raw.locations?.find(l => l.locationId === (locationId || selectedLocationId));
+    const defaultCost = (targetLoc && targetLoc.purchasePrice !== undefined && targetLoc.purchasePrice !== null)
+      ? String(targetLoc.purchasePrice)
+      : (raw.purchasePrice !== undefined ? String(raw.purchasePrice) : '');
     setAdjustUnitCost(defaultCost);
     setAdjustReason('Physical Stock Count / Surplus');
     setAdjustNotes('');
@@ -131,11 +134,15 @@ export const InventoryView: React.FC = () => {
   const [movementLocationFilter, setMovementLocationFilter] = useState<string>('ALL');
   const [movementSearchQuery, setMovementSearchQuery] = useState<string>('');
   const [movementKeywords, setMovementKeywords] = useState<string[]>([]);
-  const [movementDateRange, setMovementDateRange] = useState<DateRangeValue>({
-    preset: 'ALL',
-    fromDate: '',
-    toDate: '',
+  const [movementDateRange, setMovementDateRange] = useState<DateRangeValue>(() => {
+    const dates = calculatePresetDates('LAST_7_DAYS');
+    return {
+      preset: 'LAST_7_DAYS',
+      fromDate: dates.fromDate,
+      toDate: dates.toDate,
+    };
   });
+  const [initialSnapshot, setInitialSnapshot] = useState<string>('');
   const [isProductSuggestionsOpen, setIsProductSuggestionsOpen] = useState<boolean>(false);
   const movementSearchContainerRef = useRef<HTMLDivElement>(null);
   const [movementPage, setMovementPage] = useState<number>(1);
@@ -572,6 +579,7 @@ export const InventoryView: React.FC = () => {
       };
     });
     setLocationOverrides(initialOverrides);
+    setInitialSnapshot('');
     setIsAddModalOpen(true);
   };
 
@@ -590,19 +598,19 @@ export const InventoryView: React.FC = () => {
     setUploadStatusMsg('');
 
     // Load existing images ordered by order index
+    let loadedImages: FormImageItem[] = [];
     if (raw.images && raw.images.length > 0) {
-      setFormImages([...raw.images].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+      loadedImages = [...raw.images].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     } else if (raw.imageUrl) {
-      setFormImages([{
+      loadedImages = [{
         id: 'img_0',
         url: raw.imageUrl,
         order: 0,
         isPrimary: true,
         name: 'Cover Image',
-      }]);
-    } else {
-      setFormImages([]);
+      }];
     }
+    setFormImages(loadedImages);
 
     // Map existing locations or fallback
     const initialOverrides: Record<string, ItemLocationInventory> = {};
@@ -639,6 +647,21 @@ export const InventoryView: React.FC = () => {
       }
     });
     setLocationOverrides(initialOverrides);
+
+    const snapshot = JSON.stringify({
+      name: (raw.name || '').trim(),
+      sku: (raw.sku || '').trim(),
+      barcode: (raw.barcode || '').trim(),
+      category: (raw.category || categoriesList[0]?.name || 'Grocery').trim(),
+      taxRate: Number(raw.taxRate ?? 5),
+      unit: raw.unit || 'pcs',
+      allowParts: !!raw.allowParts,
+      description: (raw.description || '').trim(),
+      images: loadedImages.map(img => ({ id: img.id, url: img.url, order: img.order, isPrimary: img.isPrimary, hasPending: false })),
+      locationOverrides: initialOverrides,
+    });
+    setInitialSnapshot(snapshot);
+
     setIsAddModalOpen(true);
   };
 
@@ -656,6 +679,44 @@ export const InventoryView: React.FC = () => {
       return Math.max(0, Number((baseMrp - discVal).toFixed(2)));
     }
   };
+
+  // Determine if changes have been made to the product in the edit modal
+  const hasChanges = useMemo(() => {
+    if (!editingItem) return true;
+    if (!initialSnapshot) return false;
+    const current = JSON.stringify({
+      name: formName.trim(),
+      sku: formSku.trim(),
+      barcode: formBarcode.trim(),
+      category: formCategory.trim(),
+      taxRate: Number(formTaxRate || 0),
+      unit: formUnit || 'pcs',
+      allowParts: !!formAllowParts,
+      description: formDescription.trim(),
+      images: formImages.map(img => ({
+        id: img.id,
+        url: img.url,
+        order: img.order,
+        isPrimary: img.isPrimary,
+        hasPending: !!img.pendingCompressed,
+      })),
+      locationOverrides,
+    });
+    return current !== initialSnapshot;
+  }, [
+    editingItem,
+    initialSnapshot,
+    formName,
+    formSku,
+    formBarcode,
+    formCategory,
+    formTaxRate,
+    formUnit,
+    formAllowParts,
+    formDescription,
+    formImages,
+    locationOverrides,
+  ]);
 
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1197,7 +1258,7 @@ export const InventoryView: React.FC = () => {
                 <th style={{ padding: '10px 12px' }}>Product Name</th>
                 <th style={{ width: '100px', padding: '10px 12px' }}>Category</th>
                 <th style={{ width: '120px', padding: '10px 12px' }}>MRP</th>
-                <th style={{ width: '110px', padding: '10px 12px' }}>Purchase (WAC)</th>
+                <th style={{ width: '110px', padding: '10px 12px' }}>Purchase Cost</th>
                 <th style={{ width: '70px', padding: '10px 12px' }}>GST</th>
                 <th style={{ width: '100px', padding: '10px 12px' }}>Stock</th>
                 <th style={{ width: '95px', padding: '10px 12px' }}>Status</th>
@@ -1211,6 +1272,7 @@ export const InventoryView: React.FC = () => {
                 const isListed = branchInv ? branchInv.isListed !== false : true;
 
                 const mrp = branchInv?.mrp ?? item.mrp ?? item.salePrice;
+                const effectiveSalePrice = branchInv?.salePrice !== undefined ? Number(branchInv.salePrice) : Number(item.salePrice || 0);
                 const hasDiscount = branchInv?.hasDiscount && (branchInv?.discountValue || 0) > 0;
                 const discountText = branchInv?.discountType === 'PERCENT'
                   ? `${branchInv.discountValue}% OFF`
@@ -1224,6 +1286,10 @@ export const InventoryView: React.FC = () => {
                   : (branchInv && branchInv.currentStock !== undefined
                       ? Number(branchInv.currentStock || 0)
                       : Number(item.currentStock || 0));
+
+                const effectivePurchasePrice = (!isConsolidated && branchInv?.purchasePrice !== undefined && branchInv?.purchasePrice !== null)
+                  ? Number(branchInv.purchasePrice)
+                  : Number(item.purchasePrice || 0);
 
                 const effectiveMinStock = isConsolidated
                   ? Number(item.minStockAlert ?? 5)
@@ -1287,7 +1353,7 @@ export const InventoryView: React.FC = () => {
                     <td style={{ padding: '10px 12px' }}>
                       <div>
                         <span style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--primary-600)' }}>
-                          ₹{Number(item.salePrice || 0).toFixed(2)}
+                          ₹{Number(effectiveSalePrice).toFixed(2)}
                         </span>
                         {hasDiscount ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
@@ -1304,7 +1370,7 @@ export const InventoryView: React.FC = () => {
                       </div>
                     </td>
                     <td style={{ color: 'var(--neutral-600)', fontSize: '0.85rem', padding: '10px 12px' }}>
-                      <div style={{ fontWeight: 600 }}>₹{Number(item.averageCostPrice !== undefined ? item.averageCostPrice : (item.purchasePrice || 0)).toFixed(2)}</div>
+                      <div style={{ fontWeight: 600 }}>₹{effectivePurchasePrice.toFixed(2)}</div>
                     </td>
                     <td style={{ fontSize: '0.85rem', padding: '10px 12px' }}>{Number(item.taxRate || 0)}%</td>
                     <td style={{ padding: '10px 12px' }}>
@@ -1598,6 +1664,8 @@ export const InventoryView: React.FC = () => {
                 <option value="SALE">🛍️ Sales Outward</option>
                 <option value="SALE_RETURN">🔄 Sales Returns</option>
                 <option value="MANUAL_ADJUSTMENT">⚙️ Manual Adjustments</option>
+                <option value="PRICE_CHANGE">🏷️ Price Changes</option>
+                <option value="PRODUCT_UPDATE">📝 Product & Store Settings</option>
                 <option value="DAMAGED_WRITE_OFF">⚠️ Damaged/Expired</option>
                 <option value="OPENING_STOCK">📦 Opening Stock</option>
               </select>
@@ -1856,6 +1924,14 @@ export const InventoryView: React.FC = () => {
                         badgeBg = '#fffbeb';
                         badgeColor = '#b45309';
                         badgeLabel = '⚙️ ADJUSTMENT';
+                      } else if (m.type === 'PRICE_CHANGE') {
+                        badgeBg = '#f0f9ff';
+                        badgeColor = '#0369a1';
+                        badgeLabel = '🏷️ PRICE REVISION';
+                      } else if (m.type === 'PRODUCT_UPDATE') {
+                        badgeBg = '#faf5ff';
+                        badgeColor = '#7e22ce';
+                        badgeLabel = '📝 SETTINGS UPDATE';
                       } else if (m.type === 'DAMAGED_WRITE_OFF') {
                         badgeBg = '#fef2f2';
                         badgeColor = '#b91c1c';
@@ -1865,6 +1941,8 @@ export const InventoryView: React.FC = () => {
                         badgeColor = '#0f766e';
                         badgeLabel = '📦 OPENING';
                       }
+
+                      const isZero = Math.abs(m.quantityChange) < 0.0001;
 
                       return (
                         <tr key={m.id || idx}>
@@ -1889,8 +1967,8 @@ export const InventoryView: React.FC = () => {
                           <td style={{ fontSize: '0.78rem', fontFamily: 'var(--font-mono)', padding: '10px 12px', fontWeight: 600 }}>
                             {m.referenceNumber || m.referenceType || '—'}
                           </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, color: isPositive ? '#059669' : '#dc2626' }}>
-                            {isPositive ? `+${m.quantityChange.toFixed(2)}` : m.quantityChange.toFixed(2)}
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, color: isZero ? 'var(--neutral-500)' : (isPositive ? '#059669' : '#dc2626') }}>
+                            {isZero ? '0.00' : (isPositive ? `+${m.quantityChange.toFixed(2)}` : m.quantityChange.toFixed(2))}
                           </td>
                           <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '0.78rem', fontFamily: 'var(--font-mono)' }}>
                             <span style={{ color: 'var(--neutral-400)' }}>{m.quantityBefore.toFixed(1)}</span>
@@ -2702,7 +2780,16 @@ export const InventoryView: React.FC = () => {
                   <button type="button" className="btn btn-secondary" onClick={() => setIsAddModalOpen(false)} disabled={isSaving}>
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-primary" disabled={isSaving || isUploadingImage}>
+                  <button 
+                    type="submit" 
+                    className="btn btn-primary" 
+                    disabled={isSaving || isUploadingImage || (editingItem ? !hasChanges : !formName.trim())}
+                    title={editingItem && !hasChanges ? 'No changes made to product or branch settings' : undefined}
+                    style={{
+                      opacity: (isSaving || isUploadingImage || (editingItem ? !hasChanges : !formName.trim())) ? 0.6 : 1,
+                      cursor: (isSaving || isUploadingImage || (editingItem ? !hasChanges : !formName.trim())) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
                     {isSaving ? 'Uploading & Saving...' : (editingItem ? 'Save Product & Pricing' : 'Create Product')}
                   </button>
                 </div>
@@ -2717,11 +2804,12 @@ export const InventoryView: React.FC = () => {
         const raw = rawItems.find(r => r.id === selectedItemForAdjust.id) || selectedItemForAdjust;
         const bInv = raw.locations?.find(l => l.locationId === adjustLocationId);
         const prevStock = bInv && bInv.currentStock !== undefined ? Number(bInv.currentStock) : Number(selectedItemForAdjust.currentStock || 0);
-        const oldAvgCost = Number(raw.averageCostPrice || raw.purchasePrice || selectedItemForAdjust.averageCostPrice || selectedItemForAdjust.purchasePrice || 0);
+        const locPurchaseCost = Number(bInv?.purchasePrice ?? raw.purchasePrice ?? selectedItemForAdjust.purchasePrice ?? 0);
+        const oldAvgCost = locPurchaseCost;
         const inwardQty = parseFloat(String(adjustDelta)) || 0;
-        const inwardCost = adjustUnitCost !== '' ? (parseFloat(String(adjustUnitCost)) || 0) : oldAvgCost;
+        const inwardCost = adjustUnitCost !== '' ? (parseFloat(String(adjustUnitCost)) || 0) : locPurchaseCost;
         const resultingStock = adjustType === 'ADD' ? (Math.max(0, prevStock) + inwardQty) : Math.max(0, prevStock - inwardQty);
-        const newWac = adjustType === 'ADD' && resultingStock > 0 ? (((Math.max(0, prevStock) * oldAvgCost) + (inwardQty * inwardCost)) / resultingStock) : oldAvgCost;
+        const newWac = adjustType === 'ADD' && resultingStock > 0 ? (((Math.max(0, prevStock) * locPurchaseCost) + (inwardQty * inwardCost)) / resultingStock) : locPurchaseCost;
 
         return (
           <div className="modal-overlay" onClick={() => setIsAdjustModalOpen(false)}>
@@ -2934,7 +3022,15 @@ export const InventoryView: React.FC = () => {
                   <button type="button" className="btn btn-secondary" onClick={() => setIsAdjustModalOpen(false)}>
                     Cancel
                   </button>
-                  <button type="submit" className={`btn ${adjustType === 'ADD' ? 'btn-primary' : 'btn-danger'}`}>
+                  <button 
+                    type="submit" 
+                    className={`btn ${adjustType === 'ADD' ? 'btn-primary' : 'btn-danger'}`}
+                    disabled={inwardQty <= 0}
+                    style={{
+                      opacity: inwardQty <= 0 ? 0.6 : 1,
+                      cursor: inwardQty <= 0 ? 'not-allowed' : 'pointer'
+                    }}
+                  >
                     {adjustType === 'ADD' ? `Confirm Inward Stock (+${inwardQty})` : `Confirm Stock Reduction (-${inwardQty})`}
                   </button>
                 </div>

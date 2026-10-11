@@ -12,6 +12,7 @@ security_bearer = HTTPBearer(auto_error=False)
 class TokenPayload(BaseModel):
     sub: str  # userId
     email: str
+    name: Optional[str] = None
     roles: List[str] = ["admin"]
     permissions: List[str] = []
     default_business_id: Optional[str] = None
@@ -56,6 +57,7 @@ async def get_current_user(
             return TokenPayload(
                 sub="demo_user_001",
                 email="admin@quickbill.local",
+                name="Store Administrator",
                 roles=["admin"],
                 permissions=["all"],
                 default_business_id="65f2a1b9a000000000000001",
@@ -141,3 +143,35 @@ async def enforce_active_store_operations(
         pass
 
     return business_id
+
+async def resolve_user_name(db, user: TokenPayload) -> str:
+    """
+    Resolves the human-readable display name for an authenticated user.
+    Prioritizes name embedded in TokenPayload, then queries users collection by sub/userId,
+    and falls back to email prefix or 'Staff'.
+    """
+    if getattr(user, "name", None) and str(user.name).strip():
+        return str(user.name).strip()
+
+    try:
+        from bson import ObjectId
+        from app.core.database import db_manager
+        u_oid = ObjectId(user.sub) if ObjectId.is_valid(user.sub) else user.sub
+        u_doc = None
+        if db is not None:
+            u_doc = await db.users.find_one({"_id": u_oid})
+        if not u_doc:
+            primary_db = db_manager.get_primary_database()
+            if primary_db is not None:
+                u_doc = await primary_db.users.find_one({"_id": u_oid})
+        if u_doc and u_doc.get("name"):
+            return str(u_doc["name"]).strip()
+    except Exception:
+        pass
+
+    if getattr(user, "email", None) and user.email:
+        clean_email = user.email.split("@")[0].strip()
+        if clean_email:
+            return clean_email.replace(".", " ").title()
+
+    return "Staff"
