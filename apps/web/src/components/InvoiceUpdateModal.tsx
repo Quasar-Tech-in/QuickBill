@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   X, 
   RotateCcw, 
@@ -116,6 +116,22 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
   const [returnNotes, setReturnNotes] = useState<string>(invoice.returnNotes || '');
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const hasInvoiceChanges = useMemo(() => {
+    const notesChanged = returnNotes.trim() !== (invoice.returnNotes || '').trim();
+    const itemsChanged = itemsState.some(it => {
+      const orig = invoice.items.find(origItem => origItem.itemId === it.itemId);
+      const origReturnedQty = Number(orig?.returnedQuantity || 0);
+      const currentReturnedQty = Number(it.returnedQty || 0);
+      if (Math.abs(currentReturnedQty - origReturnedQty) > 0.0001) return true;
+      if (currentReturnedQty > 0) {
+        if ((it.returnReason || 'RESTOCKABLE_RETURN') !== (orig?.returnReason || 'RESTOCKABLE_RETURN')) return true;
+        if ((it.returnNote || '').trim() !== (orig?.returnNote || '').trim()) return true;
+      }
+      return false;
+    });
+    return notesChanged || itemsChanged;
+  }, [itemsState, returnNotes, invoice]);
 
   // Compute live financial totals (tax-inclusive MRP standard)
   const originalGrand = invoice.originalGrandTotal || invoice.grandTotal;
@@ -685,7 +701,8 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
             type="button" 
             className="btn btn-primary btn-sm" 
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || !hasInvoiceChanges}
+            title={!hasInvoiceChanges ? 'No return adjustments or notes modified' : undefined}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, padding: '7px 18px' }}
           >
             {isSaving ? (

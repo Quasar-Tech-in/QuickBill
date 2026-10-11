@@ -2071,7 +2071,12 @@ export const PurchaseOrdersView: React.FC = () => {
                 <button type="button" className="btn btn-secondary" onClick={() => setIsCreateModalOpen(false)} disabled={isSaving}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={isSaving || !newPO.supplierId || newPO.items.length === 0}
+                  title={(!newPO.supplierId || newPO.items.length === 0) ? 'Please select a supplier and add at least one item' : undefined}
+                >
                   {isSaving ? <RefreshCw size={14} className="spin-animation" /> : <Check size={16} />}
                   <span>Place Purchase Order</span>
                 </button>
@@ -2348,7 +2353,12 @@ export const PurchaseOrdersView: React.FC = () => {
                 <button type="button" className="btn btn-secondary" onClick={() => setIsReceiveModalOpen(false)} disabled={isSaving}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-success" disabled={isSaving}>
+                <button 
+                  type="submit" 
+                  className="btn btn-success" 
+                  disabled={isSaving || !receiveForm.items.some((it: any) => Number(it.qtyToReceive || 0) > 0)}
+                  title={!receiveForm.items.some((it: any) => Number(it.qtyToReceive || 0) > 0) ? 'Please enter quantity to receive for at least one item' : undefined}
+                >
                   {isSaving ? <RefreshCw size={14} className="spin-animation" /> : <CheckCircle2 size={16} />}
                   <span>Confirm Inward Shipment</span>
                 </button>
@@ -2792,7 +2802,12 @@ export const PurchaseOrdersView: React.FC = () => {
                 <button type="button" className="btn btn-secondary" onClick={() => setIsQuickSupplierModalOpen(false)} disabled={isSaving}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={isSaving || !quickSupplier.name.trim()}
+                  title={!quickSupplier.name.trim() ? 'Please enter supplier name' : undefined}
+                >
                   {isSaving ? <RefreshCw size={14} className="spin-animation" /> : <Check size={14} />}
                   <span>Save &amp; Select</span>
                 </button>
@@ -3101,7 +3116,12 @@ export const PurchaseOrdersView: React.FC = () => {
                 <button type="button" className="btn btn-secondary" onClick={() => setIsQuickItemModalOpen(false)} disabled={isSaving}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={isSaving || !quickItem.name.trim() || Number(quickItem.purchasePrice || 0) <= 0}
+                  title={(!quickItem.name.trim() || Number(quickItem.purchasePrice || 0) <= 0) ? 'Please enter product name and purchase cost' : undefined}
+                >
                   {isSaving ? <RefreshCw size={14} className="spin-animation" /> : <Check size={14} />}
                   <span>Add to PO</span>
                 </button>

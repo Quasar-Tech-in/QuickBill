@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   BookOpen, 
   Plus, 
@@ -135,6 +135,7 @@ export const LedgerView: React.FC = () => {
   const [editingCatName, setEditingCatName] = useState<string>('');
   const [editingCatDesc, setEditingCatDesc] = useState<string>('');
 
+  const [initialEditExpenseSnapshot, setInitialEditExpenseSnapshot] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
 
   const refreshData = useCallback(async () => {
@@ -393,8 +394,33 @@ export const LedgerView: React.FC = () => {
       locationId: exp.locationId || activeLoc?.id || '',
       expenseDate: exp.expenseDate ? (exp.expenseDate.includes('T') ? exp.expenseDate.split('T')[0] : exp.expenseDate) : getLocalDateString(),
     });
+    setInitialEditExpenseSnapshot(JSON.stringify({
+      category: exp.category,
+      amount: Number(exp.amount),
+      payee: (exp.payee || '').trim(),
+      paymentMode: exp.paymentMode || 'CASH',
+      referenceNumber: (exp.referenceNumber || '').trim(),
+      description: (exp.description || '').trim(),
+      locationId: exp.locationId || activeLoc?.id || '',
+      expenseDate: exp.expenseDate ? (exp.expenseDate.includes('T') ? exp.expenseDate.split('T')[0] : exp.expenseDate) : getLocalDateString(),
+    }));
     setIsEditExpenseOpen(true);
   };
+
+  const isEditExpenseDirty = useMemo(() => {
+    if (!initialEditExpenseSnapshot) return false;
+    const current = JSON.stringify({
+      category: editExpenseForm.category,
+      amount: Number(editExpenseForm.amount || 0),
+      payee: editExpenseForm.payee.trim(),
+      paymentMode: editExpenseForm.paymentMode,
+      referenceNumber: editExpenseForm.referenceNumber.trim(),
+      description: editExpenseForm.description.trim(),
+      locationId: editExpenseForm.locationId,
+      expenseDate: editExpenseForm.expenseDate,
+    });
+    return current !== initialEditExpenseSnapshot && Number(editExpenseForm.amount || 0) > 0;
+  }, [initialEditExpenseSnapshot, editExpenseForm]);
 
   // Save Edit Expense
   const handleSaveEditExpense = async (e: React.FormEvent) => {
@@ -1570,7 +1596,8 @@ export const LedgerView: React.FC = () => {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={isSaving || (activeTab !== 'EXPENSE' && !paymentForm.partyId)}
+                  disabled={isSaving || (activeTab !== 'EXPENSE' && !paymentForm.partyId) || (activeTab === 'EXPENSE' ? Number(expenseForm.amount || 0) <= 0 : Number(paymentForm.amount || 0) <= 0)}
+                  title={((activeTab !== 'EXPENSE' && !paymentForm.partyId) || (activeTab === 'EXPENSE' ? Number(expenseForm.amount || 0) <= 0 : Number(paymentForm.amount || 0) <= 0)) ? 'Please enter valid amount and party' : undefined}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -1752,7 +1779,12 @@ export const LedgerView: React.FC = () => {
                 <button type="button" className="btn btn-secondary" onClick={() => setIsEditExpenseOpen(false)} disabled={isSaving}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={isSaving || !isEditExpenseDirty}
+                  title={!isEditExpenseDirty ? 'No changes made to expense record' : undefined}
+                >
                   {isSaving ? 'Updating...' : 'Update Expense'}
                 </button>
               </div>
@@ -1894,7 +1926,8 @@ export const LedgerView: React.FC = () => {
                                   <button
                                     type="button"
                                     className="btn btn-primary btn-sm"
-                                    title="Save Changes"
+                                    title={(editingCatName.trim() === c.name && editingCatDesc.trim() === (c.description || '')) ? 'No changes made' : 'Save Changes'}
+                                    disabled={!editingCatName.trim() || (editingCatName.trim() === c.name && editingCatDesc.trim() === (c.description || ''))}
                                     onClick={() => handleSaveEditCat(c.id)}
                                     style={{ padding: '4px 10px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                                   >

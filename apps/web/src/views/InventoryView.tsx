@@ -3297,7 +3297,8 @@ export const InventoryView: React.FC = () => {
                                       <button
                                         type="button"
                                         className="btn btn-primary btn-sm"
-                                        title="Save Changes"
+                                        title={(editingCatName.trim() === cat.name && editingCatDesc.trim() === (cat.description || '')) ? 'No changes made' : 'Save Changes'}
+                                        disabled={!editingCatName.trim() || (editingCatName.trim() === cat.name && editingCatDesc.trim() === (cat.description || ''))}
                                         onClick={() => handleSaveEditCat(cat.id)}
                                         style={{ padding: '4px 10px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                                       >

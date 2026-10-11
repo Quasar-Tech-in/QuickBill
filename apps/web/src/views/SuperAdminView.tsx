@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   ShieldCheck, 
@@ -152,6 +152,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     confirmNewPassword: '',
   });
   const [profileSaveSuccess, setProfileSaveSuccess] = useState(false);
+  const [initialEditTenantSnapshot, setInitialEditTenantSnapshot] = useState<string>('');
 
   // DB Test State
   const [testUri, setTestUri] = useState('mongodb://admin:secretpassword@localhost:27017/quickbill_db?authSource=admin');
@@ -407,9 +408,45 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       mongodbUri: t.databaseConfig?.mongodbUri || '',
       databaseName: t.databaseConfig?.databaseName || 'quickbill_db',
     });
+    setInitialEditTenantSnapshot(JSON.stringify({
+      name: t.name.trim(),
+      adminEmail: t.adminEmail.trim().toLowerCase(),
+      phone: (t.phone || '').trim(),
+      gstin: (t.gstin || '').trim(),
+      address: (t.address || '').trim(),
+      status: t.status,
+      plan: t.plan,
+      isolationMode: t.databaseConfig?.isolationMode || 'SHARED',
+      mongodbUri: (t.databaseConfig?.mongodbUri || '').trim(),
+      databaseName: (t.databaseConfig?.databaseName || 'quickbill_db').trim(),
+    }));
     setEditDbTestResult(null);
     setIsEditTenantModalOpen(true);
   };
+
+  const isEditTenantDirty = useMemo(() => {
+    if (!initialEditTenantSnapshot) return false;
+    const current = JSON.stringify({
+      name: editTenantForm.name.trim(),
+      adminEmail: editTenantForm.adminEmail.trim().toLowerCase(),
+      phone: editTenantForm.phone.trim(),
+      gstin: editTenantForm.gstin.trim(),
+      address: editTenantForm.address.trim(),
+      status: editTenantForm.status,
+      plan: editTenantForm.plan,
+      isolationMode: editTenantForm.isolationMode,
+      mongodbUri: editTenantForm.mongodbUri.trim(),
+      databaseName: editTenantForm.databaseName.trim(),
+    });
+    return current !== initialEditTenantSnapshot;
+  }, [initialEditTenantSnapshot, editTenantForm]);
+
+  const isAdminProfileDirty = useMemo(() => {
+    const nameChanged = adminProfile.name.trim() !== (currentUser?.name || 'Global Super Administrator');
+    const emailChanged = adminProfile.email.trim() !== (currentUser?.email || 'superadmin@quickbill.local');
+    const pwdChanged = !!adminProfile.newPassword.trim() || !!adminProfile.confirmNewPassword.trim();
+    return nameChanged || emailChanged || pwdChanged;
+  }, [adminProfile, currentUser]);
 
   // Save Edit Tenant
   const handleSaveEditTenant = async (e: React.FormEvent) => {
@@ -1396,7 +1433,13 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                 </div>
               </div>
 
-              <button type="submit" className="btn btn-primary" style={{ marginTop: 8 }}>
+              <button 
+                type="submit" 
+                className="btn btn-primary" 
+                disabled={!isAdminProfileDirty}
+                title={!isAdminProfileDirty ? 'No changes made to profile' : undefined}
+                style={{ marginTop: 8 }}
+              >
                 Save Profile Changes
               </button>
             </form>
@@ -2138,7 +2181,12 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                 <button type="button" className="btn btn-secondary" onClick={() => setIsEditTenantModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={!isEditTenantDirty}
+                  title={!isEditTenantDirty ? 'No changes made to store profile' : undefined}
+                >
                   Save Store Profile
                 </button>
               </div>
@@ -2198,7 +2246,12 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                 <button type="button" className="btn btn-secondary" onClick={() => setIsResetPwModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={!resetPwForm.newPassword.trim() || !resetPwForm.confirmPassword.trim()}
+                  title={(!resetPwForm.newPassword.trim() || !resetPwForm.confirmPassword.trim()) ? 'Please enter and confirm the new password' : undefined}
+                >
                   Update Password
                 </button>
               </div>

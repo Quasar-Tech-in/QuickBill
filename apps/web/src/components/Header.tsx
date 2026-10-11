@@ -796,7 +796,8 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={isUpdatingPassword}
+                  disabled={isUpdatingPassword || !currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()}
+                  title={(!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) ? 'Please fill in current, new, and confirm password fields' : undefined}
                   className="btn btn-primary"
                   style={{ fontSize: '0.84rem', fontWeight: 800, padding: '8px 18px', display: 'flex', alignItems: 'center', gap: 6 }}
                 >

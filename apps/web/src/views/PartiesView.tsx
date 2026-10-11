@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Users, 
   UserPlus, 
@@ -95,6 +95,7 @@ export const PartiesView: React.FC = () => {
     locationIds: [],
   });
 
+  const [initialPartySnapshot, setInitialPartySnapshot] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
 
   const loadPaginatedParties = useCallback(async (
@@ -202,8 +203,31 @@ export const PartiesView: React.FC = () => {
       address: party.address || '',
       locationIds: party.locationIds || [],
     });
+    setInitialPartySnapshot(JSON.stringify({
+      name: party.name.trim(),
+      type: party.type,
+      phone: (party.phone || '').trim(),
+      email: (party.email || '').trim(),
+      gstin: (party.gstin || '').trim().toUpperCase(),
+      address: (party.address || '').trim(),
+      locationIds: [...(party.locationIds || [])].sort(),
+    }));
     setIsEditModalOpen(true);
   };
+
+  const isEditPartyDirty = useMemo(() => {
+    if (!initialPartySnapshot) return false;
+    const current = JSON.stringify({
+      name: editForm.name.trim(),
+      type: editForm.type,
+      phone: editForm.phone.trim(),
+      email: editForm.email.trim(),
+      gstin: editForm.gstin.trim().toUpperCase(),
+      address: editForm.address.trim(),
+      locationIds: [...editForm.locationIds].sort(),
+    });
+    return current !== initialPartySnapshot;
+  }, [initialPartySnapshot, editForm]);
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -797,7 +821,12 @@ export const PartiesView: React.FC = () => {
                 <button type="button" className="btn btn-secondary" onClick={() => setIsAddModalOpen(false)} disabled={isSaving}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={isSaving || !newParty.name.trim()}
+                  title={!newParty.name.trim() ? 'Please enter party name' : undefined}
+                >
                   {isSaving ? 'Saving...' : 'Save Profile'}
                 </button>
               </div>
@@ -908,7 +937,12 @@ export const PartiesView: React.FC = () => {
                 <button type="button" className="btn btn-secondary" onClick={() => setIsEditModalOpen(false)} disabled={isSaving}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={isSaving || !isEditPartyDirty}
+                  title={!isEditPartyDirty ? 'No changes made to party details' : undefined}
+                >
                   {isSaving ? 'Updating...' : 'Update Profile'}
                 </button>
               </div>

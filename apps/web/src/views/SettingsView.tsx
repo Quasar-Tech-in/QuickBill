@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { 
   Users, 
@@ -155,6 +155,20 @@ export const SettingsView: React.FC = () => {
   const [logoUploadMsg, setLogoUploadMsg] = useState('');
   const [logoCompressionStat, setLogoCompressionStat] = useState('');
 
+  // Dirty Tracking Snapshots
+  const [initialProfileSnapshot, setInitialProfileSnapshot] = useState<string>(() => JSON.stringify({
+    name: (activeTenant?.name || '').trim(),
+    gstin: (activeTenant?.gstin || '').trim(),
+    phone: (activeTenant?.phone || '').trim(),
+    email: (activeTenant?.adminEmail || '').trim().toLowerCase(),
+    address: (activeTenant?.address || 'Ground Floor, Metro Retail Plaza, Sector 18, New Delhi').trim(),
+    logoUrl: (activeTenant?.logoUrl || '').trim(),
+    tagline: (activeTenant?.tagline || '').trim(),
+    receiptFooterNote: (activeTenant?.receiptFooterNote || '').trim(),
+  }));
+  const [initialEditUserSnapshot, setInitialEditUserSnapshot] = useState<string>('');
+  const [initialEditLocSnapshot, setInitialEditLocSnapshot] = useState<string>('');
+
   const currentUser = store.getCurrentUser();
   const canManage = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'TENANT_ADMIN';
 
@@ -216,8 +230,17 @@ export const SettingsView: React.FC = () => {
         setProfileEmail(liveTenant.adminEmail || '');
         setProfileLogoUrl(liveTenant.logoUrl || '');
         setProfileTagline(liveTenant.tagline || '');
-        setProfileReceiptFooter(liveTenant.receiptFooterNote || '');
         if (liveTenant.address) setProfileAddress(liveTenant.address);
+        setInitialProfileSnapshot(JSON.stringify({
+          name: (liveTenant.name || '').trim(),
+          gstin: (liveTenant.gstin || '').trim(),
+          phone: (liveTenant.phone || '').trim(),
+          email: (liveTenant.adminEmail || '').trim().toLowerCase(),
+          address: (liveTenant.address || 'Ground Floor, Metro Retail Plaza, Sector 18, New Delhi').trim(),
+          logoUrl: (liveTenant.logoUrl || '').trim(),
+          tagline: (liveTenant.tagline || '').trim(),
+          receiptFooterNote: (liveTenant.receiptFooterNote || '').trim(),
+        }));
       }
     } catch (e) {
       console.error('Failed loading staff, locations, and live tenant:', e);
@@ -303,6 +326,11 @@ export const SettingsView: React.FC = () => {
     setEditUserLocationIds(user.assignedLocationIds || []);
     setEditUserNewPassword('');
     setEditUserFormError('');
+    setInitialEditUserSnapshot(JSON.stringify({
+      name: user.name.trim(),
+      role: user.role,
+      assignedLocationIds: [...(user.assignedLocationIds || [])].sort(),
+    }));
     setIsEditUserModalOpen(true);
   };
 
@@ -438,6 +466,13 @@ export const SettingsView: React.FC = () => {
     setEditLocPhone(loc.phone || '');
     setEditLocGstin(loc.gstin || '');
     setEditLocFormError('');
+    setInitialEditLocSnapshot(JSON.stringify({
+      name: loc.name.trim(),
+      code: loc.code.trim().toUpperCase(),
+      address: (loc.address || '').trim(),
+      phone: (loc.phone || '').trim(),
+      gstin: (loc.gstin || '').trim().toUpperCase(),
+    }));
     setIsEditLocModalOpen(true);
   };
 
@@ -566,6 +601,16 @@ export const SettingsView: React.FC = () => {
         tagline: profileTagline.trim(),
         receiptFooterNote: profileReceiptFooter.trim(),
       });
+      setInitialProfileSnapshot(JSON.stringify({
+        name: profileName.trim(),
+        gstin: profileGstin.trim(),
+        phone: profilePhone.trim(),
+        email: profileEmail.trim().toLowerCase(),
+        address: profileAddress.trim(),
+        logoUrl: profileLogoUrl.trim(),
+        tagline: profileTagline.trim(),
+        receiptFooterNote: profileReceiptFooter.trim(),
+      }));
       setProfileSavedMsg(true);
       setTimeout(() => setProfileSavedMsg(false), 3500);
     } catch (err) {
@@ -574,6 +619,43 @@ export const SettingsView: React.FC = () => {
       setIsSavingProfile(false);
     }
   };
+
+  const isProfileDirty = useMemo(() => {
+    if (!initialProfileSnapshot) return false;
+    const current = JSON.stringify({
+      name: profileName.trim(),
+      gstin: profileGstin.trim(),
+      phone: profilePhone.trim(),
+      email: profileEmail.trim().toLowerCase(),
+      address: profileAddress.trim(),
+      logoUrl: profileLogoUrl.trim(),
+      tagline: profileTagline.trim(),
+      receiptFooterNote: profileReceiptFooter.trim(),
+    });
+    return current !== initialProfileSnapshot;
+  }, [initialProfileSnapshot, profileName, profileGstin, profilePhone, profileEmail, profileAddress, profileLogoUrl, profileTagline, profileReceiptFooter]);
+
+  const isEditUserDirty = useMemo(() => {
+    if (!initialEditUserSnapshot) return false;
+    const current = JSON.stringify({
+      name: editUserName.trim(),
+      role: editUserRole,
+      assignedLocationIds: editUserRole === 'TENANT_ADMIN' ? [] : [...editUserLocationIds].sort(),
+    });
+    return current !== initialEditUserSnapshot || editUserNewPassword.trim().length > 0;
+  }, [initialEditUserSnapshot, editUserName, editUserRole, editUserLocationIds, editUserNewPassword]);
+
+  const isEditLocDirty = useMemo(() => {
+    if (!initialEditLocSnapshot) return false;
+    const current = JSON.stringify({
+      name: editLocName.trim(),
+      code: editLocCode.trim().toUpperCase(),
+      address: editLocAddress.trim(),
+      phone: editLocPhone.trim(),
+      gstin: editLocGstin.trim().toUpperCase(),
+    });
+    return current !== initialEditLocSnapshot;
+  }, [initialEditLocSnapshot, editLocName, editLocCode, editLocAddress, editLocPhone, editLocGstin]);
 
   const getRoleBadge = (role: UserRole) => {
     switch (role) {
@@ -1333,7 +1415,13 @@ export const SettingsView: React.FC = () => {
               </div>
 
               <div style={{ marginTop: 8 }}>
-                <button type="submit" className="btn btn-primary" disabled={isSavingProfile} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={isSavingProfile || !isProfileDirty} 
+                  title={!isProfileDirty ? 'No changes made to store profile' : undefined}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                >
                   <Save size={16} />
                   <span>{isSavingProfile ? 'Saving Changes...' : 'Save Store Profile & Branding'}</span>
                 </button>
@@ -1923,7 +2011,13 @@ export const SettingsView: React.FC = () => {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()}
+                  title={(!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) ? 'Please fill in Name, Email, and Password' : undefined}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
                   <UserPlus size={16} />
                   <span>Create Staff Account</span>
                 </button>
@@ -2256,7 +2350,13 @@ export const SettingsView: React.FC = () => {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={!isEditUserDirty}
+                  title={!isEditUserDirty ? 'No changes made to user permissions' : undefined}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
                   <ShieldCheck size={16} />
                   <span>Save Permissions</span>
                 </button>
@@ -2473,7 +2573,13 @@ export const SettingsView: React.FC = () => {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={!newLocName.trim() || !newLocCode.trim()}
+                  title={(!newLocName.trim() || !newLocCode.trim()) ? 'Please enter Branch Code and Branch Name' : undefined}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
                   <Store size={16} />
                   <span>Save Branch Location</span>
                 </button>
@@ -2634,7 +2740,13 @@ export const SettingsView: React.FC = () => {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={!isEditLocDirty}
+                  title={!isEditLocDirty ? 'No changes made to branch details' : undefined}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
                   <Edit3 size={16} />
                   <span>Update Branch Details</span>
                 </button>
