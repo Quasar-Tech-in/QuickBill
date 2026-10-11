@@ -84,6 +84,39 @@ const AppLayout: React.FC<AppLayoutProps> = ({
   const daysRemaining = sub?.daysRemaining ?? 365;
   const isExpiringSoon = !isSuperAdmin && daysRemaining <= 14;
 
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('quickbill_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleSidebar = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('quickbill_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        const target = e.target as HTMLElement;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+          return;
+        }
+        e.preventDefault();
+        handleToggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Sync and fetch locations on mount or tenant switch
   const checkActiveLocations = async () => {
     if (!isStaffNonAdmin) return;
@@ -145,6 +178,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({
       {/* Sidebar Navigation */}
       <Sidebar 
         onLogout={onLogout}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={handleToggleSidebar}
       />
 
       {/* Main Content Area */}

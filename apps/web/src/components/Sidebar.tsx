@@ -14,7 +14,9 @@ import {
   ShieldCheck, 
   LogOut,
   Lock,
-  Building
+  Building,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { store } from '../services/store';
 
@@ -22,6 +24,8 @@ interface SidebarProps {
   activeTab?: string;
   onTabChange?: (tab: string) => void;
   onLogout?: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 interface NavItem {
@@ -35,9 +39,39 @@ interface NavItem {
   isLockedWhenStoreSuspended?: boolean;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabChange: _onTabChange, onLogout }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ 
+  activeTab: _activeTab, 
+  onTabChange: _onTabChange, 
+  onLogout,
+  isCollapsed: propIsCollapsed,
+  onToggleCollapse
+}) => {
   const location = useLocation();
   const [, setTick] = useState(0);
+
+  const [internalCollapsed, setInternalCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('quickbill_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const isCollapsed = propIsCollapsed !== undefined ? propIsCollapsed : internalCollapsed;
+
+  const toggleCollapse = () => {
+    if (onToggleCollapse) {
+      onToggleCollapse();
+    } else {
+      setInternalCollapsed(prev => {
+        const next = !prev;
+        try {
+          localStorage.setItem('quickbill_sidebar_collapsed', String(next));
+        } catch {}
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = store.subscribe(() => {
@@ -165,10 +199,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabCh
     : tenantNavItems.filter(item => item.roles?.includes(userRole));
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
       {/* Sidebar Header */}
-      <div className="sidebar-header">
-        <div className="sidebar-brand-icon" style={{ overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="sidebar-header" style={{ position: 'relative' }}>
+        <div 
+          className="sidebar-brand-icon" 
+          style={{ 
+            overflow: 'hidden', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            cursor: isCollapsed ? 'pointer' : 'default',
+            flexShrink: 0
+          }}
+          title={isCollapsed ? `${brandTitle} (Click to expand sidebar)` : brandTitle}
+          onClick={isCollapsed ? toggleCollapse : undefined}
+        >
           {!isSuperAdmin && activeTenant?.logoUrl ? (
             <img 
               src={activeTenant.logoUrl} 
@@ -182,16 +228,45 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabCh
             <Building size={20} color="#ffffff" />
           )}
         </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <h1 className="sidebar-brand-title" style={{ fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={brandTitle}>
-            {brandTitle}
-          </h1>
-          {brandTagline && (
-            <p style={{ fontSize: '0.68rem', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {brandTagline}
-            </p>
-          )}
-        </div>
+
+        {!isCollapsed && (
+          <>
+            <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
+              <h1 className="sidebar-brand-title" style={{ fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={brandTitle}>
+                {brandTitle}
+              </h1>
+              {brandTagline && (
+                <p style={{ fontSize: '0.68rem', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {brandTagline}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={toggleCollapse}
+              className="sidebar-toggle-btn"
+              title="Minimize sidebar (Ctrl+B)"
+              aria-label="Minimize sidebar"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                padding: '6px',
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.15s ease',
+                flexShrink: 0
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Navigation */}
@@ -214,48 +289,71 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabCh
                 }
               }}
               className={({ isActive }) => `nav-link ${isActive || isItemActive ? 'active' : ''}`}
-              title={isItemLocked ? 'Feature locked: Store is currently suspended / expired' : undefined}
+              title={isCollapsed 
+                ? `${item.label}${isItemLocked ? ' (Feature locked: Store suspended)' : ''}`
+                : (isItemLocked ? 'Feature locked: Store is currently suspended / expired' : undefined)
+              }
               style={{ 
-                width: '100%', 
+                width: isCollapsed ? 44 : '100%', 
                 textDecoration: 'none',
                 opacity: isItemLocked ? 0.55 : 1,
-                cursor: isItemLocked ? 'not-allowed' : 'pointer'
+                cursor: isItemLocked ? 'not-allowed' : 'pointer',
+                position: 'relative'
               }}
             >
               <Icon size={18} color={item.isSuper ? '#a5b4fc' : undefined} />
-              <span style={{ flex: 1, color: item.isSuper && !isItemActive ? '#c7d2fe' : undefined, fontWeight: item.isSuper ? 600 : undefined }}>
-                {item.label}
-              </span>
-              {isItemLocked ? (
-                <span
-                  style={{
-                    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                    color: '#f87171',
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    padding: '2px 5px',
-                    borderRadius: 4,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 3
-                  }}
-                >
-                  <Lock size={10} /> Locked
+              {!isCollapsed && (
+                <span style={{ flex: 1, color: item.isSuper && !isItemActive ? '#c7d2fe' : undefined, fontWeight: item.isSuper ? 600 : undefined }}>
+                  {item.label}
                 </span>
+              )}
+              {isCollapsed ? (
+                isItemLocked && (
+                  <span 
+                    style={{
+                      position: 'absolute',
+                      top: 7,
+                      right: 7,
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      backgroundColor: '#ef4444',
+                      boxShadow: '0 0 4px rgba(0,0,0,0.4)'
+                    }}
+                  />
+                )
               ) : (
-                item.badge && (
+                isItemLocked ? (
                   <span
                     style={{
-                      backgroundColor: item.isSuper ? 'rgba(79, 70, 229, 0.4)' : 'rgba(239, 68, 68, 0.2)',
-                      color: item.isSuper ? '#c7d2fe' : '#f87171',
-                      fontSize: '0.68rem',
+                      backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                      color: '#f87171',
+                      fontSize: '0.65rem',
                       fontWeight: 700,
-                      padding: '2px 6px',
+                      padding: '2px 5px',
                       borderRadius: 4,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 3
                     }}
                   >
-                    {item.badge}
+                    <Lock size={10} /> Locked
                   </span>
+                ) : (
+                  item.badge && (
+                    <span
+                      style={{
+                        backgroundColor: item.isSuper ? 'rgba(79, 70, 229, 0.4)' : 'rgba(239, 68, 68, 0.2)',
+                        color: item.isSuper ? '#c7d2fe' : '#f87171',
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                      }}
+                    >
+                      {item.badge}
+                    </span>
+                  )
                 )
               )}
             </NavLink>
@@ -264,17 +362,52 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabCh
       </nav>
 
       {/* Sidebar Footer */}
-      {onLogout && (
-        <div className="sidebar-footer">
+      <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Toggle Collapse/Expand Button in Footer Rail */}
+        <button
+          type="button"
+          onClick={toggleCollapse}
+          title={isCollapsed ? "Expand sidebar (Ctrl+B)" : "Minimize sidebar (Ctrl+B)"}
+          aria-label={isCollapsed ? "Expand sidebar" : "Minimize sidebar"}
+          style={{
+            width: isCollapsed ? 44 : '100%',
+            height: 36,
+            margin: '0 auto',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: isCollapsed ? 'center' : 'flex-start',
+            gap: 10,
+            padding: isCollapsed ? 0 : '0 12px',
+            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: 'var(--radius-md)',
+            color: '#94a3b8',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'; }}
+        >
+          {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          {!isCollapsed && <span>Minimize Sidebar</span>}
+        </button>
+
+        {onLogout && (
           <button
             onClick={onLogout}
+            title={isCollapsed ? "Sign Out" : undefined}
+            aria-label="Sign Out"
             style={{
-              width: '100%',
+              width: isCollapsed ? 44 : '100%',
+              height: 36,
+              margin: '0 auto',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 8,
-              padding: '8px 12px',
+              padding: isCollapsed ? 0 : '8px 12px',
               backgroundColor: 'rgba(239, 68, 68, 0.12)',
               border: '1px solid rgba(239, 68, 68, 0.25)',
               borderRadius: 'var(--radius-md)',
@@ -286,10 +419,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab: _activeTab, onTabCh
             }}
           >
             <LogOut size={14} />
-            <span>Sign Out</span>
+            {!isCollapsed && <span>Sign Out</span>}
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </aside>
   );
 };
