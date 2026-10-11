@@ -61,11 +61,7 @@ async def _sync_location_to_items(primary_db, tenant_id: str, new_loc_id: str, n
     tenant_db = await get_tenant_db(tenant_id)
     default_loc = await primary_db.locations.find_one({"businessId": tenant_id, "isDefault": True})
     if not default_loc:
-        default_loc = await tenant_db.locations.find_one({"businessId": tenant_id, "isDefault": True})
-    if not default_loc:
         default_loc = await primary_db.locations.find_one({"businessId": tenant_id})
-    if not default_loc:
-        default_loc = await tenant_db.locations.find_one({"businessId": tenant_id})
     default_loc_id = str(default_loc["_id"]) if default_loc else "MAIN-01"
     default_loc_name = default_loc.get("name", "Main Flagship Counter") if default_loc else "Main Flagship Counter"
 
@@ -74,8 +70,6 @@ async def _sync_location_to_items(primary_db, tenant_id: str, new_loc_id: str, n
         b_queries.append({"businessId": ObjectId(tenant_id)})
 
     dbs = [tenant_db]
-    if primary_db.name != tenant_db.name:
-        dbs.append(primary_db)
 
     for target_db in dbs:
         cursor = target_db.items.find({"$or": b_queries})
@@ -422,8 +416,6 @@ async def sync_location_inventory(
     now = datetime.now(timezone.utc)
 
     dbs_to_sync = [tenant_db]
-    if primary_db.name != tenant_db.name:
-        dbs_to_sync.append(primary_db)
 
     for target_db in dbs_to_sync:
         cursor = target_db.items.find({"$or": b_queries})

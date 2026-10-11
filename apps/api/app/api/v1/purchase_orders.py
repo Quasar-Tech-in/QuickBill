@@ -275,8 +275,6 @@ async def create_purchase_order(
             ]
         }
         sup_doc = await db.parties.find_one(sup_query)
-        if not sup_doc:
-            sup_doc = await primary_db.parties.find_one({"$or": [{"_id": ObjectId(supplier_id) if ObjectId.is_valid(supplier_id) else supplier_id}, {"id": supplier_id}]})
         if sup_doc:
             supplier_name = sup_doc.get("name", "Supplier")
             supplier_phone = supplier_phone or sup_doc.get("phone")
@@ -314,8 +312,6 @@ async def create_purchase_order(
                 ]
             }
             itm_doc = await db.items.find_one(itm_query)
-            if not itm_doc:
-                itm_doc = await primary_db.items.find_one({"$or": [{"_id": ObjectId(item_id_str) if ObjectId.is_valid(item_id_str) else item_id_str}, {"publicItemId": item_id_str}, {"sku": item_id_str}]})
             if itm_doc:
                 item_name = itm_doc.get("name", "Item")
                 sku = sku or itm_doc.get("sku")
@@ -380,10 +376,6 @@ async def create_purchase_order(
     insert_res = await db.purchase_orders.insert_one(po_doc)
     po_doc["_id"] = insert_res.inserted_id
 
-    # Also backup to primary_db if distinct
-    if primary_db.name != db.name:
-        await primary_db.purchase_orders.insert_one(po_doc)
-
     return _to_po_response(po_doc)
 
 
@@ -403,9 +395,6 @@ async def get_purchase_order(
     }
 
     doc = await db.purchase_orders.find_one(query)
-    if not doc:
-        primary_db = get_database()
-        doc = await primary_db.purchase_orders.find_one(query)
 
     if not doc:
         raise HTTPException(status_code=404, detail="Purchase Order not found.")

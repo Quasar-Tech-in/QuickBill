@@ -29,7 +29,7 @@ PLAN_DEFAULTS = {
 class DatabaseConfig(BaseModel):
     isolation_mode: str = Field(default="SHARED", description="SHARED | DEDICATED_DATABASE | CUSTOM_CLUSTER")
     mongodb_uri: Optional[str] = None
-    database_name: str = "quickbill_db"
+    database_name: str = "quickbill_main_db"
 
 class SubscriptionRenewalHistoryItem(BaseModel):
     date: Optional[str] = None
@@ -96,7 +96,7 @@ class TenantResponse(BaseModel):
 
 class TestConnectionRequest(BaseModel):
     mongodb_uri: str
-    database_name: Optional[str] = "quickbill_db"
+    database_name: Optional[str] = "quickbill_main_db"
 
 class SubscriptionRenewRequest(BaseModel):
     extend_days: Optional[int] = None
@@ -288,7 +288,7 @@ def build_tenant_response(t: dict, stats_override: Optional[dict] = None) -> Ten
     db_config_model = DatabaseConfig(
         isolation_mode=db_cfg.get("isolationMode", db_cfg.get("isolation_mode", "SHARED")),
         mongodb_uri=db_cfg.get("mongodbUri", db_cfg.get("mongodb_uri", settings.MONGODB_URI)),
-        database_name=db_cfg.get("databaseName", db_cfg.get("database_name", "quickbill_db"))
+        database_name=db_cfg.get("databaseName", db_cfg.get("database_name", "quickbill_main_db"))
     )
 
     stats_doc = stats_override or t.get("stats") or {
@@ -398,7 +398,7 @@ async def test_db_connection(req: TestConnectionRequest, user: TokenPayload = De
     client = None
     try:
         client = AsyncIOMotorClient(clean_uri, serverSelectionTimeoutMS=4000)
-        target_db = req.database_name.strip() if req.database_name and req.database_name.strip() else "quickbill_db"
+        target_db = req.database_name.strip() if req.database_name and req.database_name.strip() else "quickbill_main_db"
         db = client[target_db]
         start_time = datetime.now()
         await db.command("ping")
@@ -708,7 +708,7 @@ async def create_tenant(req: TenantCreateRequest, user: TokenPayload = Depends(g
         "databaseConfig": {
             "isolationMode": db_mode,
             "mongodbUri": custom_uri if db_mode == "CUSTOM_CLUSTER" else settings.MONGODB_URI,
-            "databaseName": target_db_name if db_mode != "SHARED" else "quickbill_db"
+            "databaseName": target_db_name if db_mode != "SHARED" else settings.DEFAULT_TENANT_DATABASE_NAME
         },
         "subscription": sub_doc,
         "stats": {

@@ -39,6 +39,10 @@ async def init_primary_superadmin_database(db: AsyncIOMotorDatabase) -> None:
         await db.subscriptions.create_index("businessId")
         await db.subscriptions.create_index("status")
 
+        # locations collection indexes (allowed in Primary DB)
+        await db.locations.create_index([("businessId", 1), ("code", 1)])
+        await db.locations.create_index("businessId")
+
         print("[DB Init] Primary DB collections and indexes verified.")
     except Exception as e:
         print(f"[DB Init] Note on creating indexes: {e}")

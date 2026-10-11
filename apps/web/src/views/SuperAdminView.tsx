@@ -103,7 +103,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     billingCycle: 'ANNUAL' as BillingCycle,
     isolationMode: 'SHARED' as 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER',
     mongodbUri: '',
-    databaseName: 'quickbill_db',
+    databaseName: 'quickbill_main_db',
   });
   const [isTestingNewDb, setIsTestingNewDb] = useState(false);
   const [newDbTestResult, setNewDbTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
@@ -131,7 +131,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     plan: 'PROFESSIONAL' as PlanTier,
     isolationMode: 'SHARED' as 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER',
     mongodbUri: '',
-    databaseName: 'quickbill_db',
+    databaseName: 'quickbill_main_db',
   });
   const [isTestingEditDb, setIsTestingEditDb] = useState(false);
   const [editDbTestResult, setEditDbTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
@@ -236,7 +236,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     }
     setIsTestingEditDb(true);
     setEditDbTestResult(null);
-    const targetDb = editTenantForm.databaseName.trim() || 'quickbill_db';
+    const targetDb = editTenantForm.databaseName.trim() || 'quickbill_main_db';
     const res = await store.testMongoConnection(uri, targetDb);
     setIsTestingEditDb(false);
     setEditDbTestResult({
@@ -253,7 +253,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
 
     const slug = newTenant.slug.trim() || newTenant.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const dbName = newTenant.isolationMode === 'SHARED' 
-      ? 'quickbill_db' 
+      ? 'quickbill_main_db' 
       : (newTenant.databaseName.trim() || `quickbill_${slug.replace(/-/g, '_')}_db`);
 
     if (newTenant.isolationMode === 'CUSTOM_CLUSTER') {
@@ -308,7 +308,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       billingCycle: 'ANNUAL',
       isolationMode: 'SHARED',
       mongodbUri: '',
-      databaseName: 'quickbill_db',
+      databaseName: 'quickbill_main_db',
     });
     setNewDbTestResult(null);
   };
@@ -406,7 +406,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       plan: t.plan,
       isolationMode: t.databaseConfig?.isolationMode || 'SHARED',
       mongodbUri: t.databaseConfig?.mongodbUri || '',
-      databaseName: t.databaseConfig?.databaseName || 'quickbill_db',
+      databaseName: t.databaseConfig?.databaseName || 'quickbill_main_db',
     });
     setInitialEditTenantSnapshot(JSON.stringify({
       name: t.name.trim(),
@@ -418,7 +418,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       plan: t.plan,
       isolationMode: t.databaseConfig?.isolationMode || 'SHARED',
       mongodbUri: (t.databaseConfig?.mongodbUri || '').trim(),
-      databaseName: (t.databaseConfig?.databaseName || 'quickbill_db').trim(),
+      databaseName: (t.databaseConfig?.databaseName || 'quickbill_main_db').trim(),
     }));
     setEditDbTestResult(null);
     setIsEditTenantModalOpen(true);
@@ -477,7 +477,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       databaseConfig: {
         isolationMode: editTenantForm.isolationMode,
         mongodbUri: editTenantForm.isolationMode === 'CUSTOM_CLUSTER' ? editTenantForm.mongodbUri.trim() : undefined,
-        databaseName: editTenantForm.isolationMode === 'SHARED' ? 'quickbill_db' : (editTenantForm.databaseName.trim() || 'quickbill_db'),
+        databaseName: editTenantForm.isolationMode === 'SHARED' ? 'quickbill_main_db' : (editTenantForm.databaseName.trim() || 'quickbill_main_db'),
       }
     });
 
@@ -1720,7 +1720,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                         setNewTenant({
                           ...newTenant,
                           isolationMode: mode,
-                          databaseName: mode === 'SHARED' ? 'quickbill_db' : (newTenant.databaseName || `quickbill_${(newTenant.slug || 'store').replace(/-/g, '_')}_db`)
+                          databaseName: mode === 'SHARED' ? 'quickbill_main_db' : (newTenant.databaseName || `quickbill_${(newTenant.slug || 'store').replace(/-/g, '_')}_db`)
                         });
                         setNewDbTestResult(null);
                       }}
@@ -1733,7 +1733,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
 
                   {newTenant.isolationMode === 'SHARED' && (
                     <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: 'var(--neutral-50)', border: '1px solid var(--neutral-200)', marginTop: 8, fontSize: '0.78rem', color: 'var(--neutral-600)' }}>
-                      ℹ️ Store records will be securely isolated via <code>businessId</code> namespace inside the primary shared database (<code>quickbill_db</code>).
+                      ℹ️ Store records will be securely isolated via <code>businessId</code> namespace inside the shared tenant database (<code>quickbill_main_db</code>). Primary DB strictly holds platform directory entities.
                     </div>
                   )}
 
@@ -2090,7 +2090,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                       setEditTenantForm({
                         ...editTenantForm,
                         isolationMode: mode,
-                        databaseName: mode === 'SHARED' ? 'quickbill_db' : (editTenantForm.databaseName || `quickbill_${selectedTenant.slug.replace(/-/g, '_')}_db`)
+                        databaseName: mode === 'SHARED' ? 'quickbill_main_db' : (editTenantForm.databaseName || `quickbill_${selectedTenant.slug.replace(/-/g, '_')}_db`)
                       });
                       setEditDbTestResult(null);
                     }}

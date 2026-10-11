@@ -1119,7 +1119,7 @@ class StoreService {
           databaseConfig: {
             isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
             mongodbUri: t.database_config?.mongodb_uri || t.databaseConfig?.mongodbUri,
-            databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_db',
+            databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_main_db',
           },
           subscription: {
             planId: t.subscription?.plan_id || t.subscription?.planId || 'PROFESSIONAL',
@@ -1185,7 +1185,7 @@ class StoreService {
           databaseConfig: {
             isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
             mongodbUri: t.database_config?.mongodb_uri || t.databaseConfig?.mongodbUri,
-            databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_db',
+            databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_main_db',
           },
           subscription: {
             planId: t.subscription?.plan_id || t.subscription?.planId || 'PROFESSIONAL',

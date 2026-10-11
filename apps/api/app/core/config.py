@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # MongoDB
     MONGODB_URI: str = "mongodb://admin:secretpassword@localhost:27017/quickbill_db?authSource=admin"
     DATABASE_NAME: str = "quickbill_db"
+    DEFAULT_TENANT_DATABASE_NAME: str = "quickbill_main_db"
     
     # JWT Security
     JWT_SECRET: str = "development_jwt_secret_key_32_characters_minimum"

@@ -62,13 +62,15 @@ class MultiTenantDatabaseManager:
         tenant = await primary.tenants.find_one(tenant_filter)
         
         if not tenant:
-            # If tenant not found or default store, return primary DB
-            return primary
+            # If tenant not found or default store, return default tenant operational DB
+            return self.primary_client[settings.DEFAULT_TENANT_DATABASE_NAME]
             
         # 2. Dynamic Database Resolution based on onboarding database_config
         db_config = tenant.get("databaseConfig", {})
         isolation_mode = db_config.get("isolationMode", "SHARED")
-        target_db_name = db_config.get("databaseName", settings.DATABASE_NAME)
+        target_db_name = db_config.get("databaseName")
+        if not target_db_name or target_db_name == settings.DATABASE_NAME:
+            target_db_name = settings.DEFAULT_TENANT_DATABASE_NAME
         custom_uri = db_config.get("mongodbUri")
 
         if isolation_mode == "CUSTOM_CLUSTER" and custom_uri:
@@ -78,7 +80,7 @@ class MultiTenantDatabaseManager:
         elif isolation_mode == "DEDICATED_DATABASE" and target_db_name:
             return self.primary_client[target_db_name]
         else:
-            return self.primary_client[target_db_name or settings.DATABASE_NAME]
+            return self.primary_client[target_db_name]
 
 db_manager = MultiTenantDatabaseManager()
 
