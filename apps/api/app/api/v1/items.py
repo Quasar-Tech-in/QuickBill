@@ -96,6 +96,18 @@ async def create_item(
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
+    # Validate Barcode uniqueness within tenant if provided
+    if payload.barcode and payload.barcode.strip():
+        clean_barcode = payload.barcode.strip()
+        b_filter = {"$in": [business_id, ObjectId(business_id)]} if ObjectId.is_valid(business_id) else business_id
+        existing_barcode_item = await db.items.find_one({"businessId": b_filter, "barcode": clean_barcode})
+        if existing_barcode_item:
+            dup_name = existing_barcode_item.get("name", "Unknown Item")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Barcode '{clean_barcode}' is already assigned to product '{dup_name}'."
+            )
+
     public_id = f"itm_{secrets.token_hex(6)}"
     now = datetime.now(timezone.utc)
 
@@ -260,6 +272,24 @@ async def update_item(
 
     # Disallow direct stock alterations in update_item to preserve audit ledger integrity
     update_data.pop("currentStock", None)
+
+    # Validate Barcode uniqueness within tenant if barcode is being updated
+    if "barcode" in update_data and update_data["barcode"]:
+        clean_barcode = str(update_data["barcode"]).strip()
+        if clean_barcode:
+            b_filter = {"$in": [business_id, ObjectId(business_id)]} if ObjectId.is_valid(business_id) else business_id
+            target_oid = ObjectId(item_id) if ObjectId.is_valid(item_id) else item_id
+            existing_barcode_item = await db.items.find_one({
+                "businessId": b_filter,
+                "barcode": clean_barcode,
+                "_id": {"$ne": target_oid}
+            })
+            if existing_barcode_item:
+                dup_name = existing_barcode_item.get("name", "Unknown Item")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Barcode '{clean_barcode}' is already assigned to product '{dup_name}'."
+                )
 
     # Float conversion for monetary / numeric fields
     for float_field in ["purchasePrice", "averageCostPrice", "salePrice", "mrp", "taxRate", "minStockAlert", "discountValue"]:

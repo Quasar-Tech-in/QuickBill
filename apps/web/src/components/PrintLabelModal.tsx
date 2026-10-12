@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Printer, X, Tag, Gem, Download, Eye, QrCode, FileText } from 'lucide-react';
-import { apiClient } from '../services/store';
+import { apiClient, store } from '../services/store';
 import { BarcodeRenderer, BarcodeRendererRef } from './BarcodeRenderer';
 
 interface PrintLabelModalProps {
@@ -14,6 +14,7 @@ interface PrintLabelModalProps {
   publicItemId?: string;
   defaultStockCount?: number;
   initialCodeType?: 'BARCODE' | 'QR';
+  storeName?: string;
 }
 
 export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
@@ -27,7 +28,12 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   publicItemId = 'ITM-1001',
   defaultStockCount = 10,
   initialCodeType = 'BARCODE',
+  storeName: propStoreName,
 }) => {
+  const resolveInitialStoreName = () => {
+    return (propStoreName || store.getActiveTenant()?.name || store.getCurrentUser()?.tenantName || store.getActiveLocation()?.name || 'QuickBill Store').trim();
+  };
+
   const [codeType, setCodeType] = useState<'BARCODE' | 'QR'>(initialCodeType);
   const [style, setStyle] = useState<'STANDARD' | 'JEWELRY_STRING_TAG' | 'SHELF' | 'SHIPPING'>('STANDARD');
   const [paperSize, setPaperSize] = useState<'THERMAL_50x30' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40' | 'SHIPPING_4x6'>('THERMAL_50x30');
@@ -36,8 +42,15 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   const [showMrp, setShowMrp] = useState(true);
   const [showSku, setShowSku] = useState(true);
   const [showStoreName, setShowStoreName] = useState(true);
+  const [storeName, setStoreName] = useState<string>(resolveInitialStoreName);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDownloadingImage, setIsDownloadingImage] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setStoreName(resolveInitialStoreName());
+    }
+  }, [isOpen, propStoreName]);
 
   const barcodeRendererRef = useRef<BarcodeRendererRef | null>(null);
 
@@ -101,7 +114,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         showMrp,
         showSku,
         showStoreName,
-        storeName: 'QuickBill Store',
+        storeName: storeName || 'Store',
       };
 
       const response = await apiClient.post('/labels/custom-pdf', payload, {
@@ -335,7 +348,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 >
                   {/* Left Wing (Store + Price & Title) */}
                   <div style={{ flex: '2', paddingRight: 8 }}>
-                    {showStoreName && <div style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--neutral-800)' }}>QuickBill Store</div>}
+                    {showStoreName && <div style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--neutral-800)' }}>{storeName || 'Store'}</div>}
                     <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--neutral-700)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{itemName}</div>
                     {showPrice && <div style={{ fontSize: '0.85rem', fontWeight: 900, color: 'var(--primary-700)' }}>₹{itemPrice.toFixed(2)}</div>}
                   </div>
@@ -394,7 +407,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     textAlign: 'center'
                   }}
                 >
-                  {showStoreName && <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--neutral-900)' }}>QuickBill Store</div>}
+                  {showStoreName && <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--neutral-900)' }}>{storeName || 'Store'}</div>}
                   <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--neutral-800)', margin: '3px 0', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {itemName}
                   </div>
@@ -621,15 +634,34 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   <span>Show SKU / Barcode ID</span>
                 </label>
 
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={showStoreName}
-                    onChange={(e) => setShowStoreName(e.target.checked)}
-                    style={{ width: 15, height: 15, accentColor: 'var(--primary-600)' }}
-                  />
-                  <span>Show Store Header</span>
-                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showStoreName}
+                      onChange={(e) => setShowStoreName(e.target.checked)}
+                      style={{ width: 15, height: 15, accentColor: 'var(--primary-600)' }}
+                    />
+                    <span>Show Store Header</span>
+                  </label>
+                  {showStoreName && (
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={storeName}
+                      onChange={(e) => setStoreName(e.target.value)}
+                      placeholder="Store / Business Header Name"
+                      style={{
+                        fontSize: '0.74rem',
+                        height: 26,
+                        padding: '2px 8px',
+                        marginTop: 2,
+                        maxWidth: 220
+                      }}
+                      title="Edit store / business name header printed on labels"
+                    />
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -639,7 +671,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         {/* Printable Printable Container for Direct Browser Window Printing */}
         <div className="only-print" style={{ display: 'none', padding: 20 }}>
           <div style={{ textAlign: 'center', border: '1px solid #000', padding: 10, width: 220, margin: '0 auto' }}>
-            {showStoreName && <div style={{ fontSize: 10, fontWeight: 'bold' }}>QuickBill Store</div>}
+            {showStoreName && <div style={{ fontSize: 10, fontWeight: 'bold' }}>{storeName || 'Store'}</div>}
             <div style={{ fontSize: 12, fontWeight: 'bold', margin: '4px 0' }}>{itemName}</div>
             <div style={{ margin: '6px 0', display: 'flex', justifyContent: 'center' }}>
               <BarcodeRenderer value={activePayload} codeType={codeType} height={codeType === 'BARCODE' ? 35 : 70} />

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, X, Zap, CheckCircle2, QrCode, Scan, AlertCircle } from 'lucide-react';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { Camera, X, Zap, CheckCircle2, QrCode, Scan, Radio, HelpCircle, Laptop, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Html5Qrcode, Html5QrcodeSupportedFormats, CameraDevice } from 'html5-qrcode';
 
 interface WebcamScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onScanSuccess: (barcodeData: string) => void;
+  onScanSuccess: (barcodeData: string, isContinuous?: boolean) => void;
   initialStandbyMode?: boolean;
   title?: string;
 }
@@ -15,21 +15,32 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
   onClose,
   onScanSuccess,
   initialStandbyMode = false,
-  title = 'Barcode & QR Camera Scanner',
+  title = 'Barcode & QR Scanner',
 }) => {
+  const [activeTab, setActiveTab] = useState<'CAMERA' | 'GUN'>('CAMERA');
   const [isStandby, setIsStandby] = useState(initialStandbyMode);
   const [isScanned, setIsScanned] = useState(false);
   const [lastCode, setLastCode] = useState<string | null>(null);
+  const [recentScans, setRecentScans] = useState<string[]>([]);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameras, setCameras] = useState<CameraDevice[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState<string>('');
+  const [testGunInput, setTestGunInput] = useState<string>('');
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isStandbyRef = useRef<boolean>(initialStandbyMode);
   const scannerContainerId = 'webcam-scanner-viewport';
   const lastScannedTimeRef = useRef<number>(0);
   const usbBufferRef = useRef<string>('');
   const lastKeyTimeRef = useRef<number>(0);
+  const testInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Audio feedback helper
+  // Keep isStandbyRef synchronized with state to prevent stale closure in scanner callbacks
+  useEffect(() => {
+    isStandbyRef.current = isStandby;
+  }, [isStandby]);
+
+  // Audio feedback confirmation beep (880Hz pleasant chirp)
   const playBeep = () => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -39,7 +50,7 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
       const gain = ctx.createGain();
       osc.type = 'sine';
       osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.setValueAtTime(0.14, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
       osc.connect(gain);
       gain.connect(ctx.destination);
@@ -48,40 +59,65 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
     } catch (_) {}
   };
 
-  const handleSuccessfulScan = (code: string) => {
+  const handleSuccessfulScan = (code: string, isHardwareTrigger = false) => {
+    const clean = code.trim();
+    if (!clean) return;
+
     const now = Date.now();
-    // Debounce duplicate scans within 1.2 seconds
-    if (now - lastScannedTimeRef.current < 1200 && code === lastCode) {
+    // For continuous camera video stream, throttle duplicate frame detection to 750ms.
+    // For intentional hardware gun triggers or manual clicks, allow immediate re-scans!
+    if (!isHardwareTrigger && now - lastScannedTimeRef.current < 750 && clean === lastCode) {
       return;
     }
     lastScannedTimeRef.current = now;
 
     playBeep();
     setIsScanned(true);
-    setLastCode(code);
-    onScanSuccess(code);
+    setLastCode(clean);
+    setRecentScans((prev) => [clean, ...prev.slice(0, 4)]);
+
+    const continuousActive = isStandbyRef.current;
+    onScanSuccess(clean, continuousActive);
 
     setTimeout(() => {
       setIsScanned(false);
-      if (!isStandby) {
+      // Close ONLY if NOT in continuous / multi-capture mode
+      if (!isStandbyRef.current) {
         onClose();
       }
-    }, 1100);
+    }, 700);
   };
 
-  // 1. Initialize Html5Qrcode camera scanner
+  // 1. Detect available cameras
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || activeTab !== 'CAMERA') return;
+
+    Html5Qrcode.getCameras()
+      .then((devices) => {
+        if (devices && devices.length > 0) {
+          setCameras(devices);
+          if (!selectedCameraId) {
+            // Prefer back/environment camera if found
+            const backCam = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear'));
+            setSelectedCameraId(backCam ? backCam.id : devices[0].id);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('Unable to query camera devices:', err);
+      });
+  }, [isOpen, activeTab]);
+
+  // 2. Start / stop Html5Qrcode camera stream
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'CAMERA') return;
 
     setIsScanned(false);
-    setLastCode(null);
     setCameraError(null);
-    setIsCameraActive(false);
 
     let html5QrCode: Html5Qrcode | null = null;
     let isCancelled = false;
 
-    // Small delay to ensure container element is mounted
     const timer = setTimeout(() => {
       const container = document.getElementById(scannerContainerId);
       if (!container || isCancelled) return;
@@ -101,39 +137,37 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
         });
         scannerRef.current = html5QrCode;
 
+        const cameraConfig = selectedCameraId 
+          ? { deviceId: { exact: selectedCameraId } }
+          : { facingMode: 'environment' };
+
         html5QrCode
           .start(
-            { facingMode: 'environment' },
+            cameraConfig,
             {
-              fps: 15,
-              qrbox: { width: 240, height: 240 },
-              aspectRatio: 1.333,
+              fps: 20,
+              qrbox: { width: 250, height: 220 },
+              aspectRatio: 1.6,
             },
             (decodedText) => {
               if (decodedText) {
-                handleSuccessfulScan(decodedText.trim());
+                handleSuccessfulScan(decodedText);
               }
             },
-            () => {
-              // Ignore frequent scan misses
-            }
+            () => {}
           )
-          .then(() => {
-            if (!isCancelled) {
-              setIsCameraActive(true);
-            }
-          })
           .catch((err) => {
-            console.warn('Html5Qrcode start error:', err);
+            console.warn('Camera start error:', err);
             if (!isCancelled) {
-              setCameraError('Camera access denied or unavailable. You can use a USB scanner or quick simulation buttons.');
+              setCameraError('Camera access unavailable or denied. Switch to Hardware Gun mode or connect a USB scanner.');
             }
           });
       } catch (err: any) {
-        console.warn('Scanner init error:', err);
-        setCameraError(err?.message || 'Failed to initialize scanner');
+        if (!isCancelled) {
+          setCameraError(err?.message || 'Failed to start camera');
+        }
       }
-    }, 150);
+    }, 120);
 
     return () => {
       isCancelled = true;
@@ -154,16 +188,16 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
         }
       }
     };
-  }, [isOpen]);
+  }, [isOpen, activeTab, selectedCameraId]);
 
-  // 2. Listen for USB / Bluetooth handheld hardware barcode gun keystrokes
+  // 3. Listen for USB / Bluetooth handheld hardware barcode gun keystrokes globally in modal
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const now = Date.now();
-      // If typing speed is rapid (< 60ms between keys), it's likely a hardware scanner
-      if (now - lastKeyTimeRef.current > 100) {
+      // Physical scanner typing speed is superhuman (< 60ms between consecutive keystrokes)
+      if (now - lastKeyTimeRef.current > 90) {
         usbBufferRef.current = '';
       }
       lastKeyTimeRef.current = now;
@@ -173,7 +207,7 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
         if (captured.length >= 2) {
           e.preventDefault();
           usbBufferRef.current = '';
-          handleSuccessfulScan(captured);
+          handleSuccessfulScan(captured, true);
         }
       } else if (e.key.length === 1) {
         usbBufferRef.current += e.key;
@@ -184,98 +218,558 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, isStandby, lastCode]);
 
+  // Focus test input when opening GUN tab
+  useEffect(() => {
+    if (activeTab === 'GUN' && testInputRef.current) {
+      testInputRef.current.focus();
+    }
+  }, [activeTab]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div 
+      className="modal-overlay" 
+      style={{ 
+        zIndex: 10000, 
+        backgroundColor: 'rgba(2, 6, 23, 0.82)',
+        backdropFilter: 'blur(8px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16
+      }}
+      onClick={onClose}
+    >
       <div 
-        className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+        className="scanner-hud-modal" 
         onClick={(e) => e.stopPropagation()}
+        style={{
+          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 35px rgba(99, 102, 241, 0.25)',
+        }}
       >
-        {/* Header Bar */}
-        <div className="flex items-center justify-between px-5 py-4 bg-slate-900/90 border-b border-slate-800">
-          <div className="flex items-center space-x-2">
-            <Scan className="w-5 h-5 text-indigo-400" />
-            <h3 className="text-base font-bold text-white">{title}</h3>
+        {/* Top HUD Header */}
+        <div style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          background: 'rgba(15, 23, 42, 0.6)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg, #4f46e5 0%, #38bdf8 100%)',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 14px rgba(79, 70, 229, 0.5)'
+            }}>
+              <Scan size={20} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: '0.98rem', fontWeight: 800, color: '#ffffff', margin: 0 }}>
+                {title}
+              </h3>
+              <p style={{ fontSize: '0.73rem', color: '#94a3b8', margin: '2px 0 0 0' }}>
+                Instant capture via Camera or 2D/1D Hardware Scanner Gun
+              </p>
+            </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
+              type="button"
               onClick={() => setIsStandby(!isStandby)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-colors ${
-                isStandby ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-              title="Continuous standby scanning mode"
+              style={{
+                padding: '6px 12px',
+                borderRadius: 8,
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                transition: 'all 0.15s ease',
+                backgroundColor: isStandby ? '#4f46e5' : 'rgba(255, 255, 255, 0.07)',
+                color: isStandby ? '#ffffff' : '#94a3b8',
+                boxShadow: isStandby ? '0 0 12px rgba(79, 70, 229, 0.5)' : 'none'
+              }}
+              title="Continuous scanning without closing after one code"
             >
-              <Zap className="w-3.5 h-3.5" />
+              <Zap size={13} />
               <span>{isStandby ? 'Continuous Mode ON' : 'Single Capture'}</span>
             </button>
 
+            {isStandby && recentScans.length > 0 && (
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  backgroundColor: '#10b981',
+                  color: '#ffffff',
+                  boxShadow: '0 0 12px rgba(16, 185, 129, 0.4)'
+                }}
+              >
+                <CheckCircle2 size={13} />
+                <span>Done ({recentScans.length})</span>
+              </button>
+            )}
+
             <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                background: 'rgba(255, 255, 255, 0.07)',
+                border: 'none',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
             >
-              <X className="w-5 h-5" />
+              <X size={16} />
             </button>
           </div>
         </div>
 
-        {/* Viewport Box */}
-        <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden">
-          {cameraError ? (
-            <div className="p-6 text-center text-slate-400 space-y-2">
-              <Camera className="w-10 h-10 mx-auto text-slate-600 mb-2" />
-              <p className="text-xs text-amber-400 font-medium">{cameraError}</p>
-              <p className="text-[11px] text-slate-500">USB hardware barcode guns still work automatically.</p>
-            </div>
-          ) : (
-            <div 
-              id={scannerContainerId} 
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
+        {/* Mode Switcher Tabs */}
+        <div style={{
+          padding: '12px 20px',
+          backgroundColor: 'rgba(15, 23, 42, 0.4)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <div style={{
+            display: 'inline-flex',
+            padding: 3,
+            backgroundColor: 'rgba(2, 6, 23, 0.6)',
+            borderRadius: 12,
+            border: '1px solid rgba(255, 255, 255, 0.08)'
+          }}>
+            <button
+              type="button"
+              className={`scanner-mode-tab ${activeTab === 'CAMERA' ? 'active' : ''}`}
+              onClick={() => setActiveTab('CAMERA')}
+            >
+              <Camera size={14} />
+              <span>Camera Viewfinder</span>
+            </button>
+
+            <button
+              type="button"
+              className={`scanner-mode-tab ${activeTab === 'GUN' ? 'active' : ''}`}
+              onClick={() => setActiveTab('GUN')}
+            >
+              <Radio size={14} />
+              <span>Hardware Scanner Gun</span>
+            </button>
+          </div>
+
+          {activeTab === 'CAMERA' && cameras.length > 1 && (
+            <select
+              value={selectedCameraId}
+              onChange={(e) => setSelectedCameraId(e.target.value)}
+              style={{
+                backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                color: '#e2e8f0',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                borderRadius: 8,
+                padding: '5px 10px',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                outline: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              {cameras.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label || `Camera ${c.id.substring(0, 6)}`}
+                </option>
+              ))}
+            </select>
           )}
 
-          {/* Visual Scan Success Overlay Banner */}
-          {isScanned && (
-            <div className="absolute inset-0 bg-emerald-950/60 flex items-center justify-center backdrop-blur-[2px] transition-all z-20">
-              <div className="bg-emerald-600 text-white px-5 py-2.5 rounded-full flex items-center space-x-2.5 shadow-2xl animate-bounce">
-                <CheckCircle2 className="w-5 h-5" />
-                <span className="text-sm font-bold tracking-wide">{lastCode}</span>
+          {activeTab === 'GUN' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: '#10b981', fontWeight: 700 }}>
+              <div className="scanner-pulse-dot" />
+              <span>Gun Listener Active</span>
+            </div>
+          )}
+        </div>
+
+        {/* Tab Body Content */}
+        <div style={{ padding: 20 }}>
+          {activeTab === 'CAMERA' ? (
+            /* ================= MODE 1: CAMERA VIEWFINDER ================= */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="scanner-viewport-wrapper">
+                {cameraError ? (
+                  <div style={{ padding: 24, textAlign: 'center', maxWidth: 380 }}>
+                    <div style={{
+                      width: 50,
+                      height: 50,
+                      borderRadius: 14,
+                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                      color: '#ef4444',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto 12px auto'
+                    }}>
+                      <Camera size={26} />
+                    </div>
+                    <div style={{ fontSize: '0.86rem', fontWeight: 700, color: '#f87171' }}>
+                      Camera Access Unavailable
+                    </div>
+                    <p style={{ fontSize: '0.74rem', color: '#94a3b8', margin: '6px 0 14px 0', lineHeight: 1.4 }}>
+                      {cameraError}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('GUN')}
+                      style={{
+                        padding: '7px 14px',
+                        borderRadius: 8,
+                        backgroundColor: '#4f46e5',
+                        color: '#ffffff',
+                        border: 'none',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Radio size={14} />
+                      <span>Switch to Hardware Gun Mode</span>
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Raw Video Target Mounted by Html5Qrcode */}
+                    <div id={scannerContainerId} />
+
+                    {/* Cyberpunk HUD Reticle & Corner Brackets */}
+                    <div className="scanner-reticle-box">
+                      <div className="scanner-corner tl" />
+                      <div className="scanner-corner tr" />
+                      <div className="scanner-corner bl" />
+                      <div className="scanner-corner br" />
+
+                      {/* Animated Laser Line */}
+                      <div className="scanner-laser-sweep" />
+                    </div>
+                  </>
+                )}
+
+                {/* Success Detected Overlay Banner */}
+                {isScanned && (
+                  <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    backgroundColor: 'rgba(6, 78, 59, 0.75)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 30,
+                    transition: 'all 0.2s ease'
+                  }}>
+                    <div style={{
+                      backgroundColor: '#059669',
+                      color: '#ffffff',
+                      padding: '10px 22px',
+                      borderRadius: 9999,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      boxShadow: '0 10px 25px rgba(5, 150, 105, 0.5)',
+                      animation: 'bounce 0.6s infinite alternate'
+                    }}>
+                      <CheckCircle2 size={22} />
+                      <span style={{ fontSize: '0.95rem', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
+                        {lastCode}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                fontSize: '0.73rem',
+                color: '#94a3b8'
+              }}>
+                <span>📷 Position QR Code or Barcode flat within the laser reticle</span>
+                <span style={{ color: '#38bdf8', fontWeight: 600 }}>Auto-Focus 15 FPS</span>
+              </div>
+
+              {isStandby && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '8px 12px',
+                  backgroundColor: 'rgba(2, 6, 23, 0.75)',
+                  borderRadius: 10,
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  fontSize: '0.73rem'
+                }}>
+                  <span style={{ color: '#10b981', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <CheckCircle2 size={13} />
+                    <span>Multi-Capture Log ({recentScans.length}):</span>
+                  </span>
+                  {recentScans.length === 0 ? (
+                    <span style={{ color: '#64748b', fontStyle: 'italic' }}>Point camera at items in sequence...</span>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', flex: 1 }}>
+                      {recentScans.map((scannedItem, idx) => (
+                        <span
+                          key={`${scannedItem}-${idx}`}
+                          style={{
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            backgroundColor: idx === 0 ? 'rgba(79, 70, 229, 0.45)' : 'rgba(255, 255, 255, 0.06)',
+                            color: idx === 0 ? '#ffffff' : '#94a3b8',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '0.72rem',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          {scannedItem}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ================= MODE 2: HARDWARE SCANNER GUN ================= */
+            <div className="scanner-gun-bench">
+              {/* Top Status Card */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+                padding: '14px 16px',
+                borderRadius: 12,
+                background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.12) 0%, rgba(16, 185, 129, 0.12) 100%)',
+                border: '1px solid rgba(99, 102, 241, 0.25)'
+              }}>
+                <div style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 10,
+                  backgroundColor: '#4f46e5',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  boxShadow: '0 0 16px rgba(79, 70, 229, 0.5)'
+                }}>
+                  <Laptop size={22} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#ffffff' }}>
+                    Hardware 2D/1D Scanner Gun Ready
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: '#cbd5e1', marginTop: 2 }}>
+                    Standard USB, 2.4GHz Wireless Dongle, or Bluetooth guns are recognized automatically without any driver setup.
+                  </div>
+                </div>
+              </div>
+
+              {/* Step-by-Step Instructions */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  How to Use Your Barcode Gun:
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                  <div style={{ padding: 12, borderRadius: 10, backgroundColor: 'rgba(2, 6, 23, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#38bdf8' }}>1. Plug & Play</div>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
+                      Plug your gun's USB cable or wireless dongle into your PC or Mac. It acts like a fast keyboard.
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 12, borderRadius: 10, backgroundColor: 'rgba(2, 6, 23, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#818cf8' }}>2. Point & Trigger</div>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
+                      Point the gun's red aiming light at any product barcode or 2D QR code and pull the trigger.
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 12, borderRadius: 10, backgroundColor: 'rgba(2, 6, 23, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#34d399' }}>3. Auto Ingest</div>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
+                      QuickBill instantly catches the code, beeps, and verifies if the product already exists in your inventory.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Live Gun Trigger Test Box */}
+              <div style={{
+                padding: '14px 16px',
+                borderRadius: 12,
+                backgroundColor: 'rgba(2, 6, 23, 0.75)',
+                border: '1.5px dashed rgba(99, 102, 241, 0.35)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label style={{ fontSize: '0.74rem', fontWeight: 700, color: '#cbd5e1' }}>
+                    Live Gun Trigger Test Bench:
+                  </label>
+                  <span style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 700 }}>
+                    ⚡ Focus & Trigger Test
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    ref={testInputRef}
+                    type="text"
+                    value={testGunInput}
+                    onChange={(e) => setTestGunInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && testGunInput.trim()) {
+                        e.preventDefault();
+                        handleSuccessfulScan(testGunInput.trim(), true);
+                        setTestGunInput('');
+                      }
+                    }}
+                    placeholder="Pull scanner gun trigger now to test..."
+                    style={{
+                      flex: 1,
+                      backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      borderRadius: 8,
+                      padding: '8px 12px',
+                      color: '#ffffff',
+                      fontSize: '0.85rem',
+                      fontFamily: 'var(--font-mono)',
+                      outline: 'none'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (testGunInput.trim()) {
+                        handleSuccessfulScan(testGunInput.trim(), true);
+                        setTestGunInput('');
+                      }
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: 8,
+                      backgroundColor: '#4f46e5',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Accept
+                  </button>
+                </div>
               </div>
             </div>
           )}
-        </div>
 
-        {/* Footer & Simulation Quick Actions */}
-        <div className="p-4 bg-slate-900 border-t border-slate-800 space-y-3">
-          <div className="flex items-center justify-between text-[11px] text-slate-400">
-            <span>📷 Align 1D Barcode or QR Code within the viewfinder</span>
-            <span className="text-indigo-400 font-medium">⚡ USB Gun Ready</span>
-          </div>
+          {/* Quick Simulation Bar */}
+          <div style={{
+            marginTop: 16,
+            paddingTop: 14,
+            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 8
+          }}>
+            <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
+              Quick Test Simulation:
+            </span>
 
-          <div className="flex flex-wrap items-center justify-center gap-2 pt-1 border-t border-slate-800/60">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mr-1">Simulate:</span>
-            <button
-              type="button"
-              onClick={() => handleSuccessfulScan('8901030383321')}
-              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-xs transition-colors"
-            >
-              8901030383321 (EAN)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSuccessfulScan('SKU-RICE-001')}
-              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-xs transition-colors"
-            >
-              SKU-RICE-001
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSuccessfulScan('ITEM:ITM-1001')}
-              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-xs transition-colors"
-            >
-              ITEM:ITM-1001
-            </button>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => handleSuccessfulScan('8901030383321', true)}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#cbd5e1',
+                  fontSize: '0.72rem',
+                  cursor: 'pointer'
+                }}
+              >
+                8901030383321 (EAN)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSuccessfulScan('SKU-RICE-001', true)}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#cbd5e1',
+                  fontSize: '0.72rem',
+                  cursor: 'pointer'
+                }}
+              >
+                SKU-RICE-001
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSuccessfulScan('ITEM:ITM-1001', true)}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#cbd5e1',
+                  fontSize: '0.72rem',
+                  cursor: 'pointer'
+                }}
+              >
+                ITEM:ITM-1001 (QR)
+              </button>
+            </div>
           </div>
         </div>
 

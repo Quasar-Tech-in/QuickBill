@@ -90,14 +90,13 @@ export const InventoryView: React.FC = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
 
-  const handleCodeScanned = (rawCode: string) => {
+  const handleCodeScanned = (rawCode: string, isContinuous = false) => {
     const code = rawCode.startsWith('ITEM:') ? rawCode.substring(5).trim() : rawCode.trim();
     if (activeScanField === 'sku') {
       setFormSku(code);
     } else if (activeScanField === 'barcode') {
       setFormBarcode(code);
     }
-    setActiveScanField(null);
 
     // Check if an existing product already uses this code
     const existing = rawItems.find((item) => 
@@ -110,6 +109,9 @@ export const InventoryView: React.FC = () => {
     if (existing) {
       setScannedCodeValue(code);
       setScanDuplicateItem(existing);
+      setActiveScanField(null);
+    } else if (!isContinuous) {
+      setActiveScanField(null);
     }
   };
 
@@ -263,6 +265,43 @@ export const InventoryView: React.FC = () => {
   const [formUnit, setFormUnit] = useState('pcs');
   const [formAllowParts, setFormAllowParts] = useState(false);
   const [formDescription, setFormDescription] = useState('');
+
+  // Auto-generate standard retail SKU (e.g. SKU-GRO-8421)
+  const handleAutoGenerateSku = () => {
+    const rawCat = (formCategory || 'GEN').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const prefix = rawCat.length >= 3 ? rawCat.substring(0, 3) : 'GEN';
+    const randSuffix = Math.floor(1000 + Math.random() * 9000);
+    setFormSku(`SKU-${prefix}-${randSuffix}`);
+  };
+
+  // Auto-generate retail-compliant Barcode (12-digit Code 128 / EAN standard)
+  const handleAutoGenerateBarcode = () => {
+    const middleDigits = String(Math.floor(100000000 + Math.random() * 900000000));
+    setFormBarcode(`20${middleDigits}`);
+  };
+
+  // Check for duplicate barcode or SKU in existing catalog
+  const duplicateBarcodeItem = useMemo(() => {
+    const clean = formBarcode.trim().toLowerCase();
+    if (!clean) return null;
+    return rawItems.find(i => 
+      i.barcode && 
+      i.barcode.trim().toLowerCase() === clean && 
+      i.id !== editingItem?.id && 
+      (i as any)._id !== editingItem?.id
+    );
+  }, [formBarcode, rawItems, editingItem]);
+
+  const duplicateSkuItem = useMemo(() => {
+    const clean = formSku.trim().toLowerCase();
+    if (!clean) return null;
+    return rawItems.find(i => 
+      i.sku && 
+      i.sku.trim().toLowerCase() === clean && 
+      i.id !== editingItem?.id && 
+      (i as any)._id !== editingItem?.id
+    );
+  }, [formSku, rawItems, editingItem]);
 
   // Location-specific overrides state in form
   const [locationOverrides, setLocationOverrides] = useState<Record<string, ItemLocationInventory>>({});
@@ -2073,6 +2112,7 @@ export const InventoryView: React.FC = () => {
         itemMrp={codeStudioTarget?.mrp}
         publicItemId={codeStudioTarget?.publicItemId}
         defaultStockCount={codeStudioTarget?.currentStock}
+        storeName={store.getActiveTenant()?.name || currentUser?.tenantName || store.getActiveLocation()?.name}
       />
 
       {/* Camera Scanner Modal for SKU / Barcode */}
@@ -2142,10 +2182,9 @@ export const InventoryView: React.FC = () => {
 
       {/* Add / Edit Product Modal */}
       {isAddModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsAddModalOpen(false)}>
+        <div className="modal-overlay">
           <div
             className="modal-content"
-            onClick={(e) => e.stopPropagation()}
             style={{ maxWidth: 920, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
           >
             <div className="card-header" style={{ flexShrink: 0, padding: '12px 20px', borderBottom: '1px solid var(--neutral-200)' }}>
@@ -2254,14 +2293,63 @@ export const InventoryView: React.FC = () => {
                           <span>Scan</span>
                         </button>
                       </div>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="RICE-001"
-                        value={formSku}
-                        onChange={(e) => setFormSku(e.target.value)}
-                        style={{ width: '100%', boxSizing: 'border-box' }}
-                      />
+                      <div style={{ position: 'relative', width: '100%' }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="e.g. RICE-001"
+                          value={formSku}
+                          onChange={(e) => setFormSku(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (formSku.trim()) {
+                                handleCodeScanned(formSku.trim());
+                              }
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            boxSizing: 'border-box',
+                            paddingRight: !formSku.trim() ? 48 : undefined,
+                            borderColor: duplicateSkuItem ? '#f59e0b' : undefined,
+                            backgroundColor: duplicateSkuItem ? '#fffbeb' : undefined
+                          }}
+                        />
+                        {!formSku.trim() && (
+                          <button
+                            type="button"
+                            onClick={handleAutoGenerateSku}
+                            style={{
+                              position: 'absolute',
+                              right: 4,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              border: '1px solid var(--amber-200, #fde68a)',
+                              background: 'var(--amber-50, #fffbeb)',
+                              borderRadius: 4,
+                              padding: '2px 6px',
+                              color: 'var(--amber-700, #b45309)',
+                              fontSize: '0.66rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 2,
+                              lineHeight: 1
+                            }}
+                            title="Auto-generate clean SKU"
+                          >
+                            <Sparkles size={10} />
+                            <span>Auto</span>
+                          </button>
+                        )}
+                      </div>
+                      {duplicateSkuItem && (
+                        <div style={{ fontSize: '0.68rem', color: '#b45309', marginTop: 3, fontWeight: 500 }}>
+                          ⚠️ In use by <strong>{duplicateSkuItem.name}</strong>
+                        </div>
+                      )}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
@@ -2289,14 +2377,63 @@ export const InventoryView: React.FC = () => {
                           <span>Scan</span>
                         </button>
                       </div>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="8901234567890"
-                        value={formBarcode}
-                        onChange={(e) => setFormBarcode(e.target.value)}
-                        style={{ width: '100%', boxSizing: 'border-box' }}
-                      />
+                      <div style={{ position: 'relative', width: '100%' }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="e.g. 8901234567890"
+                          value={formBarcode}
+                          onChange={(e) => setFormBarcode(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (formBarcode.trim()) {
+                                handleCodeScanned(formBarcode.trim());
+                              }
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            boxSizing: 'border-box',
+                            paddingRight: !formBarcode.trim() ? 48 : undefined,
+                            borderColor: duplicateBarcodeItem ? '#f59e0b' : undefined,
+                            backgroundColor: duplicateBarcodeItem ? '#fffbeb' : undefined
+                          }}
+                        />
+                        {!formBarcode.trim() && (
+                          <button
+                            type="button"
+                            onClick={handleAutoGenerateBarcode}
+                            style={{
+                              position: 'absolute',
+                              right: 4,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              border: '1px solid var(--amber-200, #fde68a)',
+                              background: 'var(--amber-50, #fffbeb)',
+                              borderRadius: 4,
+                              padding: '2px 6px',
+                              color: 'var(--amber-700, #b45309)',
+                              fontSize: '0.66rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 2,
+                              lineHeight: 1
+                            }}
+                            title="Auto-generate retail-compliant barcode"
+                          >
+                            <Sparkles size={10} />
+                            <span>Auto</span>
+                          </button>
+                        )}
+                      </div>
+                      {duplicateBarcodeItem && (
+                        <div style={{ fontSize: '0.68rem', color: '#b45309', marginTop: 3, fontWeight: 500 }}>
+                          ⚠️ In use by <strong>{duplicateBarcodeItem.name}</strong>
+                        </div>
+                      )}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
@@ -3043,10 +3180,9 @@ export const InventoryView: React.FC = () => {
         const newWac = adjustType === 'ADD' && resultingStock > 0 ? (((Math.max(0, prevStock) * locPurchaseCost) + (inwardQty * inwardCost)) / resultingStock) : locPurchaseCost;
 
         return (
-          <div className="modal-overlay" onClick={() => setIsAdjustModalOpen(false)}>
+          <div className="modal-overlay">
             <div
               className="modal-content"
-              onClick={(e) => e.stopPropagation()}
               style={{
                 maxWidth: 560,
                 width: '100%',
@@ -3273,10 +3409,9 @@ export const InventoryView: React.FC = () => {
 
       {/* Category Master Management Modal */}
       {isCategoryModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsCategoryModalOpen(false)}>
+        <div className="modal-overlay">
           <div
             className="modal-content"
-            onClick={(e) => e.stopPropagation()}
             style={{ maxWidth: 680, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
           >
             <div className="card-header" style={{ flexShrink: 0, padding: '16px 24px', borderBottom: '1px solid var(--neutral-200)' }}>

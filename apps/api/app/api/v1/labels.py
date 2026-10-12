@@ -1,9 +1,28 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Response
+from bson import ObjectId
 from app.core.security import get_current_business_id
+from app.core.database import get_database
 from app.schemas.label import LabelPrintConfig, BatchLabelPrintRequest, LabelStyle, PaperSize
 from app.services.label_service import LabelService
 
 router = APIRouter(prefix="/labels", tags=["Label Printing"])
+
+async def _resolve_store_name(business_id: str, candidate_name: Optional[str] = None) -> str:
+    if candidate_name and candidate_name.strip():
+        return candidate_name.strip()
+    try:
+        primary_db = get_database()
+        t_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else None
+        q = {"_id": t_oid} if t_oid else {"slug": business_id}
+        tenant = await primary_db.tenants.find_one(q)
+        if not tenant and not t_oid:
+            tenant = await primary_db.tenants.find_one({"id": business_id})
+        if tenant and tenant.get("name"):
+            return str(tenant["name"]).strip()
+    except Exception:
+        pass
+    return "QuickBill Store"
 
 @router.post("/custom-pdf", summary="Generate single product thermal label PDF")
 async def generate_custom_label_pdf(
@@ -14,7 +33,7 @@ async def generate_custom_label_pdf(
     Generates customized label PDF for thermal printers or sticker rolls.
     Supports Standard 50x30mm, Jewelry Dumbbell 70x12mm String Tags, and custom sizes.
     """
-    store_name = config.store_name or "QuickBill Store"
+    store_name = await _resolve_store_name(business_id, config.store_name)
     
     if config.paper_size == PaperSize.DUMBBELL_70x12 or config.style == LabelStyle.JEWELRY_STRING_TAG:
         pdf_bytes = LabelService.generate_jewelry_dumbbell_tag(config=config, store_name=store_name)
@@ -38,9 +57,10 @@ async def generate_batch_label_pdf(
     business_id: str = Depends(get_current_business_id),
 ):
     """Generates multi-page A4 sticker sheet PDF (24-up, 40-up, or 65-up)."""
+    store_name = await _resolve_store_name(business_id, None)
     pdf_bytes = LabelService.generate_a4_sticker_grid(
         configs=request.items,
-        store_name="QuickBill Store",
+        store_name=store_name,
         paper_size=request.paper_size
     )
     return Response(

@@ -121,8 +121,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const [dropdownSearch, setDropdownSearch] = useState('');
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Cart State (Synchronized with store.posCart)
-  const [cart, setCart] = useState<CartItem[]>(store.getPosCart());
+  // Cart State (Synchronized with store.posCart and persisted in localStorage)
+  const [cart, setCart] = useState<CartItem[]>(() => store.getPosCart());
   // Map of raw typed input string per item to allow typing "0.", "0.0", "0.01", "4/30" without React resetting mid-keystroke
   const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({});
   // Item-level discount editor state
@@ -177,19 +177,37 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   // Global Hardware USB Barcode Scanner Handler
   const handleGlobalBarcodeScan = (scannedCode: string) => {
     const clean = scannedCode.trim();
+    if (!clean) return;
+
     let publicId = clean;
     if (clean.startsWith('ITEM:')) {
       publicId = clean.replace('ITEM:', '').trim();
     }
+    const cleanLower = clean.toLowerCase();
+    const publicIdLower = publicId.toLowerCase();
 
-    const matchedItem = items.find(
+    // 1. Search in current branch items
+    let matchedItem = items.find(
       (it) =>
         it.id === clean ||
-        it.publicItemId === publicId ||
-        it.publicItemId === clean ||
-        it.sku === clean ||
-        it.barcode === clean
+        ((it as any)._id && (it as any)._id === clean) ||
+        (it.publicItemId && (it.publicItemId.toLowerCase() === publicIdLower || it.publicItemId.toLowerCase() === cleanLower)) ||
+        (it.sku && it.sku.toLowerCase() === cleanLower) ||
+        (it.barcode && it.barcode.trim().toLowerCase() === cleanLower)
     );
+
+    // 2. Fallback to store raw catalog if not found in current view items
+    if (!matchedItem) {
+      const rawCatalog = store.getRawItems();
+      matchedItem = rawCatalog.find(
+        (it) =>
+          it.id === clean ||
+          ((it as any)._id && (it as any)._id === clean) ||
+          (it.publicItemId && (it.publicItemId.toLowerCase() === publicIdLower || it.publicItemId.toLowerCase() === cleanLower)) ||
+          (it.sku && it.sku.toLowerCase() === cleanLower) ||
+          (it.barcode && it.barcode.trim().toLowerCase() === cleanLower)
+      );
+    }
 
     if (matchedItem) {
       handleAddToCart(matchedItem);
@@ -261,7 +279,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       setRawItems(store.getRawItems());
       setCategoriesList(store.getCategories());
       setParties(store.getParties(currentLoc.id).filter(p => p.type === 'CUSTOMER'));
-      if (selectedLocationId !== currentLoc.id) {
+      if (selectedLocationId && selectedLocationId !== currentLoc.id) {
         setSelectedLocationId(currentLoc.id);
         updateCart([]);
       }
@@ -279,7 +297,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
     const interval = setInterval(() => {
       const currentLocId = store.getActiveLocation().id;
-      if (currentLocId !== selectedLocationId) {
+      if (currentLocId && selectedLocationId && currentLocId !== selectedLocationId) {
         setSelectedLocationId(currentLocId);
         updateCart([]);
         refreshData();
@@ -463,6 +481,19 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     };
   };
 
+  // Helper to accurately match an item in cart across id, _id, publicItemId, barcode, or sku
+  const isSameItem = (a?: Item | null, b?: Item | null): boolean => {
+    if (!a || !b) return false;
+    if (a.id && b.id && a.id === b.id) return true;
+    if ((a as any)._id && (b as any)._id && (a as any)._id === (b as any)._id) return true;
+    if (a.id && (b as any)._id && a.id === (b as any)._id) return true;
+    if ((a as any)._id && b.id && (a as any)._id === b.id) return true;
+    if (a.publicItemId && b.publicItemId && a.publicItemId.trim().toLowerCase() === b.publicItemId.trim().toLowerCase()) return true;
+    if (a.barcode && b.barcode && a.barcode.trim().toLowerCase() === b.barcode.trim().toLowerCase()) return true;
+    if (a.sku && b.sku && a.sku.trim().toLowerCase() === b.sku.trim().toLowerCase()) return true;
+    return false;
+  };
+
   // Add Item to Cart (Quick Tap on Catalog Card or Barcode Scan)
   const handleAddToCart = (item: Item) => {
     const price = Number(item.salePrice || 0);
@@ -494,14 +525,16 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     });
 
     updateCart((prevCart) => {
-      const existingIdx = prevCart.findIndex(c => c.item.id === item.id);
+      const existingIdx = prevCart.findIndex(c => isSameItem(c.item, item));
       if (existingIdx >= 0) {
         const nextCart = [...prevCart];
-        const currentQty = Number(nextCart[existingIdx].quantity || 0);
+        const existingLine = nextCart[existingIdx];
+        const currentQty = Number(existingLine.quantity || 0);
         const newQty = item.allowParts
           ? Number((currentQty + 1).toFixed(3))
           : currentQty + 1;
-        nextCart[existingIdx] = calculateCartLine(nextCart[existingIdx], newQty, price);
+        const lineUnitPrice = Number(existingLine.unitPrice || price);
+        nextCart[existingIdx] = calculateCartLine(existingLine, newQty, lineUnitPrice);
         return nextCart;
       } else {
         const initialLine: CartItem = {

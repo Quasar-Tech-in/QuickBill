@@ -1,3 +1,4 @@
+import uuid
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
@@ -121,3 +122,32 @@ async def test_shipping_order_lookup_and_verification(auth_headers):
         dispatch_res = await client.post("/api/v1/shipping/orders/ORD-9842/dispatch", headers=auth_headers)
         assert dispatch_res.status_code == 200
         assert dispatch_res.json()["status"] == "DISPATCHED"
+
+
+@pytest.mark.asyncio
+async def test_barcode_uniqueness_enforcement(auth_headers):
+    unique_barcode = f"BAR-{uuid.uuid4().hex[:8]}"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Create first product with barcode
+        item_a = {
+            "name": "Product Alpha Barcode Test",
+            "salePrice": 100.0,
+            "purchasePrice": 60.0,
+            "barcode": unique_barcode,
+            "sku": f"SKU-{uuid.uuid4().hex[:6]}"
+        }
+        res_a = await client.post("/api/v1/items", json=item_a, headers=auth_headers)
+        assert res_a.status_code == 201
+
+        # 2. Attempt to create second product with identical barcode in same tenant -> Should fail with 400
+        item_b = {
+            "name": "Product Beta Barcode Collision",
+            "salePrice": 120.0,
+            "purchasePrice": 70.0,
+            "barcode": unique_barcode,
+            "sku": f"SKU-{uuid.uuid4().hex[:6]}"
+        }
+        res_b = await client.post("/api/v1/items", json=item_b, headers=auth_headers)
+        assert res_b.status_code == 400
+        assert "already assigned" in res_b.json()["detail"].lower()

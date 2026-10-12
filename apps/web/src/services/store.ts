@@ -208,9 +208,13 @@ class StoreService {
       const savedStagedOrders = localStorage.getItem('qb_staged_orders');
       this.stagedOrders = savedStagedOrders ? JSON.parse(savedStagedOrders) : [];
 
+      const savedPosCart = localStorage.getItem('qb_pos_cart');
+      this.posCart = savedPosCart ? JSON.parse(savedPosCart) : [];
+
     } catch {
       this.items = [];
       this.parties = [];
+      this.posCart = [];
       this.invoices = [];
       this.payments = [];
       this.expenses = [];
@@ -541,6 +545,9 @@ class StoreService {
 
   setPosCart(cart: CartItem[]): void {
     this.posCart = cart;
+    try {
+      localStorage.setItem('qb_pos_cart', JSON.stringify(cart));
+    } catch (_) {}
     this.cartListeners.forEach(listener => {
       try { listener(cart); } catch (e) { console.error(e); }
     });
@@ -548,10 +555,16 @@ class StoreService {
 
   setPosCartSilent(cart: CartItem[]): void {
     this.posCart = cart;
+    try {
+      localStorage.setItem('qb_pos_cart', JSON.stringify(cart));
+    } catch (_) {}
   }
 
   clearPosCart(): void {
     this.posCart = [];
+    try {
+      localStorage.removeItem('qb_pos_cart');
+    } catch (_) {}
     this.cartListeners.forEach(listener => {
       try { listener([]); } catch (e) { console.error(e); }
     });
