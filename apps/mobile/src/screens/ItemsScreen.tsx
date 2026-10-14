@@ -83,6 +83,18 @@ export const ItemsScreen: React.FC = () => {
     setItemAllowParts(!!item.allowParts);
   };
 
+  const handleAutoGenerateSku = () => {
+    const rawCat = (itemCategory || 'GEN').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const prefix = rawCat.length >= 3 ? rawCat.substring(0, 3) : 'GEN';
+    const randSuffix = Math.floor(1000 + Math.random() * 9000);
+    setItemSku(`INT-SKU-${prefix}-${randSuffix}`);
+  };
+
+  const handleAutoGenerateBarcode = () => {
+    const middleDigits = String(Math.floor(100000000 + Math.random() * 900000000));
+    setItemBarcode(`INT-${middleDigits}`);
+  };
+
   const filteredItems = items.filter(item => {
     const matchesCat = selectedCategory === 'ALL' || item.category === selectedCategory;
     const q = searchQuery.toLowerCase().trim();
@@ -378,12 +390,22 @@ export const ItemsScreen: React.FC = () => {
 
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>SKU</Text>
-                  <TextInput style={styles.modalInput} placeholder="e.g. ALM-01" value={itemSku} onChangeText={setItemSku} />
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                    <Text style={styles.fieldLabel}>SKU</Text>
+                    <TouchableOpacity onPress={handleAutoGenerateSku}>
+                      <Text style={{ fontSize: 11, color: colors.primary[600], fontWeight: '700' }}>⚡ Auto</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput style={styles.modalInput} placeholder="e.g. INT-SKU-GRO-8421" value={itemSku} onChangeText={setItemSku} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Barcode</Text>
-                  <TextInput style={styles.modalInput} placeholder="e.g. 8901030381001" value={itemBarcode} onChangeText={setItemBarcode} />
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                    <Text style={styles.fieldLabel}>Barcode</Text>
+                    <TouchableOpacity onPress={handleAutoGenerateBarcode}>
+                      <Text style={{ fontSize: 11, color: colors.primary[600], fontWeight: '700' }}>⚡ Auto</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput style={styles.modalInput} placeholder="e.g. INT-123456789" value={itemBarcode} onChangeText={setItemBarcode} />
                 </View>
               </View>
 

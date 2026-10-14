@@ -268,18 +268,18 @@ export const InventoryView: React.FC = () => {
   const [formAllowParts, setFormAllowParts] = useState(false);
   const [formDescription, setFormDescription] = useState('');
 
-  // Auto-generate standard retail SKU (e.g. SKU-GRO-8421)
+  // Auto-generate standard retail SKU with internal prefix (e.g. INT-SKU-GRO-8421)
   const handleAutoGenerateSku = () => {
     const rawCat = (formCategory || 'GEN').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     const prefix = rawCat.length >= 3 ? rawCat.substring(0, 3) : 'GEN';
     const randSuffix = Math.floor(1000 + Math.random() * 9000);
-    setFormSku(`SKU-${prefix}-${randSuffix}`);
+    setFormSku(`INT-SKU-${prefix}-${randSuffix}`);
   };
 
-  // Auto-generate retail-compliant Barcode (12-digit Code 128 / EAN standard)
+  // Auto-generate internal Barcode (e.g. INT-208491024)
   const handleAutoGenerateBarcode = () => {
     const middleDigits = String(Math.floor(100000000 + Math.random() * 900000000));
-    setFormBarcode(`20${middleDigits}`);
+    setFormBarcode(`INT-${middleDigits}`);
   };
 
   // Check for duplicate barcode or SKU in existing catalog
@@ -2363,7 +2363,7 @@ export const InventoryView: React.FC = () => {
                               gap: 2,
                               lineHeight: 1
                             }}
-                            title="Auto-generate clean SKU"
+                            title="Auto-generate internal SKU (INT-SKU-...)"
                           >
                             <Sparkles size={10} />
                             <span>Auto</span>
@@ -2406,7 +2406,7 @@ export const InventoryView: React.FC = () => {
                         <input
                           type="text"
                           className="form-input"
-                          placeholder="e.g. 8901234567890"
+                          placeholder="e.g. 8901234567890 or INT-..."
                           value={formBarcode}
                           onChange={(e) => setFormBarcode(e.target.value)}
                           onKeyDown={(e) => {
@@ -2447,7 +2447,7 @@ export const InventoryView: React.FC = () => {
                               gap: 2,
                               lineHeight: 1
                             }}
-                            title="Auto-generate retail-compliant barcode"
+                            title="Auto-generate internal barcode (INT-...)"
                           >
                             <Sparkles size={10} />
                             <span>Auto</span>
