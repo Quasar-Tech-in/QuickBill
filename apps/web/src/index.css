@@ -3103,3 +3103,34 @@ button:disabled:hover,
   100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
 }
 
+/* POS Machine Scanner & Mobile Camera Visibility */
+.pos-hardware-scanner-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full, 9999px);
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #065f46;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.pos-mobile-camera-btn {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .pos-hardware-scanner-pill {
+    display: none !important;
+  }
+  .pos-mobile-camera-btn {
+    display: inline-flex !important;
+  }
+}
+
+

@@ -14,7 +14,7 @@ interface UseBarcodeScannerOptions {
 export function useBarcodeScanner({
   onScan,
   enabled = true,
-  maxKeystrokeIntervalMs = 45,
+  maxKeystrokeIntervalMs = 75,
   minBarcodeLength = 3,
 }: UseBarcodeScannerOptions) {
   const bufferRef = useRef<string>('');

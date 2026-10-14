@@ -35,6 +35,7 @@ import { Item, Party, CartItem, Invoice, ItemCategory, StagedOrder } from '../ty
 import { store } from '../services/store';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { WebcamScannerModal } from '../components/WebcamScannerModal';
+import { playScanSuccess, playScanError } from '../utils/audio';
 
 // Helper to parse decimal numbers or fraction expressions (e.g. "4/30", "6/12", "1 4/12", "1+4/12")
 const parseFractionString = (str: string): number | null => {
@@ -114,7 +115,16 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+
+  // Automatically focus product search input on POS mount so hardware scanner gun can immediately type
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 120);
+    return () => clearTimeout(timer);
+  }, []);
   
   // Category Multi-Select Dropdown State (Matching InventoryView)
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
@@ -173,8 +183,23 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   });
 
   const [isWebcamOpen, setIsWebcamOpen] = useState(false);
+  const [scanNotification, setScanNotification] = useState<{
+    message: string;
+    type: 'success' | 'error';
+  } | null>(null);
+  const scanNotificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Global Hardware USB Barcode Scanner Handler
+  const showScanNotification = (message: string, type: 'success' | 'error') => {
+    if (scanNotificationTimeoutRef.current) {
+      clearTimeout(scanNotificationTimeoutRef.current);
+    }
+    setScanNotification({ message, type });
+    scanNotificationTimeoutRef.current = setTimeout(() => {
+      setScanNotification(null);
+    }, 2800);
+  };
+
+  // Global Hardware USB / Wireless Barcode Scanner Handler
   const handleGlobalBarcodeScan = (scannedCode: string) => {
     const clean = scannedCode.trim();
     if (!clean) return;
@@ -193,7 +218,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         ((it as any)._id && (it as any)._id === clean) ||
         (it.publicItemId && (it.publicItemId.toLowerCase() === publicIdLower || it.publicItemId.toLowerCase() === cleanLower)) ||
         (it.sku && it.sku.toLowerCase() === cleanLower) ||
-        (it.barcode && it.barcode.trim().toLowerCase() === cleanLower)
+        (it.barcode && it.barcode.trim().toLowerCase() === cleanLower) ||
+        it.name.trim().toLowerCase() === cleanLower
     );
 
     // 2. Fallback to store raw catalog if not found in current view items
@@ -205,12 +231,23 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           ((it as any)._id && (it as any)._id === clean) ||
           (it.publicItemId && (it.publicItemId.toLowerCase() === publicIdLower || it.publicItemId.toLowerCase() === cleanLower)) ||
           (it.sku && it.sku.toLowerCase() === cleanLower) ||
-          (it.barcode && it.barcode.trim().toLowerCase() === cleanLower)
+          (it.barcode && it.barcode.trim().toLowerCase() === cleanLower) ||
+          it.name.trim().toLowerCase() === cleanLower
       );
     }
 
     if (matchedItem) {
       handleAddToCart(matchedItem);
+      setSearchQuery('');
+      playScanSuccess();
+      showScanNotification(`✓ Added "${matchedItem.name}" (₹ ${matchedItem.salePrice}) to bill`, 'success');
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+      }
+    } else {
+      playScanError();
+      showScanNotification(`⚠️ Unrecognized code: "${clean}". No matching product in catalog.`, 'error');
+      setSearchQuery('');
     }
   };
 
@@ -1355,12 +1392,21 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
               <div style={{ position: 'relative', flex: '1 1 260px', minWidth: 200 }}>
                 <Search size={17} style={{ position: 'absolute', left: 12, top: 10, color: 'var(--neutral-400)' }} />
                 <input
+                  ref={searchInputRef}
                   type="text"
-                  placeholder="Scan QR barcode, or search by item name, SKU, ID..."
+                  placeholder="Scan item barcode with gun, or search by name, SKU..."
                   className="form-input"
                   style={{ paddingLeft: 38, width: '100%', boxSizing: 'border-box' }}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (searchQuery.trim()) {
+                        handleGlobalBarcodeScan(searchQuery.trim());
+                      }
+                    }
+                  }}
                   autoFocus
                 />
                 {searchQuery && (
@@ -1385,13 +1431,22 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                 )}
               </div>
 
-              {/* Webcam Camera Scanner Button */}
+              {/* Machine Scanner Active Indicator (Always ON & Auto-accepting inputs on Desktop) */}
+              <div 
+                className="pos-hardware-scanner-pill"
+                title="Hardware Barcode Scanner gun is connected and active. Point gun at any item barcode or QR code and pull trigger to scan!"
+              >
+                <span className="scanner-pulse-dot" />
+                <span>Machine Scanner Ready</span>
+              </div>
+
+              {/* Camera Scanner Button (Only visible on smaller devices / mobile screens <= 768px) */}
               <button
                 type="button"
+                className="pos-mobile-camera-btn"
                 onClick={() => setIsWebcamOpen(true)}
-                title="Open Webcam Camera Scanner"
+                title="Open device camera scanner for QR code and barcodes"
                 style={{
-                  display: 'inline-flex',
                   alignItems: 'center',
                   gap: 6,
                   padding: '8px 12px',
@@ -1407,7 +1462,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                 }}
               >
                 <QrCode size={16} color="var(--primary-600)" />
-                <span>Webcam Scanner</span>
+                <span>📷 Scan QR / Barcode</span>
               </button>
 
               {/* Multi-Select Category Dropdown matching InventoryView */}
@@ -1613,6 +1668,33 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                 )}
               </div>
             </div>
+
+            {/* Live Scan Notification Toast Banner */}
+            {scanNotification && (
+              <div 
+                style={{
+                  marginTop: 8,
+                  padding: '7px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: scanNotification.type === 'success' ? '#ecfdf5' : '#fef2f2',
+                  border: `1.5px solid ${scanNotification.type === 'success' ? '#10b981' : '#ef4444'}`,
+                  color: scanNotification.type === 'success' ? '#065f46' : '#991b1b',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
+                }}
+              >
+                {scanNotification.type === 'success' ? (
+                  <CheckCircle size={15} color="#059669" />
+                ) : (
+                  <AlertCircle size={15} color="#dc2626" />
+                )}
+                <span>{scanNotification.message}</span>
+              </div>
+            )}
 
             {/* Quick Active Filter Badges */}
             {selectedCategories.length > 0 && (

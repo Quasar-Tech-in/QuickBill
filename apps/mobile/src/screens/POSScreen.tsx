@@ -391,6 +391,12 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
             placeholder="🔍 Search item name, barcode, or SKU..."
             value={searchQuery}
             onChangeText={setSearchQuery}
+            onSubmitEditing={() => {
+              if (searchQuery.trim()) {
+                handleBarcodeScanned(searchQuery.trim());
+                setSearchQuery('');
+              }
+            }}
           />
           {searchQuery !== '' && (
             <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
