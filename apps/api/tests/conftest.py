@@ -88,7 +88,31 @@ class MockCollection:
             if k == "$expr":
                 continue
             
-            doc_val = doc.get(k)
+            if "." in k:
+                parent, child = k.split(".", 1)
+                parent_val = doc.get(parent)
+                if isinstance(parent_val, list):
+                    matched_elem = False
+                    for elem in parent_val:
+                        if isinstance(elem, dict):
+                            elem_val = elem.get(child)
+                            if isinstance(v, (str, ObjectId)) and isinstance(elem_val, (str, ObjectId)):
+                                if str(elem_val) == str(v):
+                                    matched_elem = True
+                                    break
+                            elif elem_val == v:
+                                matched_elem = True
+                                break
+                    if not matched_elem:
+                        return False
+                    continue
+                elif isinstance(parent_val, dict):
+                    doc_val = parent_val.get(child)
+                else:
+                    return False
+            else:
+                doc_val = doc.get(k)
+
             # Handle ObjectId or str equality
             if isinstance(v, (str, ObjectId)) and isinstance(doc_val, (str, ObjectId)):
                 if str(doc_val) != str(v):
@@ -208,6 +232,18 @@ def override_db(monkeypatch):
             "maxLocations": 3,
             "endDate": "2027-01-01T00:00:00Z"
         }
+    })
+
+    # Seed default location for tenant A
+    from datetime import datetime, timezone
+    mock_primary_db.locations.data.append({
+        "_id": ObjectId("65f2a1b9a000000000000101"),
+        "businessId": "65f2a1b9a000000000000001",
+        "name": "Main Flagship Counter",
+        "code": "MAIN-01",
+        "isDefault": True,
+        "isActive": True,
+        "createdAt": datetime.now(timezone.utc),
     })
 
     app.dependency_overrides[get_database] = lambda: mock_primary_db

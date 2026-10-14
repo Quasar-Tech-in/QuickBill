@@ -562,6 +562,35 @@ export interface InventoryMovement {
   createdAt: string;
 }
 
+export interface ItemImportError {
+  row: number;
+  error: string;
+}
+
+export interface ItemImportDetail {
+  row: number;
+  name: string;
+  sku?: string;
+  barcode?: string;
+  status: 'CREATED' | 'UPDATED' | 'SKIPPED';
+  message?: string;
+  publicItemId?: string;
+  branch?: string;
+}
+
+export interface ItemImportResponse {
+  success: boolean;
+  totalRows: number;
+  processedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorsCount: number;
+  categoriesCreated: string[];
+  errors: ItemImportError[];
+  details: ItemImportDetail[];
+}
+
 
 
 

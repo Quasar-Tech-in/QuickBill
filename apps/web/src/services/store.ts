@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement, ItemImportResponse } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -2345,6 +2345,60 @@ class StoreService {
     );
     this.saveToStorage();
     return this.items.length < prevLen;
+  }
+
+  async downloadItemTemplate(format: 'xlsx' | 'csv' = 'xlsx'): Promise<void> {
+    try {
+      const res = await apiClient.get('/items/template', {
+        params: { format },
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data], {
+        type: format === 'xlsx' 
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+          : 'text/csv;charset=utf-8;'
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `product_import_template.${format}`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Failed to download template:', err);
+      throw new Error(err.response?.data?.detail || 'Failed to download product import template.');
+    }
+  }
+
+  async importProducts(
+    file: File,
+    options?: {
+      locationId?: string;
+      updateExisting?: boolean;
+      createCategories?: boolean;
+    }
+  ): Promise<ItemImportResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options?.locationId && options.locationId !== 'ALL') {
+      formData.append('location_id', options.locationId);
+    }
+    formData.append('update_existing', String(options?.updateExisting !== false));
+    formData.append('create_categories', String(options?.createCategories !== false));
+
+    const res = await apiClient.post('/items/import', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    // Refresh live in-memory categories and items
+    await this.fetchCategories().catch(() => {});
+    await this.fetchItems().catch(() => {});
+
+    return res.data;
   }
 
   // --- Strict Tenant-Isolated Product Categories ---

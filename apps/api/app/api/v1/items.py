@@ -11,12 +11,14 @@ from typing import Optional, List
 from pydantic import BaseModel
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from app.core.config import settings
-from app.core.database import get_tenant_db
+from app.core.database import get_tenant_db, get_database
 from app.core.security import get_current_business_id, enforce_active_store_operations, get_current_user, TokenPayload, resolve_user_name
 from app.schemas.common import PaginatedResponse
 from app.schemas.item import ItemCreate, ItemUpdate, ItemResponse, StockAdjustmentRequest
 from app.repositories.item_repository import ItemRepository
+from app.services.item_import_service import ItemImportService
 
 logger = logging.getLogger("quickbill.items")
 router = APIRouter(prefix="/items", tags=["Items"])
@@ -40,12 +42,16 @@ async def list_items(
     ]
 
     if location_id and location_id != "ALL":
-        conditions.append({
-            "$or": [
-                {"locations.locationId": location_id},
-                {"locationId": location_id}
-            ]
-        })
+        loc_clauses = [
+            {"locations.locationId": location_id},
+            {"locationId": location_id}
+        ]
+        if ObjectId.is_valid(location_id):
+            loc_clauses.extend([
+                {"locations.locationId": ObjectId(location_id)},
+                {"locationId": ObjectId(location_id)}
+            ])
+        conditions.append({"$or": loc_clauses})
 
     if category and category != "ALL":
         cats = [c.strip() for c in category.split(",") if c.strip()]
@@ -129,7 +135,11 @@ async def create_item(
             b_queries = [{"businessId": business_id}]
             if ObjectId.is_valid(business_id):
                 b_queries.append({"businessId": ObjectId(business_id)})
-            loc_cursor = db.locations.find({"$or": b_queries})
+            primary_db = get_database()
+            loc_cursor = primary_db.locations.find({"$or": b_queries})
+            count_p = await primary_db.locations.count_documents({"$or": b_queries})
+            if count_p == 0:
+                loc_cursor = db.locations.find({"$or": b_queries})
             async for t_loc in loc_cursor:
                 t_loc_id = str(t_loc["_id"])
                 is_default_branch = bool(t_loc.get("isDefault", False))
@@ -141,7 +151,7 @@ async def create_item(
                     "purchasePrice": float(payload.purchase_price),
                     "currentStock": float(initial_stock) if is_default_branch else 0.0,
                     "minStockAlert": float(payload.min_stock_alert),
-                    "isListed": True if is_default_branch else False,
+                    "isListed": True,
                     "hasDiscount": bool(payload.has_discount),
                     "discountType": payload.discount_type or "PERCENT",
                     "discountValue": float(payload.discount_value or 0)
@@ -214,8 +224,49 @@ async def create_item(
             "createdAt": now
         }
         await db.inventory_movements.insert_one(movement_doc)
-
     return ItemResponse(**item_doc)
+
+@router.get("/template")
+async def download_item_template(
+    format: str = Query("xlsx", pattern="^(xlsx|csv)$"),
+    business_id: str = Depends(get_current_business_id),
+):
+    """
+    Downloads pre-formatted product import template in Excel (.xlsx) or CSV (.csv).
+    Excel templates include an instructions and store branches reference sheet.
+    """
+    db = await get_tenant_db(business_id)
+    stream, filename, mime_type = await ItemImportService.generate_template(db, business_id, format)
+    return StreamingResponse(
+        stream,
+        media_type=mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+@router.post("/import")
+async def import_items(
+    file: UploadFile = File(...),
+    location_id: Optional[str] = Form(None),
+    update_existing: bool = Form(True),
+    create_categories: bool = Form(True),
+    business_id: str = Depends(enforce_active_store_operations),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """
+    Imports products in bulk from Excel (.xlsx, .xls) or CSV files.
+    Auto-detects and creates new categories, supports branch-specific pricing/stock,
+    and updates existing products matched by Barcode, SKU, or Name.
+    """
+    db = await get_tenant_db(business_id)
+    return await ItemImportService.process_import(
+        db=db,
+        business_id=business_id,
+        current_user=current_user,
+        file=file,
+        location_id=location_id,
+        update_existing=update_existing,
+        create_categories=create_categories,
+    )
 
 @router.get("/lookup/qr/{public_item_id}", response_model=ItemResponse)
 async def lookup_item_by_qr(

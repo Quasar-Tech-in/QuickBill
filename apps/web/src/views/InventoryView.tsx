@@ -48,6 +48,7 @@ import { WebcamScannerModal } from '../components/WebcamScannerModal';
 import { CustomSelect } from '../components/CustomSelect';
 import { Pagination } from '../components/Pagination';
 import { SyncInventoryModal } from '../components/SyncInventoryModal';
+import { ImportProductsModal } from '../components/ImportProductsModal';
 import { DateRangePicker, DateRangeValue, calculatePresetDates } from '../components/DateRangePicker';
 import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
 import { uploadItemImage, deleteItemImages } from '../services/supabaseStorage';
@@ -88,6 +89,7 @@ export const InventoryView: React.FC = () => {
   const [scanDuplicateItem, setScanDuplicateItem] = useState<Item | null>(null);
   const [scannedCodeValue, setScannedCodeValue] = useState<string>('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
 
   const handleCodeScanned = (rawCode: string, isContinuous = false) => {
@@ -1015,10 +1017,33 @@ export const InventoryView: React.FC = () => {
         {canManage && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button 
+              className="btn" 
+              onClick={() => setIsImportModalOpen(true)}
+              title="Bulk import products from Excel (.xlsx) or CSV (.csv)"
+              style={{ 
+                display: 'inline-flex', 
+                alignItems: 'center', 
+                gap: 7, 
+                color: '#4338ca', 
+                backgroundColor: '#eef2ff',
+                border: '1.5px solid #c7d2fe',
+                fontWeight: 700,
+                fontSize: '0.84rem',
+                borderRadius: 'var(--radius-md)',
+                padding: '7px 14px',
+                cursor: 'pointer',
+                boxShadow: '0 1px 2px rgba(79, 70, 229, 0.08)',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <FileSpreadsheet size={16} color="#4f46e5" />
+              <span>Import Products</span>
+            </button>
+            <button 
               className="btn btn-secondary" 
               onClick={() => setIsSyncModalOpen(true)}
               title="Synchronize and configure catalog items for active branch"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--primary-700)', fontWeight: 600 }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--neutral-700)', fontWeight: 600 }}
             >
               <Boxes size={16} color="var(--primary-600)" />
               <span>Sync Branch Items</span>
@@ -3624,6 +3649,20 @@ export const InventoryView: React.FC = () => {
         onClose={() => setIsSyncModalOpen(false)}
         targetLocation={activeLocation}
         onSuccess={async () => {
+          await loadPaginatedItems();
+          refreshData();
+        }}
+      />
+
+      {/* Bulk Import Products from Excel / CSV Modal */}
+      <ImportProductsModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        locations={locations}
+        currentLocationId={selectedLocationId}
+        onSuccess={async () => {
+          await store.fetchCategories().catch(() => {});
+          setCategoriesList(store.getCategories());
           await loadPaginatedItems();
           refreshData();
         }}
