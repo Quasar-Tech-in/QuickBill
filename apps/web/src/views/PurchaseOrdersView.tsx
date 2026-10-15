@@ -1252,7 +1252,7 @@ export const PurchaseOrdersView: React.FC = () => {
       {/* Main PO Table Card */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div className="table-responsive">
-          <table className="data-table">
+          <table className="data-table" style={{ width: '100%', minWidth: 840 }}>
             <thead>
               <tr>
                 <th>PO Number &amp; Date</th>

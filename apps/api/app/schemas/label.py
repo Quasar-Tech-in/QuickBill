@@ -12,6 +12,7 @@ class LabelStyle(str, Enum):
 
 class PaperSize(str, Enum):
     THERMAL_50x30 = "THERMAL_50x30"
+    THERMAL_40x40 = "THERMAL_40x40"
     THERMAL_38x25 = "THERMAL_38x25"
     DUMBBELL_70x12 = "DUMBBELL_70x12"
     A4_GRID_24 = "A4_GRID_24"

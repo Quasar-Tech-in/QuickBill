@@ -425,6 +425,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
           gap: 16, 
           marginBottom: 24 
         }}
+        className="kpi-cards-grid"
       >
         <MetricCard
           title={dateRange.preset === 'TODAY' ? "Today's Sales" : dateRange.preset === 'ALL' ? "All-Time Sales" : "Period Sales"}
@@ -471,7 +472,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
       </div>
 
       {/* Main Analytics Grid: Top Selling Items + Payment Mode Breakdown */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 24, marginBottom: 24 }}>
+      <div 
+        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 24, marginBottom: 24 }}
+        className="dashboard-dual-grid dashboard-analytics-grid"
+      >
         
         {/* Top Selling Products Leaderboard */}
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -772,11 +776,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
       )}
 
       {/* Grid: Recent Invoices & Low Stock Alert Tables */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 24 }}>
+      <div 
+        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 24 }}
+        className="dashboard-dual-grid dashboard-tables-grid"
+      >
         
         {/* Recent Invoices Card */}
         <div className="card">
-          <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-border)' }}>
+          <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Receipt size={18} color="var(--primary-500)" />
               <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Recent Sales Invoices</h3>
@@ -785,14 +792,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
               View All Invoices
             </button>
           </div>
-          <div style={{ width: '100%', overflow: 'hidden' }}>
-            <table className="table" style={{ width: '100%', tableLayout: 'fixed' }}>
+          <div className="table-responsive" style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <table className="table" style={{ width: '100%', minWidth: 460 }}>
               <thead>
                 <tr>
-                  <th style={{ padding: '10px 14px', width: '26%' }}>Invoice #</th>
-                  <th style={{ padding: '10px 14px', width: '30%' }}>Customer</th>
-                  <th style={{ padding: '10px 14px', width: '18%' }}>Payment</th>
-                  <th style={{ padding: '10px 14px', width: '26%', textAlign: 'right' }}>Amount</th>
+                  <th style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>Invoice #</th>
+                  <th style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>Customer</th>
+                  <th style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>Payment</th>
+                  <th style={{ padding: '10px 14px', width: '24%', textAlign: 'right', whiteSpace: 'nowrap' }}>Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -841,7 +848,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
 
         {/* Low Stock Restock Watchlist Card */}
         <div className="card">
-          <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-border)' }}>
+          <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <AlertTriangle size={18} color="var(--warning-500)" />
               <h3 className="card-title" style={{ fontSize: '1rem', fontWeight: 700 }}>Critical Stock Replenishment</h3>
@@ -850,14 +857,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onView
               Adjust Stock
             </button>
           </div>
-          <div style={{ width: '100%', overflow: 'hidden' }}>
-            <table className="table" style={{ width: '100%', tableLayout: 'fixed' }}>
+          <div className="table-responsive" style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <table className="table" style={{ width: '100%', minWidth: 460 }}>
               <thead>
                 <tr>
-                  <th style={{ padding: '10px 14px', width: '22%' }}>Item Code</th>
-                  <th style={{ padding: '10px 14px', width: '38%' }}>Product Name</th>
-                  <th style={{ padding: '10px 14px', width: '22%' }}>Stock</th>
-                  <th style={{ padding: '10px 14px', width: '18%', textAlign: 'right' }}>Status</th>
+                  <th style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>Item Code</th>
+                  <th style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>Product Name</th>
+                  <th style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>Stock</th>
+                  <th style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>Status</th>
                 </tr>
               </thead>
               <tbody>

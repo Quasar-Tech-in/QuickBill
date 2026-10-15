@@ -401,7 +401,7 @@ export const ReportsView: React.FC = () => {
       {/* P&L View */}
       {reportType === 'PNL' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
+          <div className="dashboard-dual-grid">
             {/* Income Summary Card */}
             <div className="card">
               <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -994,7 +994,7 @@ export const ReportsView: React.FC = () => {
           </div>
 
           {/* Supplier Payables Breakdown & Input Tax Credit (ITC) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 20 }}>
+          <div className="dashboard-dual-grid">
             {/* Supplier Outstanding Balances Card */}
             <div className="card">
               <div className="card-header">

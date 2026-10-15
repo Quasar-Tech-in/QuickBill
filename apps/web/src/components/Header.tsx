@@ -18,7 +18,8 @@ import {
   EyeOff,
   AlertCircle,
   CheckCircle2,
-  Lock
+  Lock,
+  Menu
 } from 'lucide-react';
 import { store } from '../services/store';
 import { Tenant, StoreLocation } from '../types';
@@ -30,6 +31,7 @@ interface HeaderProps {
   onNavigate: (tab: string) => void;
   onTenantChange?: (tenant: Tenant) => void;
   onLogout: () => void;
+  onToggleMobileDrawer?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -38,7 +40,8 @@ export const Header: React.FC<HeaderProps> = ({
   onQuickSale: _onQuickSale, 
   onNavigate,
   onTenantChange,
-  onLogout
+  onLogout,
+  onToggleMobileDrawer
 }) => {
   const tenants = store.getTenants();
   const activeTenant = store.getActiveTenant();
@@ -182,6 +185,30 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="top-header">
       <div className="header-left">
+        {/* Mobile / Tablet Hamburger Drawer Toggle Button */}
+        {onToggleMobileDrawer && (
+          <button
+            type="button"
+            className="mobile-menu-btn"
+            onClick={onToggleMobileDrawer}
+            aria-label="Toggle navigation drawer"
+            title="Open Menu"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--neutral-700)',
+              padding: '6px 8px',
+              cursor: 'pointer',
+              borderRadius: 'var(--radius-md)',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginRight: 4
+            }}
+          >
+            <Menu size={22} />
+          </button>
+        )}
+
         {/* Store Context Display: Governance Hub Badge for SuperAdmin */}
         {isSuperAdmin && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

@@ -138,6 +138,9 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   // Item-level discount editor state
   const [editingDiscountItemId, setEditingDiscountItemId] = useState<string | null>(null);
 
+  // Mobile POS Tab State ('CATALOG' vs 'CART')
+  const [mobilePosTab, setMobilePosTab] = useState<'CATALOG' | 'CART'>('CATALOG');
+
   // Staged Orders / Multi-Drafts State
   const [stagedOrders, setStagedOrders] = useState<StagedOrder[]>(() => store.getStagedOrders(store.getActiveLocation().id));
   const [activeStagedOrderId, setActiveStagedOrderId] = useState<string | null>(null);
@@ -1186,204 +1189,242 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   return (
     <div className="page-container" style={{ paddingBottom: 16 }}>
+      {/* Mobile POS Tab Switcher */}
+      <div className="mobile-pos-switcher">
+        <button
+          type="button"
+          className={`mobile-pos-switcher-btn ${mobilePosTab === 'CATALOG' ? 'active' : ''}`}
+          onClick={() => setMobilePosTab('CATALOG')}
+        >
+          <Package size={16} />
+          <span>Items ({items.length})</span>
+        </button>
+        <button
+          type="button"
+          className={`mobile-pos-switcher-btn ${mobilePosTab === 'CART' ? 'active' : ''}`}
+          onClick={() => setMobilePosTab('CART')}
+        >
+          <ShoppingBag size={16} />
+          <span>Active Bill ({cart.reduce((s, c) => s + (c.quantity || 0), 0)})</span>
+          {cart.length > 0 && (
+            <span style={{ 
+              backgroundColor: mobilePosTab === 'CART' ? 'var(--primary-600)' : 'var(--neutral-500)',
+              color: '#ffffff',
+              fontSize: '0.70rem',
+              fontWeight: 800,
+              padding: '1px 6px',
+              borderRadius: 10
+            }}>
+              ₹{grandTotal.toFixed(0)}
+            </span>
+          )}
+        </button>
+      </div>
+
       <div className="pos-layout">
         {/* Left Column: Product Catalog & Search */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0, overflow: 'visible', position: 'relative' }}>
+        <div 
+          className={`pos-catalog-panel ${mobilePosTab === 'CART' ? 'mobile-hidden' : ''}`}
+          style={{ display: 'flex', flexDirection: 'column', gap: 12, overflow: 'visible', position: 'relative' }}
+        >
           
           {/* Top Search & Category Filter Bar */}
           <div className="card" style={{ padding: '12px 16px', position: 'relative', zIndex: 40, flexShrink: 0, overflow: 'visible' }}>
-            {/* Active Branch Notice & Manual Refresh */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: 'var(--neutral-700)', fontWeight: 600 }}>
-                <MapPin size={14} color="var(--primary-600)" />
-                <span>POS Active Branch: <strong>{activeLocation.name}</strong></span>
-                <span style={{ fontSize: '0.68rem', padding: '1px 7px', borderRadius: 10, backgroundColor: 'var(--success-50)', color: 'var(--success-700)', fontWeight: 700 }}>
-                  Live ({items.length} listed items)
-                </span>
-              </div>
+            {/* Top Notices (Hidden on Mobile Phones to prioritize fast search & products) */}
+            <div className="desktop-only-pos-header">
+              {/* Active Branch Notice & Manual Refresh */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: 'var(--neutral-700)', fontWeight: 600 }}>
+                  <MapPin size={14} color="var(--primary-600)" />
+                  <span>POS Active Branch: <strong>{activeLocation.name}</strong></span>
+                  <span style={{ fontSize: '0.68rem', padding: '1px 7px', borderRadius: 10, backgroundColor: 'var(--success-50)', color: 'var(--success-700)', fontWeight: 700 }}>
+                    Live ({items.length} listed items)
+                  </span>
+                </div>
 
-              {/* Manual Refresh Stocks Button */}
-              <button
-                type="button"
-                onClick={() => refreshData(true)}
-                disabled={isRefreshing}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '4px 10px',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: isRefreshing ? 'var(--neutral-200)' : 'var(--neutral-100)',
-                  border: '1px solid var(--neutral-300)',
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  color: 'var(--neutral-800)',
-                  cursor: isRefreshing ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.15s ease',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-                }}
-                title="Refresh product list and real-time stock levels from server"
-              >
-                <RotateCw size={13} style={{ animation: isRefreshing ? 'spin 0.75s linear infinite' : 'none' }} />
-                <span>{isRefreshing ? 'Refreshing...' : 'Refresh Stocks'}</span>
-              </button>
-            </div>
-
-            {/* Staged Orders / Multi-Drafts Quick Ribbon */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              backgroundColor: stagedOrders.length > 0 ? '#fffbeb' : '#f8fafc',
-              border: `1px solid ${stagedOrders.length > 0 ? '#fde68a' : '#e2e8f0'}`,
-              borderRadius: 'var(--radius-md, 8px)',
-              padding: '6px 10px',
-              marginBottom: 10,
-              gap: 8,
-              flexWrap: 'wrap',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto' }}>
+                {/* Manual Refresh Stocks Button */}
                 <button
                   type="button"
-                  onClick={() => setIsDraftsDrawerOpen(true)}
+                  onClick={() => refreshData(true)}
+                  disabled={isRefreshing}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 5,
-                    backgroundColor: stagedOrders.length > 0 ? '#d97706' : '#64748b',
-                    color: '#ffffff',
+                    gap: 6,
                     padding: '4px 10px',
-                    borderRadius: 6,
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: isRefreshing ? 'var(--neutral-200)' : 'var(--neutral-100)',
+                    border: '1px solid var(--neutral-300)',
                     fontSize: '0.74rem',
-                    fontWeight: 700,
-                    border: 'none',
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.08)'
+                    fontWeight: 600,
+                    color: 'var(--neutral-800)',
+                    cursor: isRefreshing ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
                   }}
-                  title="View all held orders / drafts (Alt+D)"
+                  title="Refresh product list and real-time stock levels from server"
                 >
-                  <Layers size={13} />
-                  <span>Drafts ({stagedOrders.length})</span>
+                  <RotateCw size={13} style={{ animation: isRefreshing ? 'spin 0.75s linear infinite' : 'none' }} />
+                  <span>{isRefreshing ? 'Refreshing...' : 'Refresh Stocks'}</span>
                 </button>
+              </div>
 
-                {stagedOrders.length === 0 ? (
-                  <span style={{ fontSize: '0.73rem', color: 'var(--neutral-500)' }}>
-                    No orders on hold. Use <strong>Alt+H</strong> or click "Hold Order" to stage the current cart.
-                  </span>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
-                    {stagedOrders.slice(0, 5).map((draft) => {
-                      const isActive = activeStagedOrderId === draft.id;
-                      const draftTotal = draft.cart.reduce((s, c) => s + (c.unitPrice * c.quantity), 0);
-                      return (
-                        <div
-                          key={draft.id}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 5,
-                            backgroundColor: isActive ? '#fef3c7' : '#ffffff',
-                            border: `1.5px solid ${isActive ? '#d97706' : '#cbd5e1'}`,
-                            padding: '3px 8px',
-                            borderRadius: 16,
-                            fontSize: '0.72rem',
-                            fontWeight: 700,
-                            color: isActive ? '#92400e' : '#334155',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => handleResumeStagedOrder(draft)}
+              {/* Staged Orders / Multi-Drafts Quick Ribbon */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: stagedOrders.length > 0 ? '#fffbeb' : '#f8fafc',
+                border: `1px solid ${stagedOrders.length > 0 ? '#fde68a' : '#e2e8f0'}`,
+                borderRadius: 'var(--radius-md, 8px)',
+                padding: '6px 10px',
+                marginBottom: 10,
+                gap: 8,
+                flexWrap: 'wrap',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsDraftsDrawerOpen(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      backgroundColor: stagedOrders.length > 0 ? '#d97706' : '#64748b',
+                      color: '#ffffff',
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: '0.74rem',
+                      fontWeight: 700,
+                      border: 'none',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.08)'
+                    }}
+                    title="View all held orders / drafts (Alt+D)"
+                  >
+                    <Layers size={13} />
+                    <span>Drafts ({stagedOrders.length})</span>
+                  </button>
+
+                  {stagedOrders.length === 0 ? (
+                    <span style={{ fontSize: '0.73rem', color: 'var(--neutral-500)' }}>
+                      No orders on hold. Use <strong>Alt+H</strong> or click "Hold Order" to stage the current cart.
+                    </span>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
+                      {stagedOrders.slice(0, 5).map((draft) => {
+                        const isActive = activeStagedOrderId === draft.id;
+                        const draftTotal = draft.cart.reduce((s, c) => s + (c.unitPrice * c.quantity), 0);
+                        return (
+                          <div
+                            key={draft.id}
                             style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'inherit',
-                              font: 'inherit',
-                              fontWeight: 'inherit',
-                              cursor: 'pointer',
                               display: 'inline-flex',
                               alignItems: 'center',
-                              gap: 4,
-                              padding: 0
+                              gap: 5,
+                              backgroundColor: isActive ? '#fef3c7' : '#ffffff',
+                              border: `1.5px solid ${isActive ? '#d97706' : '#cbd5e1'}`,
+                              padding: '3px 8px',
+                              borderRadius: 16,
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              color: isActive ? '#92400e' : '#334155',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                              whiteSpace: 'nowrap'
                             }}
-                            title={`Click to resume draft: ${draft.label} (${formatTimeAgo(draft.createdAt)})`}
                           >
-                            <Bookmark size={11} color={isActive ? '#d97706' : '#64748b'} />
-                            <span>{draft.label}</span>
-                            <span style={{ color: '#059669', fontWeight: 800 }}>₹{draftTotal.toFixed(0)}</span>
-                            <span style={{ fontSize: '0.64rem', color: '#94a3b8' }}>({draft.cart.length})</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteStagedOrder(draft.id, e)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: '#94a3b8',
-                              cursor: 'pointer',
-                              padding: '0 2px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              fontSize: '0.70rem',
-                              lineHeight: 1
-                            }}
-                            title="Discard this draft"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      );
-                    })}
-                    {stagedOrders.length > 5 && (
-                      <button
-                        type="button"
-                        onClick={() => setIsDraftsDrawerOpen(true)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: '#d97706',
-                          fontSize: '0.72rem',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          whiteSpace: 'nowrap',
-                          textDecoration: 'underline'
-                        }}
-                      >
-                        +{stagedOrders.length - 5} more...
-                      </button>
-                    )}
-                  </div>
+                            <button
+                              type="button"
+                              onClick={() => handleResumeStagedOrder(draft)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'inherit',
+                                font: 'inherit',
+                                fontWeight: 'inherit',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                padding: 0
+                              }}
+                              title={`Click to resume draft: ${draft.label} (${formatTimeAgo(draft.createdAt)})`}
+                            >
+                              <Bookmark size={11} color={isActive ? '#d97706' : '#64748b'} />
+                              <span>{draft.label}</span>
+                              <span style={{ color: '#059669', fontWeight: 800 }}>₹{draftTotal.toFixed(0)}</span>
+                              <span style={{ fontSize: '0.64rem', color: '#94a3b8' }}>({draft.cart.length})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteStagedOrder(draft.id, e)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#94a3b8',
+                                cursor: 'pointer',
+                                padding: '0 2px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                fontSize: '0.70rem',
+                                lineHeight: 1
+                              }}
+                              title="Discard this draft"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {stagedOrders.length > 5 && (
+                        <button
+                          type="button"
+                          onClick={() => setIsDraftsDrawerOpen(true)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#d97706',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            textDecoration: 'underline'
+                          }}
+                        >
+                          +{stagedOrders.length - 5} more...
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {cart.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleOpenStageModal}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: '#fef3c7',
+                      border: '1px solid #fde68a',
+                      color: '#b45309',
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: '0.73rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                    }}
+                    title="Stage / Hold active cart items (Alt+H)"
+                  >
+                    <PauseCircle size={13} />
+                    <span>Hold Active (Alt+H)</span>
+                  </button>
                 )}
               </div>
-
-              {cart.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleOpenStageModal}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    backgroundColor: '#fef3c7',
-                    border: '1px solid #fde68a',
-                    color: '#b45309',
-                    padding: '4px 10px',
-                    borderRadius: 6,
-                    fontSize: '0.73rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
-                  }}
-                  title="Stage / Hold active cart items (Alt+H)"
-                >
-                  <PauseCircle size={13} />
-                  <span>Hold Active (Alt+H)</span>
-                </button>
-              )}
             </div>
 
             {/* Search Input & Multi-Select Category Dropdown */}
@@ -1737,8 +1778,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
             )}
           </div>
 
-          {/* Fixed-Height Product Items Grid */}
-          <div className="item-catalog-grid" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', position: 'relative', zIndex: 1 }}>
+          {/* Product Items Grid */}
+          <div className="item-catalog-grid" style={{ position: 'relative', zIndex: 1 }}>
             {filteredItems.length === 0 ? (
               <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 36, color: 'var(--neutral-400)', backgroundColor: '#ffffff', borderRadius: 'var(--radius-md)', border: '1px dashed var(--neutral-300)' }}>
                 <Package size={38} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
@@ -1790,7 +1831,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                     }}
                   >
                     {/* Top Segment: Product Image Banner */}
-                    <div style={{
+                    <div className="pos-item-image-box" style={{
                       position: 'relative',
                       width: '100%',
                       height: 105,
@@ -1828,7 +1869,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                         <span style={{
                           fontSize: '0.65rem',
                           color: 'var(--neutral-700)',
-                          backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                          backgroundColor: 'rgba(255, 255, 255, 0.94)',
                           backdropFilter: 'blur(4px)',
                           border: '1px solid rgba(0, 0, 0, 0.08)',
                           padding: '2px 6px',
@@ -1836,7 +1877,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                           fontWeight: 600,
                           boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                           display: 'inline-block',
-                          maxWidth: 100,
+                          maxWidth: 110,
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -1845,41 +1886,19 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                         </span>
                       </div>
 
-                      {/* GST Pill Top-Right */}
-                      <div style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}>
-                        <span style={{
-                          fontSize: '0.62rem',
-                          backgroundColor: 'rgba(238, 242, 255, 0.95)',
-                          backdropFilter: 'blur(4px)',
-                          border: '1px solid var(--primary-200)',
-                          padding: '2px 5px',
-                          borderRadius: 4,
-                          color: 'var(--primary-700)',
-                          fontWeight: 700,
-                          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                        }}>
-                          GST {item.taxRate}%
-                        </span>
-                      </div>
-
-                      {/* Loose / Parts Tag Bottom-Left on Image */}
-                      {item.allowParts && (
-                        <div style={{ position: 'absolute', bottom: 6, left: 6, zIndex: 1 }}>
+                      {/* Out of Stock Warning Badge Top-Right */}
+                      {isOutOfStock && (
+                        <div style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}>
                           <span style={{
                             fontSize: '0.62rem',
-                            color: '#065f46',
-                            backgroundColor: 'rgba(236, 253, 245, 0.95)',
-                            backdropFilter: 'blur(4px)',
-                            border: '1px solid #a7f3d0',
-                            padding: '2px 5px',
+                            backgroundColor: 'rgba(239, 68, 68, 0.95)',
+                            color: '#ffffff',
+                            padding: '2px 6px',
                             borderRadius: 4,
                             fontWeight: 700,
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 3,
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
                           }}>
-                            ⚖️ Loose / Parts
+                            Out of Stock
                           </span>
                         </div>
                       )}
@@ -1894,11 +1913,44 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                       flex: 1,
                     }}>
                       <div>
-                        {/* Full Product Name (100% width, no clamping, natural wrapping) */}
+                        {/* Sub-header meta row: GST & Loose Parts badges */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexWrap: 'wrap' }}>
+                          {item.taxRate > 0 && (
+                            <span style={{
+                              fontSize: '0.64rem',
+                              backgroundColor: 'var(--primary-50)',
+                              border: '1px solid var(--primary-200)',
+                              padding: '1px 5px',
+                              borderRadius: 4,
+                              color: 'var(--primary-700)',
+                              fontWeight: 700,
+                            }}>
+                              GST {item.taxRate}%
+                            </span>
+                          )}
+                          {item.allowParts && (
+                            <span style={{
+                              fontSize: '0.64rem',
+                              color: '#065f46',
+                              backgroundColor: 'rgba(236, 253, 245, 0.95)',
+                              border: '1px solid #a7f3d0',
+                              padding: '1px 5px',
+                              borderRadius: 4,
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 2,
+                            }}>
+                              ⚖️ Loose
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Full Product Name (100% width, natural wrapping) */}
                         <h4 style={{
                           margin: '0 0 6px 0',
                           fontWeight: 700,
-                          fontSize: '0.88rem',
+                          fontSize: '0.86rem',
                           color: 'var(--neutral-900)',
                           lineHeight: '1.35',
                           wordBreak: 'normal',
@@ -1965,7 +2017,9 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         </div>
 
         {/* Right Column: Active Cart & Billing Actions */}
-        <div className="pos-cart-panel" style={{ height: '100%', maxHeight: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div 
+          className={`pos-cart-panel ${mobilePosTab === 'CATALOG' ? 'mobile-hidden' : ''}`}
+        >
           {/* Cart Header */}
           <div className="card-header" style={{ padding: '10px 14px', borderBottom: '1px solid var(--surface-border)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2011,7 +2065,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           </div>
 
           {/* Cart Items List with Independent Scroll */}
-          <div className="pos-cart-items" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', padding: '10px 12px', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="pos-cart-items" style={{ padding: '10px 12px', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 8 }}>
             
             {/* Active Draft Banner */}
             {activeStagedOrderId && (() => {
@@ -2583,6 +2637,45 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           )}
         </div>
       </div>
+
+      {/* Mobile Floating Cart Summary Bar */}
+      {cart.length > 0 && mobilePosTab === 'CATALOG' && (
+        <div 
+          className="mobile-floating-cart-bar" 
+          onClick={() => setMobilePosTab('CART')}
+          role="button"
+          tabIndex={0}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255, 255, 255, 0.22)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 800,
+              fontSize: '0.85rem'
+            }}>
+              {cart.reduce((s, c) => s + (c.quantity || 0), 0)}
+            </div>
+            <div>
+              <div style={{ fontSize: '0.70rem', opacity: 0.9, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>
+                Active Bill
+              </div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800 }}>
+                ₹{grandTotal.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.88rem' }}>
+            <span>Review Bill</span>
+            <ArrowRight size={16} />
+          </div>
+        </div>
+      )}
 
       {/* Post-Item Selection: Consumer Information & Bill Generation Confirmation Modal */}
       {isCheckoutModalOpen && (

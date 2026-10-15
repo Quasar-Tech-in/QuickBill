@@ -16,7 +16,8 @@ import {
   Lock,
   Building,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  X
 } from 'lucide-react';
 import { store } from '../services/store';
 
@@ -26,6 +27,8 @@ interface SidebarProps {
   onLogout?: () => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  isMobileDrawerOpen?: boolean;
+  onCloseMobileDrawer?: () => void;
 }
 
 interface NavItem {
@@ -44,7 +47,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onTabChange: _onTabChange, 
   onLogout,
   isCollapsed: propIsCollapsed,
-  onToggleCollapse
+  onToggleCollapse,
+  isMobileDrawerOpen,
+  onCloseMobileDrawer
 }) => {
   const location = useLocation();
   const [, setTick] = useState(0);
@@ -58,6 +63,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   const isCollapsed = propIsCollapsed !== undefined ? propIsCollapsed : internalCollapsed;
+  // Inside mobile drawer, always expand so all text, option names, and headers are visible
+  const isEffectivelyCollapsed = isCollapsed && !isMobileDrawerOpen;
 
   const toggleCollapse = () => {
     if (onToggleCollapse) {
@@ -199,102 +206,130 @@ export const Sidebar: React.FC<SidebarProps> = ({
     : tenantNavItems.filter(item => item.roles?.includes(userRole));
 
   return (
-    <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
-      {/* Sidebar Header */}
-      <div className="sidebar-header" style={{ position: 'relative' }}>
+    <>
+      {/* Mobile Drawer Backdrop Overlay */}
+      {isMobileDrawerOpen && (
         <div 
-          className="sidebar-brand-icon" 
-          style={{ 
-            overflow: 'hidden', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            cursor: isCollapsed ? 'pointer' : 'default',
-            flexShrink: 0
-          }}
-          title={isCollapsed ? `${brandTitle} (Click to expand sidebar)` : brandTitle}
-          onClick={isCollapsed ? toggleCollapse : undefined}
-        >
-          {!isSuperAdmin && activeTenant?.logoUrl ? (
-            <img 
-              src={activeTenant.logoUrl} 
-              alt="Logo" 
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-              onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-            />
-          ) : isSuperAdmin ? (
-            <Sparkles size={20} color="#ffffff" />
-          ) : (
-            <Building size={20} color="#ffffff" />
+          className="mobile-drawer-backdrop" 
+          onClick={onCloseMobileDrawer}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside className={`sidebar ${isEffectivelyCollapsed ? 'collapsed' : ''} ${isMobileDrawerOpen ? 'mobile-open' : ''}`}>
+        {/* Sidebar Header */}
+        <div className="sidebar-header" style={{ position: 'relative' }}>
+          <div 
+            className="sidebar-brand-icon" 
+            style={{ 
+              overflow: 'hidden', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              cursor: isEffectivelyCollapsed ? 'pointer' : 'default',
+              flexShrink: 0
+            }}
+            title={isEffectivelyCollapsed ? `${brandTitle} (Click to expand sidebar)` : brandTitle}
+            onClick={isEffectivelyCollapsed ? toggleCollapse : undefined}
+          >
+            {!isSuperAdmin && activeTenant?.logoUrl ? (
+              <img 
+                src={activeTenant.logoUrl} 
+                alt="Logo" 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+              />
+            ) : isSuperAdmin ? (
+              <Sparkles size={20} color="#ffffff" />
+            ) : (
+              <Building size={20} color="#ffffff" />
+            )}
+          </div>
+
+          {!isEffectivelyCollapsed && (
+            <>
+              <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
+                <h1 className="sidebar-brand-title" style={{ fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={brandTitle}>
+                  {brandTitle}
+                </h1>
+                {brandTagline && (
+                  <p style={{ fontSize: '0.68rem', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {brandTagline}
+                  </p>
+                )}
+              </div>
+              {!isMobileDrawerOpen && (
+                <button
+                  type="button"
+                  onClick={toggleCollapse}
+                  className="sidebar-toggle-btn"
+                  title="Minimize sidebar (Ctrl+B)"
+                  aria-label="Minimize sidebar"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    padding: '6px',
+                    borderRadius: 6,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.15s ease',
+                    flexShrink: 0
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <PanelLeftClose size={18} />
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Mobile Drawer Close Button */}
+          {onCloseMobileDrawer && (
+            <button
+              type="button"
+              className="mobile-drawer-close-btn"
+              onClick={onCloseMobileDrawer}
+              aria-label="Close navigation drawer"
+              title="Close Menu"
+            >
+              <X size={20} />
+            </button>
           )}
         </div>
 
-        {!isCollapsed && (
-          <>
-            <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
-              <h1 className="sidebar-brand-title" style={{ fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={brandTitle}>
-                {brandTitle}
-              </h1>
-              {brandTagline && (
-                <p style={{ fontSize: '0.68rem', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {brandTagline}
-                </p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={toggleCollapse}
-              className="sidebar-toggle-btn"
-              title="Minimize sidebar (Ctrl+B)"
-              aria-label="Minimize sidebar"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#94a3b8',
-                cursor: 'pointer',
-                padding: '6px',
-                borderRadius: 6,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.15s ease',
-                flexShrink: 0
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = 'transparent'; }}
-            >
-              <PanelLeftClose size={18} />
-            </button>
-          </>
-        )}
-      </div>
+        {/* Navigation */}
+        <nav className="sidebar-nav">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isItemLocked = isStoreLocked && item.isLockedWhenStoreSuspended;
+            const isItemActive = 
+              location.pathname === item.path || 
+              (item.id === 'transactions' && location.pathname === '/transactions');
 
-      {/* Navigation */}
-      <nav className="sidebar-nav">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isItemLocked = isStoreLocked && item.isLockedWhenStoreSuspended;
-          const isItemActive = 
-            location.pathname === item.path || 
-            (item.id === 'transactions' && location.pathname === '/transactions');
-
-          return (
-            <NavLink
-              key={item.id}
-              to={isItemLocked ? '#' : item.path}
-              onClick={(e) => {
-                if (isItemLocked) {
-                  e.preventDefault();
-                  return;
-                }
-              }}
+            return (
+              <NavLink
+                key={item.id}
+                to={isItemLocked ? '#' : item.path}
+                onClick={(e) => {
+                  if (isItemLocked) {
+                    e.preventDefault();
+                    return;
+                  }
+                  if (onCloseMobileDrawer) {
+                    onCloseMobileDrawer();
+                  }
+                }}
               className={({ isActive }) => `nav-link ${isActive || isItemActive ? 'active' : ''}`}
-              title={isCollapsed 
+              title={isEffectivelyCollapsed 
                 ? `${item.label}${isItemLocked ? ' (Feature locked: Store suspended)' : ''}`
                 : (isItemLocked ? 'Feature locked: Store is currently suspended / expired' : undefined)
               }
               style={{ 
-                width: isCollapsed ? 44 : '100%', 
+                width: isEffectivelyCollapsed ? 44 : '100%', 
                 textDecoration: 'none',
                 opacity: isItemLocked ? 0.55 : 1,
                 cursor: isItemLocked ? 'not-allowed' : 'pointer',
@@ -302,12 +337,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }}
             >
               <Icon size={18} color={item.isSuper ? '#a5b4fc' : undefined} />
-              {!isCollapsed && (
+              {!isEffectivelyCollapsed && (
                 <span style={{ flex: 1, color: item.isSuper && !isItemActive ? '#c7d2fe' : undefined, fontWeight: item.isSuper ? 600 : undefined }}>
                   {item.label}
                 </span>
               )}
-              {isCollapsed ? (
+              {isEffectivelyCollapsed ? (
                 isItemLocked && (
                   <span 
                     style={{
@@ -363,51 +398,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar Footer */}
       <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {/* Toggle Collapse/Expand Button in Footer Rail */}
-        <button
-          type="button"
-          onClick={toggleCollapse}
-          title={isCollapsed ? "Expand sidebar (Ctrl+B)" : "Minimize sidebar (Ctrl+B)"}
-          aria-label={isCollapsed ? "Expand sidebar" : "Minimize sidebar"}
-          style={{
-            width: isCollapsed ? 44 : '100%',
-            height: 36,
-            margin: '0 auto',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: isCollapsed ? 'center' : 'flex-start',
-            gap: 10,
-            padding: isCollapsed ? 0 : '0 12px',
-            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: 'var(--radius-md)',
-            color: '#94a3b8',
-            fontSize: '0.78rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.15s ease'
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'; }}
-        >
-          {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          {!isCollapsed && <span>Minimize Sidebar</span>}
-        </button>
+        {/* Toggle Collapse/Expand Button in Footer Rail (Desktop / Tablet only) */}
+        {!isMobileDrawerOpen && (
+          <button
+            type="button"
+            onClick={toggleCollapse}
+            title={isEffectivelyCollapsed ? "Expand sidebar (Ctrl+B)" : "Minimize sidebar (Ctrl+B)"}
+            aria-label={isEffectivelyCollapsed ? "Expand sidebar" : "Minimize sidebar"}
+            style={{
+              width: isEffectivelyCollapsed ? 44 : '100%',
+              height: 36,
+              margin: '0 auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: isEffectivelyCollapsed ? 'center' : 'flex-start',
+              gap: 10,
+              padding: isEffectivelyCollapsed ? 0 : '0 12px',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: 'var(--radius-md)',
+              color: '#94a3b8',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'; }}
+          >
+            {isEffectivelyCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            {!isEffectivelyCollapsed && <span>Minimize Sidebar</span>}
+          </button>
+        )}
 
         {onLogout && (
           <button
-            onClick={onLogout}
-            title={isCollapsed ? "Sign Out" : undefined}
+            onClick={() => {
+              if (onCloseMobileDrawer) onCloseMobileDrawer();
+              if (onLogout) onLogout();
+            }}
+            title={isEffectivelyCollapsed ? "Sign Out" : undefined}
             aria-label="Sign Out"
             style={{
-              width: isCollapsed ? 44 : '100%',
+              width: isEffectivelyCollapsed ? 44 : '100%',
               height: 36,
               margin: '0 auto',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 8,
-              padding: isCollapsed ? 0 : '8px 12px',
+              padding: isEffectivelyCollapsed ? 0 : '8px 12px',
               backgroundColor: 'rgba(239, 68, 68, 0.12)',
               border: '1px solid rgba(239, 68, 68, 0.25)',
               borderRadius: 'var(--radius-md)',
@@ -419,10 +459,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
           >
             <LogOut size={14} />
-            {!isCollapsed && <span>Sign Out</span>}
+            {!isEffectivelyCollapsed && <span>Sign Out</span>}
           </button>
         )}
       </div>
     </aside>
+  </>
   );
 };

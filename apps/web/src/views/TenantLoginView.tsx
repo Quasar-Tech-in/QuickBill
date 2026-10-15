@@ -290,9 +290,19 @@ export const TenantLoginView: React.FC<TenantLoginViewProps> = ({
           
           {/* Header */}
           <div className="login-form-header">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: 12 }}>
-              <div className="login-header-icon-box">
-                <Store size={22} color="var(--primary-600)" />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="login-header-icon-box">
+                  <Store size={22} color="var(--primary-600)" />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--neutral-900)', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+                    QuickBill
+                  </div>
+                  <div style={{ fontSize: '0.70rem', color: 'var(--neutral-500)', fontWeight: 600 }}>
+                    Store POS & Inventory
+                  </div>
+                </div>
               </div>
 
               {/* Backend Health Status Pill */}

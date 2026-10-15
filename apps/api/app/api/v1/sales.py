@@ -31,7 +31,15 @@ async def list_sales(
         conditions.append({"locationId": location_id})
 
     if status and status != "ALL":
-        conditions.append({"paymentStatus": status})
+        if status == "RETURNS":
+            conditions.append({
+                "$or": [
+                    {"hasReturns": True},
+                    {"returnTotal": {"$gt": 0}}
+                ]
+            })
+        else:
+            conditions.append({"paymentStatus": status})
 
     if search and search.strip():
         s = search.strip()

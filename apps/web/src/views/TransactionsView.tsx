@@ -42,7 +42,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID' | 'RETURNS'>('ALL');
   const [updatingInvoice, setUpdatingInvoice] = useState<Invoice | null>(null);
 
   // Debounce search query input (300ms) for responsive API searching
@@ -84,6 +84,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
     } catch (e) {
       console.error('Error fetching paginated invoices:', e);
       let local = store.getInvoices(locId !== 'ALL' ? locId : undefined);
+      if (status === 'RETURNS') {
+        local = local.filter(i => i.hasReturns || (i.returnTotal && i.returnTotal > 0));
+      } else if (status !== 'ALL') {
+        local = local.filter(i => i.status === status);
+      }
       if (range.fromDate) {
         local = local.filter(i => {
           const invDate = (i.date || (i.createdAt ? i.createdAt.split('T')[0] : '')).split('T')[0];
@@ -202,10 +207,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
           <div>
             <div className="invoices-stat-label">Returns &amp; Defective</div>
             <div className="invoices-stat-value" style={{ color: totalReturnsAmount > 0 ? 'var(--danger-700)' : 'var(--neutral-700)' }}>
-              -₹{totalReturnsAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {totalReturnsAmount > 0 ? `-₹${totalReturnsAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00'}
               {returnedBillsCount > 0 && (
                 <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--neutral-500)', marginLeft: 6 }}>
-                  ({returnedBillsCount} bills)
+                  ({returnedBillsCount} {returnedBillsCount === 1 ? 'bill' : 'bills'})
                 </span>
               )}
             </div>
@@ -278,6 +283,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
             <option value="PAID">✅ Paid in Full</option>
             <option value="PARTIAL">⏳ Partial / Due</option>
             <option value="UNPAID">❌ Unpaid / Credit</option>
+            <option value="RETURNS">🔄 Returned / Credit Notes</option>
           </select>
 
           {/* Single Date Range Button */}
@@ -531,9 +537,23 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
                         Tax: ₹{inv.taxTotal.toFixed(2)}
                       </div>
                       {inv.returnTotal !== undefined && inv.returnTotal > 0 ? (
-                        <div style={{ marginTop: 2 }}>
-                          <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--danger-700)', backgroundColor: 'rgba(239, 68, 68, 0.12)', padding: '1px 6px', borderRadius: 4 }}>
-                            🔄 Ret: -₹{Number(inv.returnTotal).toFixed(2)}
+                        <div style={{ marginTop: 4 }}>
+                          <span 
+                            style={{ 
+                              fontSize: '0.68rem', 
+                              fontWeight: 700, 
+                              color: 'var(--danger-700)', 
+                              backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+                              border: '1px solid rgba(239, 68, 68, 0.25)', 
+                              padding: '2px 6px', 
+                              borderRadius: 4, 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: 3 
+                            }}
+                          >
+                            <RotateCcw size={10} />
+                            <span>Ret: -₹{Number(inv.returnTotal).toFixed(2)}</span>
                           </span>
                         </div>
                       ) : null}

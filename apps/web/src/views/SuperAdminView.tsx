@@ -811,7 +811,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
           </div>
 
           <div className="table-responsive">
-            <table className="table">
+            <table className="table" style={{ width: '100%', minWidth: 780 }}>
               <thead>
                 <tr>
                   <th>Store / Business</th>
@@ -1084,7 +1084,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
             </div>
 
             <div className="table-responsive">
-              <table className="table">
+              <table className="table" style={{ width: '100%', minWidth: 780 }}>
                 <thead>
                   <tr>
                     <th>Store Name</th>
@@ -1242,7 +1242,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
             </div>
 
             <div className="table-responsive">
-              <table className="table">
+              <table className="table" style={{ width: '100%', minWidth: 780 }}>
                 <thead>
                   <tr>
                     <th>Module / Capability</th>

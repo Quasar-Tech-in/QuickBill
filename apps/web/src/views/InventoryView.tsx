@@ -1381,7 +1381,7 @@ export const InventoryView: React.FC = () => {
       {/* Items Table */}
       <div className="card" style={{ overflow: 'hidden' }}>
         <div className="table-responsive">
-          <table className="table" style={{ width: '100%', margin: 0 }}>
+          <table className="table" style={{ width: '100%', minWidth: 820, margin: 0 }}>
             <thead>
               <tr>
                 <th style={{ width: '85px', padding: '10px 12px' }}>Code</th>
@@ -2256,7 +2256,7 @@ export const InventoryView: React.FC = () => {
                   </div>
 
                   {/* Row 1: Name & Category */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.8fr) minmax(0, 1.2fr)', gap: 10, marginBottom: 10 }}>
+                  <div className="modal-grid-row-2">
                     <div style={{ minWidth: 0 }}>
                       <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
                         Product / Item Name *
@@ -2291,7 +2291,7 @@ export const InventoryView: React.FC = () => {
                   </div>
 
                   {/* Row 2: SKU, Barcode, GST Rate, Unit */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+                  <div className="modal-grid-row-4">
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
                         <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)' }}>
@@ -2529,7 +2529,7 @@ export const InventoryView: React.FC = () => {
 
                         {/* Branch Tabs if more than 1 location */}
                         {locations.length > 1 && (
-                          <div style={{ display: 'inline-flex', background: 'var(--neutral-200)', padding: 2, borderRadius: 6, gap: 2 }}>
+                          <div style={{ display: 'inline-flex', maxWidth: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', background: 'var(--neutral-200)', padding: 2, borderRadius: 6, gap: 2 }}>
                             {locations.map((loc) => {
                               const isSelected = loc.id === activeLoc.id;
                               const locData = locationOverrides[loc.id];
@@ -2617,7 +2617,7 @@ export const InventoryView: React.FC = () => {
                         {currentLocData.isListed ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                             {/* 4-column compact Grid */}
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+                            <div className="modal-grid-row-4">
                               <div style={{ minWidth: 0 }}>
                                 <label style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
                                   Selling Price ₹ (MRP) *
@@ -2808,13 +2808,11 @@ export const InventoryView: React.FC = () => {
 
                               {currentLocData.hasDiscount && (
                                 <div
+                                  className="modal-grid-row-2"
                                   style={{
                                     marginTop: 8,
                                     paddingTop: 8,
                                     borderTop: '1px dashed var(--neutral-200)',
-                                    display: 'grid',
-                                    gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)',
-                                    gap: 10,
                                   }}
                                 >
                                   <div style={{ minWidth: 0 }}>

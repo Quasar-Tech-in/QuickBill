@@ -334,10 +334,24 @@ body {
 /* Page Body Container */
 .page-container {
   flex: 1;
-  padding: 28px;
+  padding: 24px;
   max-width: 1440px;
   margin: 0 auto;
   width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1024px) {
+  .page-container {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-container {
+    padding: 12px;
+    padding-bottom: 74px; /* Room for MobileBottomNav */
+  }
 }
 
 /* KPI Card Grid */
@@ -1987,12 +2001,13 @@ button:disabled:hover,
 @media (max-width: 900px) {
   .login-split-page {
     flex-direction: column;
-    height: 100vh;
-    height: 100dvh;
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: auto;
     overflow-y: auto;
   }
   .login-hero-pane {
-    padding: 20px;
+    padding: 24px 20px;
     height: auto;
     max-height: none;
     flex: none;
@@ -2011,6 +2026,33 @@ button:disabled:hover,
     height: auto;
     max-height: none;
     flex: 1;
+  }
+}
+
+@media (max-width: 768px) {
+  /* On phones, hide bulky marketing hero pane completely so only the sign-in form is displayed directly */
+  .login-hero-pane {
+    display: none !important;
+  }
+  .login-split-page {
+    background: #f8fafc !important;
+    justify-content: center !important;
+  }
+  .login-form-pane {
+    padding: 20px 16px !important;
+    min-height: 100dvh !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  .login-form-container {
+    max-width: 440px !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    padding: 28px 20px !important;
+    border-radius: var(--radius-lg) !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06) !important;
+    border: 1px solid var(--neutral-200) !important;
   }
 }
 
@@ -3132,5 +3174,410 @@ button:disabled:hover,
     display: inline-flex !important;
   }
 }
+
+/* =========================================================
+   Mobile & Tablet Responsive System
+   ========================================================= */
+
+/* --- 1. Header Responsive Rules --- */
+.mobile-menu-btn {
+  display: none !important;
+}
+
+@media (max-width: 1024px) {
+  .mobile-menu-btn {
+    display: inline-flex !important;
+  }
+  .top-header {
+    padding: 0 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .top-header {
+    padding: 0 12px;
+    height: 56px;
+    min-height: 56px;
+  }
+  .main-content-scroll {
+    height: calc(100vh - 56px);
+  }
+  .header-left {
+    gap: 8px;
+  }
+  .header-right {
+    gap: 8px;
+  }
+  .header-desktop-only {
+    display: none !important;
+  }
+  .header-location-selector .tenant-static-icon-btn {
+    padding: 4px 8px !important;
+  }
+  .header-location-selector .tenant-static-icon-btn span:first-of-type {
+    display: none;
+  }
+}
+
+/* --- 2. Sidebar Mobile Drawer & Tablet Rail --- */
+.mobile-drawer-backdrop {
+  display: none;
+}
+
+.mobile-drawer-close-btn {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    width: 280px !important;
+    max-width: 85vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    z-index: 10000 !important;
+    transform: translateX(-100%) !important;
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 6px 0 30px rgba(0, 0, 0, 0.5) !important;
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0) !important;
+  }
+  .mobile-drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 9999;
+    animation: fadeIn 0.2s ease;
+  }
+  .mobile-drawer-close-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+  }
+}
+
+/* Tablet: Sidebar defaults to compact rail (68px) */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .sidebar:not(.expanded) {
+    width: 68px !important;
+  }
+  .sidebar:not(.expanded) .sidebar-header {
+    padding: 0 10px !important;
+    justify-content: center !important;
+  }
+  .sidebar:not(.expanded) .sidebar-brand-title,
+  .sidebar:not(.expanded) .sidebar-toggle-btn {
+    display: none !important;
+  }
+  .sidebar:not(.expanded) .sidebar-nav {
+    padding: 16px 8px !important;
+    align-items: center !important;
+  }
+  .sidebar:not(.expanded) .nav-link {
+    gap: 0 !important;
+    width: 44px !important;
+    height: 44px !important;
+    padding: 0 !important;
+    justify-content: center !important;
+    align-items: center !important;
+    margin: 0 auto !important;
+  }
+  .sidebar:not(.expanded) .nav-label,
+  .sidebar:not(.expanded) .nav-badge-pill {
+    display: none !important;
+  }
+}
+
+/* --- 3. Mobile Bottom Navigation Bar --- */
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 58px;
+    padding-bottom: env(safe-area-inset-bottom, 6px);
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--neutral-200);
+    z-index: 9000;
+    align-items: center;
+    justify-content: space-around;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.07);
+  }
+  .mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 10px;
+    color: var(--neutral-500);
+    text-decoration: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.68rem;
+    font-weight: 600;
+    transition: color 0.15s ease, transform 0.1s ease;
+    min-width: 50px;
+  }
+  .mobile-nav-item:active {
+    transform: scale(0.92);
+  }
+  .mobile-nav-item.active {
+    color: var(--primary-600);
+    font-weight: 700;
+  }
+  .mobile-nav-badge {
+    position: absolute;
+    top: -4px;
+    right: -8px;
+    background-color: var(--primary-600);
+    color: #ffffff;
+    font-size: 0.62rem;
+    font-weight: 800;
+    padding: 1px 5px;
+    border-radius: 999px;
+    border: 1.5px solid #ffffff;
+    line-height: 1.1;
+  }
+  .mobile-nav-label {
+    letter-spacing: -0.01em;
+  }
+}
+
+/* --- 4. Mobile & Tablet POS Billing Layout --- */
+.mobile-pos-switcher {
+  display: none;
+}
+
+.mobile-floating-cart-bar {
+  display: none;
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .pos-layout {
+    grid-template-columns: 1fr 330px !important;
+    gap: 12px !important;
+  }
+  .item-catalog-grid {
+    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .pos-layout {
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    gap: 12px !important;
+  }
+  .pos-catalog-panel {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    flex: none !important;
+  }
+  .pos-catalog-panel.mobile-hidden,
+  .pos-cart-panel.mobile-hidden {
+    display: none !important;
+  }
+  .desktop-only-pos-header {
+    display: none !important;
+  }
+  .pos-cart-panel {
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 480px !important;
+    overflow: visible !important;
+    flex: none !important;
+    padding-bottom: 90px !important;
+  }
+  .pos-cart-items {
+    flex: none !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 120px !important;
+    overflow: visible !important;
+  }
+  .mobile-pos-switcher {
+    display: flex !important;
+    width: 100%;
+    background-color: var(--neutral-100);
+    padding: 3px;
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+  }
+  .mobile-pos-switcher-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: transparent;
+    color: var(--neutral-600);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .mobile-pos-switcher-btn.active {
+    background: #ffffff;
+    color: var(--primary-700);
+    font-weight: 700;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  .item-catalog-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 12px !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    flex: none !important;
+    padding-bottom: 90px !important;
+  }
+  .pos-item-card {
+    min-height: 195px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05) !important;
+  }
+  .pos-item-card .pos-item-image-box {
+    height: 85px !important;
+  }
+  .mobile-floating-cart-bar {
+    display: flex !important;
+    position: fixed;
+    bottom: 66px;
+    left: 12px;
+    right: 12px;
+    background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
+    color: #ffffff;
+    padding: 10px 16px;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 24px rgba(79, 70, 229, 0.45);
+    align-items: center;
+    justify-content: space-between;
+    z-index: 8500;
+    animation: slideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    cursor: pointer;
+  }
+}
+
+/* Responsive Item Modal Grid Layouts */
+.modal-grid-row-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.modal-grid-row-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+@media (max-width: 820px) {
+  .modal-grid-row-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+  .modal-grid-row-2 {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+}
+@media (max-width: 520px) {
+  .modal-grid-row-4 {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+}
+
+/* --- 5. Responsive Grids for Dashboard, Inventory & Analytics --- */
+.dashboard-dual-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-dual-grid,
+  .dashboard-analytics-grid,
+  .dashboard-tables-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .kpi-cards-grid,
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+  }
+  .metric-card {
+    padding: 14px !important;
+  }
+  .metric-value {
+    font-size: 1.45rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .kpi-cards-grid,
+  .kpi-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* --- 6. Responsive Modals & Touch Targets --- */
+@media (max-width: 768px) {
+  .modal-card {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    margin: 8px !important;
+    max-height: 92dvh !important;
+    border-radius: var(--radius-lg) !important;
+  }
+  .scanner-hud-modal {
+    width: 96vw !important;
+    max-width: 96vw !important;
+    padding: 0 !important;
+  }
+  .btn {
+    min-height: 38px;
+  }
+}
+
 
 

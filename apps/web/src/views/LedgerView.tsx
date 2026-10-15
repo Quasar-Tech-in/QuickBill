@@ -958,7 +958,7 @@ export const LedgerView: React.FC = () => {
       {/* Unified Ledger Entries Table */}
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="table-responsive">
-          <table className="table">
+          <table className="table" style={{ width: '100%', minWidth: 780 }}>
             <thead>
               <tr>
                 <th>Date & Branch</th>

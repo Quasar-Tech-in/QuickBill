@@ -534,7 +534,7 @@ export const PartiesView: React.FC = () => {
       {/* Profiles Directory Table */}
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="table-responsive">
-          <table className="table">
+          <table className="table" style={{ width: '100%', minWidth: 780 }}>
             <thead>
               <tr>
                 <th>Profile Name & Address</th>

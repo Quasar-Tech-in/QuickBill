@@ -353,11 +353,11 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
       <div 
-        className="modal-content" 
+        className="modal-content modal-card" 
         onClick={(e) => e.stopPropagation()} 
         style={{ 
           width: '100%',
-          maxWidth: 820, 
+          maxWidth: 860, 
           maxHeight: '92vh', 
           display: 'flex', 
           flexDirection: 'column', 
@@ -383,8 +383,8 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
               borderRadius: 'var(--radius-md)', 
               backgroundColor: 'var(--primary-100)', 
               color: 'var(--primary-700)',
-              display: 'flex',
-              alignItems: 'center',
+              display: 'flex', 
+              alignItems: 'center', 
               justifyContent: 'center'
             }}>
               <RotateCcw size={18} />
@@ -412,14 +412,14 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
 
         {/* Modal Body */}
         <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
-          {/* Explicit Warning Alert Banner Regarding Inventory Stock */}
+          {/* Explicit Notice Alert Banner Regarding Inventory & Returns */}
           <div style={{ 
             backgroundColor: '#fffbeb', 
             border: '1px solid #fef08a', 
             borderLeft: '4px solid #f59e0b',
             padding: '12px 16px', 
             borderRadius: 'var(--radius-md)',
-            marginBottom: 20,
+            marginBottom: 18,
             display: 'flex',
             alignItems: 'flex-start',
             gap: 12
@@ -427,10 +427,10 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
             <AlertTriangle size={20} color="#d97706" style={{ flexShrink: 0, marginTop: 2 }} />
             <div>
               <div style={{ fontSize: '0.84rem', fontWeight: 800, color: '#92400e', marginBottom: 2 }}>
-                ⚠️ Important Notice: Inventory Stock Separation
+                Return &amp; Credit Note Notice
               </div>
               <p style={{ fontSize: '0.78rem', color: '#b45309', margin: 0, lineHeight: 1.45 }}>
-                Updating this bill will recalculate billing amounts, register return/defective marks on the receipt, and adjust financial records. <strong>It will NOT automatically restock physical inventory in your store/warehouse</strong>. Please process and inspect physical restockable items separately under <strong>Inventory &amp; Items &gt; Adjust Stock</strong>.
+                Processing returns will recalculate bill totals, update accounting ledgers, and adjust payments. Items marked as <strong>Restockable</strong> are added back to store inventory, while items marked as <strong>Defective</strong> are scrapped.
               </p>
             </div>
           </div>
@@ -447,8 +447,8 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
               Line Items &amp; Return Allocation
             </h4>
 
-            <div style={{ border: '1px solid var(--neutral-200)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+            <div className="table-responsive" style={{ border: '1px solid var(--neutral-200)', borderRadius: 'var(--radius-md)', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <table style={{ width: '100%', minWidth: 640, borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                 <thead>
                   <tr style={{ backgroundColor: 'var(--neutral-50)', borderBottom: '1px solid var(--neutral-200)', color: 'var(--neutral-600)', textAlign: 'left' }}>
                     <th style={{ padding: '10px 14px', width: '34%' }}>Item &amp; Price</th>
@@ -464,6 +464,12 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
                     const displayQtyStr = qtyInputMap[it.itemId] !== undefined 
                       ? qtyInputMap[it.itemId] 
                       : (it.returnedQty > 0 ? String(it.returnedQty) : '0');
+
+                    const lineGross = it.returnedQty * it.unitPrice;
+                    const lineDisc = it.discountAmount !== undefined 
+                      ? (it.originalQty > 0 ? (it.returnedQty / it.originalQty) * it.discountAmount : 0)
+                      : (it.discountPercent ? lineGross * (it.discountPercent / 100) : 0);
+                    const lineRefundVal = Math.max(0, lineGross - lineDisc);
 
                     return (
                       <tr 
@@ -483,8 +489,8 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
                             Billed: {it.originalQty.toLocaleString(undefined, { maximumFractionDigits: 3 })} {it.unit} • Active: {activeQty.toLocaleString(undefined, { maximumFractionDigits: 3 })} {it.unit}
                           </div>
                           {it.returnedQty > 0 && (
-                            <div style={{ fontSize: '0.72rem', color: 'var(--danger-600)', fontWeight: 700, marginTop: 2 }}>
-                              Refund Amount: ₹{(it.returnedQty * it.unitPrice * (1 - (it.discountPercent || 0) / 100)).toFixed(2)} (Full Product Value)
+                            <div style={{ fontSize: '0.72rem', color: 'var(--danger-700)', fontWeight: 700, marginTop: 2 }}>
+                              Refund Value: ₹{lineRefundVal.toFixed(2)}
                             </div>
                           )}
                         </td>
@@ -627,50 +633,50 @@ export const InvoiceUpdateModal: React.FC<InvoiceUpdateModalProps> = ({ invoice,
             borderRadius: 'var(--radius-md)', 
             padding: '16px 20px' 
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 6 }}>
               <h4 style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--neutral-800)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Financial Recalculation Preview (Tax-Inclusive MRP)
+                Financial Recalculation Summary
               </h4>
               {(totalItemDiscDeducted > 0 || totalBillDiscDeducted > 0) && (
-                <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--neutral-500)' }}>
-                  Discounts Cross-Deducted: -₹{(totalItemDiscDeducted + totalBillDiscDeducted).toFixed(2)} (Item: ₹{totalItemDiscDeducted.toFixed(2)}, Bill: ₹{totalBillDiscDeducted.toFixed(2)})
+                <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--neutral-600)' }}>
+                  Discounts Adjusted: -₹{(totalItemDiscDeducted + totalBillDiscDeducted).toFixed(2)}
                 </span>
               )}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Original Bill Total</div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+              <div style={{ backgroundColor: '#ffffff', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
+                <div style={{ fontSize: '0.70rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Original Bill Total</div>
+                <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--neutral-700)', marginTop: 2 }}>
                   ₹{originalGrand.toFixed(2)}
                 </div>
               </div>
 
-              <div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Gross Return Value</div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
+              <div style={{ backgroundColor: '#ffffff', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
+                <div style={{ fontSize: '0.70rem', color: 'var(--neutral-500)', fontWeight: 600 }}>Gross Return Value</div>
+                <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--neutral-700)', marginTop: 2 }}>
                   ₹{totalGrossReturn.toFixed(2)}
                 </div>
               </div>
 
-              <div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--danger-600)', fontWeight: 600 }}>Net Refund / Return Total</div>
-                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--danger-600)' }}>
+              <div style={{ backgroundColor: '#ffffff', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid #fecaca' }}>
+                <div style={{ fontSize: '0.70rem', color: 'var(--danger-700)', fontWeight: 700 }}>Net Refund / Credit</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 900, color: 'var(--danger-700)', marginTop: 2 }}>
                   -₹{returnDeduction.toFixed(2)}
                 </div>
               </div>
 
-              <div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--primary-700)', fontWeight: 600 }}>Revised Bill Total</div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--primary-700)' }}>
+              <div style={{ backgroundColor: '#ffffff', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--primary-200)' }}>
+                <div style={{ fontSize: '0.70rem', color: 'var(--primary-700)', fontWeight: 700 }}>Revised Bill Total</div>
+                <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--primary-700)', marginTop: 2 }}>
                   ₹{netGrandTotal.toFixed(2)}
                 </div>
               </div>
 
               {refundDue > 0 && (
-                <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--success-200)' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--success-700)', fontWeight: 700 }}>Refund Payable</div>
-                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--success-700)' }}>
+                <div style={{ backgroundColor: '#ecfdf5', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid #a7f3d0' }}>
+                  <div style={{ fontSize: '0.70rem', color: 'var(--success-700)', fontWeight: 700 }}>Refund Payable Now</div>
+                  <div style={{ fontSize: '1.10rem', fontWeight: 900, color: 'var(--success-700)', marginTop: 2 }}>
                     ₹{refundDue.toFixed(2)}
                   </div>
                 </div>

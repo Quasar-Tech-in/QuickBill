@@ -10,6 +10,7 @@ import {
 } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { DashboardView } from './views/DashboardView';
 import { PosBillingView } from './views/PosBillingView';
 import { InventoryView } from './views/InventoryView';
@@ -91,6 +92,20 @@ const AppLayout: React.FC<AppLayoutProps> = ({
       return false;
     }
   });
+
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+
+  // Auto-close mobile drawer whenever route changes
+  useEffect(() => {
+    setIsMobileDrawerOpen(false);
+  }, [location.pathname]);
+
+  // Default to collapsed sidebar on tablet viewports (769px - 1024px)
+  useEffect(() => {
+    if (window.innerWidth <= 1024 && window.innerWidth > 768) {
+      setIsSidebarCollapsed(true);
+    }
+  }, []);
 
   const handleToggleSidebar = () => {
     setIsSidebarCollapsed(prev => {
@@ -180,6 +195,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({
         onLogout={onLogout}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={handleToggleSidebar}
+        isMobileDrawerOpen={isMobileDrawerOpen}
+        onCloseMobileDrawer={() => setIsMobileDrawerOpen(false)}
       />
 
       {/* Main Content Area */}
@@ -272,6 +289,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
           }}
           onTenantChange={onTenantSwitched}
           onLogout={onLogout}
+          onToggleMobileDrawer={() => setIsMobileDrawerOpen(prev => !prev)}
         />
 
         <main className="main-content-scroll" key={location.pathname}>
@@ -403,6 +421,12 @@ const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
         </div>
       )}
+
+      {/* Mobile Bottom Navigation Bar */}
+      <MobileBottomNav 
+        onToggleMenu={() => setIsMobileDrawerOpen(prev => !prev)} 
+        isMenuOpen={isMobileDrawerOpen} 
+      />
 
       {/* Invoice Print & Preview Modal */}
       {viewingInvoice && (

@@ -195,7 +195,7 @@ export const SuperAdminDashboardView: React.FC<SuperAdminDashboardViewProps> = (
       </div>
 
       {/* Analytics Breakdown: 2-Column Split */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '24px', marginBottom: '24px' }}>
+      <div className="dashboard-dual-grid">
         
         {/* Card 1: Subscription Health & Expiration Matrix */}
         <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
