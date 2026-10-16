@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   StyleSheet, 
   View, 
@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { colors } from '../../theme/colors';
 import { Invoice, Business } from '../../types';
-import { shareInvoiceOnWhatsApp } from '../../utils/shareInvoice';
+import { shareInvoiceOnWhatsApp, shareInvoicePdfFile } from '../../utils/shareInvoice';
 import { printThermalReceipt, printA4Invoice } from '../../utils/printInvoice';
 
 interface PostSaleModalProps {
@@ -29,20 +29,40 @@ export const PostSaleModal: React.FC<PostSaleModalProps> = ({
   onNewSale,
   onClose,
 }) => {
-  const [phoneNumber, setPhoneNumber] = useState(invoice?.partyPhone || '');
+  const [phoneNumber, setPhoneNumber] = useState(invoice?.partyPhone || invoice?.consumerPhone || '');
   const [isSharing, setIsSharing] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
+  useEffect(() => {
+    if (invoice) {
+      setPhoneNumber(invoice.partyPhone || invoice.consumerPhone || '');
+    }
+  }, [invoice]);
+
   if (!invoice) return null;
 
-  const handleShareWhatsApp = async (format: 'A4' | 'THERMAL' = 'A4') => {
+  const handleSendWhatsApp = async () => {
     setIsSharing(true);
     try {
       await shareInvoiceOnWhatsApp({
         invoice,
         business,
-        format,
+        format: 'A4',
         customerPhone: phoneNumber,
+        mode: 'DIRECT_WHATSAPP',
+      });
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const handleSharePdf = async () => {
+    setIsSharing(true);
+    try {
+      await shareInvoicePdfFile({
+        invoice,
+        business,
+        format: 'A4',
       });
     } finally {
       setIsSharing(false);
@@ -89,29 +109,33 @@ export const PostSaleModal: React.FC<PostSaleModalProps> = ({
             <Text style={styles.customerMode}>Tender: {invoice.paymentMode} ({invoice.status})</Text>
           </View>
 
-          {/* WhatsApp Sharing Section */}
+          {/* Invoice PDF Sharing Section */}
           <View style={styles.waSection}>
-            <Text style={styles.waHeading}>💬 Send Invoice on WhatsApp</Text>
-            <View style={styles.waInputRow}>
-              <TextInput
-                style={styles.phoneInput}
-                placeholder="Enter 10-digit mobile number"
-                value={phoneNumber}
-                onChangeText={setPhoneNumber}
-                keyboardType="phone-pad"
-              />
-              <TouchableOpacity 
-                style={[styles.waButton, isSharing && { opacity: 0.6 }]} 
-                onPress={() => handleShareWhatsApp('A4')}
-                disabled={isSharing}
-              >
-                {isSharing ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.waButtonText}>Share PDF</Text>
-                )}
-              </TouchableOpacity>
+            <View style={styles.waHeaderRow}>
+              <Text style={styles.waHeading}>📄 Share Invoice PDF</Text>
+              {phoneNumber ? (
+                <View style={styles.phoneBadge}>
+                  <Text style={styles.phoneBadgeText}>Customer: {phoneNumber}</Text>
+                </View>
+              ) : null}
             </View>
+
+            <TouchableOpacity 
+              style={[styles.sharePdfBtn, { backgroundColor: '#22c55e', borderColor: '#16a34a', paddingVertical: 12 }, isSharing && { opacity: 0.6 }]} 
+              onPress={handleSharePdf}
+              disabled={isSharing}
+            >
+              {isSharing ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <Text style={{ fontSize: 18 }}>📄</Text>
+                  <Text style={[styles.sharePdfBtnText, { color: '#fff', fontSize: 14, fontWeight: '800' }]}>
+                    Share Invoice PDF (WhatsApp / Apps)
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
 
           {/* Print Options */}
@@ -227,15 +251,48 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 16,
   },
+  waHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  phoneBadge: {
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#86efac',
+  },
+  phoneBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#15803d',
+  },
   waHeading: {
     fontSize: 13,
     fontWeight: '700',
     color: '#166534',
-    marginBottom: 8,
   },
   waInputRow: {
     flexDirection: 'row',
     gap: 8,
+  },
+  sharePdfBtn: {
+    marginTop: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#86efac',
+    backgroundColor: '#fff',
+  },
+  sharePdfBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803d',
   },
   phoneInput: {
     flex: 1,

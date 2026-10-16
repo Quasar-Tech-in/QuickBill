@@ -4,6 +4,7 @@ import {
   Item, 
   Party, 
   Invoice, 
+  InvoiceItem,
   CartItem, 
   StagedOrder,
   PurchaseOrder, 
@@ -12,8 +13,12 @@ import {
   StoreLocation, 
   ItemCategory, 
   User, 
+  UserRole,
   Business, 
-  Expense 
+  Expense,
+  Tenant,
+  TenantSubscription,
+  InventoryMovement
 } from '../types';
 
 // Auto-detect host IP from Metro bundler URL or fallback to Wi-Fi/LAN IP
@@ -53,10 +58,12 @@ class MobileStore {
   private users: User[] = [];
   private locations: StoreLocation[] = [];
   private expenses: Expense[] = [];
+  private inventoryMovements: InventoryMovement[] = [];
   
   private activeUser: User | null = null;
   private businessProfile: Business | null = null;
   private activeLocation: StoreLocation | null = null;
+  private activeTenant: Tenant | null = null;
 
   private listeners: Set<() => void> = new Set();
 
@@ -173,6 +180,7 @@ class MobileStore {
     this.purchaseOrders = [];
     this.ledgerEntries = [];
     this.cart = [];
+    this.inventoryMovements = [];
 
     delete apiClient.defaults.headers.common['Authorization'];
     delete apiClient.defaults.headers.common['X-Business-ID'];
@@ -200,14 +208,26 @@ class MobileStore {
   }
 
   getBusinessProfile(): Business {
-    return this.businessProfile || {
+    const loc = this.getActiveLocation();
+    if (this.businessProfile) {
+      return {
+        ...this.businessProfile,
+        address: this.businessProfile.address || loc?.address,
+        phone: this.businessProfile.phone || loc?.phone,
+        gstin: this.businessProfile.gstin || loc?.gstin,
+      };
+    }
+    return {
       id: this.activeUser?.businessId || '',
-      name: this.activeUser?.tenantName || 'Store Profile',
+      name: this.activeUser?.tenantName || 'QuickBill Store',
       currency: '₹',
+      address: loc?.address,
+      phone: loc?.phone,
+      gstin: loc?.gstin,
     };
   }
 
-  updateBusinessProfile(updates: Partial<Business>) {
+  async updateBusinessProfile(updates: Partial<Business>): Promise<void> {
     if (this.businessProfile) {
       this.businessProfile = { ...this.businessProfile, ...updates };
     } else {
@@ -219,6 +239,23 @@ class MobileStore {
       };
     }
     this.notify();
+
+    try {
+      const payload: Record<string, any> = {};
+      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.phone !== undefined) payload.phone = updates.phone;
+      if (updates.gstin !== undefined) payload.gstin = updates.gstin;
+      if (updates.email !== undefined) payload.admin_email = updates.email;
+      if (updates.address !== undefined) payload.address = updates.address;
+      if (updates.logoUrl !== undefined) payload.logo_url = updates.logoUrl;
+      if (updates.tagline !== undefined) payload.tagline = updates.tagline;
+      if (updates.receiptFooterNote !== undefined) payload.receipt_footer = updates.receiptFooterNote;
+
+      const tenantId = this.businessProfile.id || 'current';
+      await apiClient.patch(`/tenants/${tenantId}`, payload);
+    } catch (e) {
+      console.warn('Backend tenant profile update failed:', e);
+    }
   }
 
   // --- Full Data Synchronization ---
@@ -230,7 +267,9 @@ class MobileStore {
         this.fetchParties(),
         this.fetchInvoices(),
         this.fetchPurchaseOrders(),
+        this.fetchLocations(),
         this.fetchBusinessProfile(),
+        this.fetchInventoryMovements(),
       ]);
     } catch (e) {
       console.warn('Error during full data sync:', e);
@@ -239,22 +278,111 @@ class MobileStore {
 
   async fetchBusinessProfile(): Promise<Business | null> {
     try {
-      const res = await apiClient.get('/businesses/me');
+      const res = await apiClient.get('/tenants/current');
       if (res.data) {
+        const t = res.data;
+        const activeLoc = this.getActiveLocation();
         this.businessProfile = {
-          id: res.data.id || res.data._id,
-          name: res.data.name,
-          gstin: res.data.taxId || res.data.gstin,
-          phone: res.data.phone,
-          email: res.data.email,
-          address: res.data.address?.street || res.data.address,
-          currency: res.data.currency || '₹',
+          id: t.id || t._id,
+          name: t.name || this.activeUser?.tenantName || 'QuickBill Store',
+          gstin: t.gstin || activeLoc?.gstin,
+          phone: t.phone || activeLoc?.phone,
+          email: t.admin_email || t.adminEmail || t.email,
+          address: t.address || activeLoc?.address,
+          currency: '₹',
+          logoUrl: t.logo_url || t.logoUrl,
+          tagline: t.tagline,
+          receiptFooterNote: t.receipt_footer || t.receiptFooterNote || t.receiptFooter,
         };
+
+        const sub = t.subscription;
+        this.activeTenant = {
+          id: t.id || t._id,
+          name: t.name,
+          slug: t.slug,
+          plan: t.plan || sub?.plan_id || sub?.planId || 'PROFESSIONAL',
+          status: t.status || sub?.status || 'ACTIVE',
+          adminEmail: t.admin_email || t.adminEmail || '',
+          phone: t.phone,
+          gstin: t.gstin,
+          address: t.address,
+          logoUrl: t.logo_url || t.logoUrl,
+          tagline: t.tagline,
+          receiptFooterNote: t.receipt_footer || t.receiptFooterNote || t.receiptFooter,
+          createdAt: t.created_at || t.createdAt || new Date().toISOString(),
+          subscription: {
+            planId: sub?.plan_id || sub?.planId || 'PROFESSIONAL',
+            planName: sub?.plan_name || sub?.planName || 'Professional Tier',
+            status: sub?.status || 'ACTIVE',
+            maxUsers: sub?.max_users !== undefined ? sub.max_users : (sub?.maxUsers !== undefined ? sub.maxUsers : 3),
+            maxLocations: sub?.max_locations !== undefined ? sub.max_locations : (sub?.maxLocations !== undefined ? sub.maxLocations : 3),
+            billingCycle: sub?.billing_cycle || sub?.billingCycle || 'ANNUAL',
+            startDate: sub?.start_date || sub?.startDate || t.created_at,
+            endDate: sub?.end_date || sub?.endDate || new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+            daysRemaining: sub?.days_remaining !== undefined ? sub.days_remaining : 365,
+            gracePeriodDays: sub?.grace_period_days || 7,
+            pricePerCycle: sub?.price_per_cycle || 1999,
+            currency: '₹',
+            autoRenew: sub?.auto_renew || false,
+            features: sub?.features || ['pos', 'inventory', 'ledger'],
+          },
+          stats: t.stats || {
+            productsCount: 0,
+            invoicesCount: 0,
+            monthlyGmv: 0,
+            usersCount: 0,
+            locationsCount: 0,
+          }
+        };
+
         this.notify();
         return this.businessProfile;
       }
     } catch {
       // Graceful fallback
+    }
+    return null;
+  }
+
+  getActiveTenant(): Tenant | null {
+    return this.activeTenant;
+  }
+
+  async fetchActiveTenant(): Promise<Tenant | null> {
+    await this.fetchBusinessProfile();
+    return this.activeTenant;
+  }
+
+  isStoreSuspended(): boolean {
+    const t = this.activeTenant;
+    if (!t) return false;
+    return t.status === 'SUSPENDED' || t.subscription?.status === 'SUSPENDED';
+  }
+
+  isSubscriptionExpired(): boolean {
+    const t = this.activeTenant;
+    if (!t) return false;
+    if (t.status === 'SUSPENDED') return false;
+    const sub = t.subscription;
+    if (!sub) return false;
+    if (sub.status === 'EXPIRED') return true;
+    const days = sub.daysRemaining ?? 365;
+    const graceDays = sub.gracePeriodDays ?? 7;
+    return days < -graceDays;
+  }
+
+  isStoreLocked(): boolean {
+    return this.isStoreSuspended() || this.isSubscriptionExpired();
+  }
+
+  getStoreLockoutReason(): string | null {
+    if (this.isStoreSuspended()) {
+      return 'Store operations are suspended by platform administration.';
+    }
+    if (this.isSubscriptionExpired()) {
+      const sub = this.activeTenant?.subscription;
+      const endStr = sub?.endDate ? new Date(sub.endDate).toLocaleDateString() : 'recently';
+      return `Store subscription license expired on ${endStr}.`;
     }
     return null;
   }
@@ -343,18 +471,143 @@ class MobileStore {
     return item;
   }
 
-  async adjustStock(itemId: string, adjustmentQty: number, reason?: string) {
+  async adjustStock(itemId: string, adjustmentQty: number, reason?: string, unitCost?: number, notes?: string) {
+    const item = this.items.find(i => i.id === itemId || i.publicItemId === itemId);
+    const prevStock = item ? item.currentStock : 0;
+    const newStock = Number((prevStock + adjustmentQty).toFixed(3));
+
     try {
-      await apiClient.post(`/items/${itemId}/adjust-stock`, { delta: adjustmentQty });
+      await apiClient.post(`/items/${itemId}/adjust-stock`, { 
+        delta: adjustmentQty,
+        reason,
+        unit_cost: unitCost,
+        notes
+      });
     } catch (err) {
       console.warn('Stock adjustment API failed, applying locally:', err);
     }
 
-    const item = this.items.find(i => i.id === itemId || i.publicItemId === itemId);
     if (item) {
-      item.currentStock = Number((item.currentStock + adjustmentQty).toFixed(3));
-      this.notify();
+      item.currentStock = newStock;
     }
+
+    this.recordInventoryMovement({
+      itemId,
+      itemName: item?.name || 'Product',
+      sku: item?.sku,
+      quantityChange: adjustmentQty,
+      quantityBefore: prevStock,
+      quantityAfter: newStock,
+      resultingStock: newStock,
+      unitCost: unitCost !== undefined ? unitCost : (item?.purchasePrice || 0),
+      type: 'MANUAL_ADJUSTMENT',
+      movementType: 'MANUAL_ADJUSTMENT',
+      reason: reason || 'Manual Stock Adjustment',
+      notes,
+      referenceType: 'ADJUSTMENT',
+    });
+
+    this.notify();
+  }
+
+  // --- Inventory Movements Audit Ledger ---
+  getInventoryMovements(): InventoryMovement[] {
+    return [...this.inventoryMovements];
+  }
+
+  recordInventoryMovement(movementData: Partial<InventoryMovement>): InventoryMovement {
+    const item = movementData.itemId ? this.getItemById(movementData.itemId) : undefined;
+    const qtyChange = Number(movementData.quantityChange !== undefined ? movementData.quantityChange : (movementData.quantity || 0));
+    const qtyBefore = Number(movementData.quantityBefore !== undefined ? movementData.quantityBefore : (item?.currentStock ?? 0));
+    const qtyAfter = Number(movementData.quantityAfter !== undefined ? movementData.quantityAfter : (qtyBefore + qtyChange));
+    const uCost = Number(movementData.unitCost !== undefined ? movementData.unitCost : (item?.purchasePrice ?? 0));
+
+    const movement: InventoryMovement = {
+      id: movementData.id || `mov-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      businessId: movementData.businessId || this.activeUser?.businessId,
+      itemId: movementData.itemId || item?.id || '',
+      publicItemId: movementData.publicItemId || item?.publicItemId,
+      itemName: movementData.itemName || item?.name || 'Item',
+      sku: movementData.sku || item?.sku,
+      locationId: movementData.locationId || this.activeLocation?.id,
+      locationName: movementData.locationName || this.activeLocation?.name,
+      type: movementData.type || movementData.movementType || 'MANUAL_ADJUSTMENT',
+      movementType: movementData.type || movementData.movementType || 'MANUAL_ADJUSTMENT',
+      referenceType: movementData.referenceType,
+      referenceId: movementData.referenceId,
+      referenceNumber: movementData.referenceNumber,
+      quantityChange: qtyChange,
+      quantityBefore: qtyBefore,
+      quantityAfter: qtyAfter,
+      resultingStock: qtyAfter,
+      unitCost: uCost,
+      totalCost: movementData.totalCost !== undefined ? movementData.totalCost : Number((Math.abs(qtyChange) * uCost).toFixed(2)),
+      reason: movementData.reason,
+      notes: movementData.notes,
+      createdByUserId: this.activeUser?.id,
+      createdByName: this.activeUser?.name || 'Staff',
+      createdAt: movementData.createdAt || new Date().toISOString(),
+    };
+
+    this.inventoryMovements.unshift(movement);
+    this.notify();
+    return movement;
+  }
+
+  async fetchInventoryMovements(params: {
+    page?: number;
+    pageSize?: number;
+    itemId?: string;
+    locationId?: string;
+    type?: string;
+    search?: string;
+  } = {}): Promise<InventoryMovement[]> {
+    try {
+      const qParams: Record<string, any> = {
+        page: params.page || 1,
+        page_size: params.pageSize || 100,
+      };
+      if (params.itemId && params.itemId !== 'ALL') qParams.item_id = params.itemId;
+      if (params.locationId && params.locationId !== 'ALL') qParams.location_id = params.locationId;
+      if (params.type && params.type !== 'ALL') qParams.type = params.type;
+      if (params.search?.trim()) qParams.search = params.search.trim();
+
+      const res = await apiClient.get('/inventory/movements', { params: qParams });
+      const rawList = res.data?.data || (Array.isArray(res.data) ? res.data : []);
+      if (Array.isArray(rawList)) {
+        this.inventoryMovements = rawList.map((d: any) => ({
+          id: d._id || d.id || `mov-${Date.now()}-${Math.random()}`,
+          businessId: d.businessId || this.activeUser?.businessId,
+          itemId: d.itemId,
+          publicItemId: d.publicItemId,
+          itemName: d.itemName || 'Product',
+          sku: d.sku,
+          locationId: d.locationId,
+          locationName: d.locationName,
+          type: d.type || d.movementType || 'MANUAL_ADJUSTMENT',
+          movementType: d.type || d.movementType || 'MANUAL_ADJUSTMENT',
+          referenceType: d.referenceType,
+          referenceId: d.referenceId,
+          referenceNumber: d.referenceNumber,
+          quantityChange: Number(d.quantityChange !== undefined ? d.quantityChange : (d.quantityDelta || 0)),
+          quantityBefore: Number(d.quantityBefore !== undefined ? d.quantityBefore : (d.previousStock || 0)),
+          quantityAfter: Number(d.quantityAfter !== undefined ? d.quantityAfter : (d.newStock || 0)),
+          resultingStock: Number(d.resultingStock !== undefined ? d.resultingStock : (d.quantityAfter || 0)),
+          unitCost: Number(d.unitCost || 0),
+          totalCost: Number(d.totalCost || 0),
+          reason: d.reason,
+          notes: d.notes,
+          createdByUserId: d.createdByUserId,
+          createdByName: d.createdByName || d.performedBy || 'Staff',
+          createdAt: d.createdAt || new Date().toISOString(),
+        }));
+        this.notify();
+        return this.inventoryMovements;
+      }
+    } catch (err) {
+      console.warn('Could not fetch inventory movements from backend:', err);
+    }
+    return this.inventoryMovements;
   }
 
   // --- Categories ---
@@ -431,19 +684,33 @@ class MobileStore {
     }
   }
 
-  updateCartItem(index: number, quantity: number, unitPrice: number, discountPercent: number = 0) {
+  updateCartItem(
+    index: number, 
+    quantity: number, 
+    unitPrice: number, 
+    discountPercent: number = 0,
+    discountType: 'PERCENT' | 'FLAT' = 'PERCENT',
+    discountValue?: number
+  ) {
     if (index < 0 || index >= this.cart.length) return;
     if (quantity <= 0) {
       this.cart.splice(index, 1);
     } else {
-      const effectivePrice = unitPrice * (1 - discountPercent / 100);
-      const lineTotal = Number((effectivePrice * quantity).toFixed(2));
+      const gross = unitPrice * quantity;
+      let effectiveDiscPercent = discountPercent;
+      if (discountType === 'FLAT' && discountValue !== undefined && discountValue > 0) {
+        effectiveDiscPercent = gross > 0 ? (discountValue / gross) * 100 : 0;
+      }
+      const discAmt = (gross * effectiveDiscPercent) / 100;
+      const lineTotal = Number(Math.max(0, gross - discAmt).toFixed(2));
 
       this.cart[index] = {
         ...this.cart[index],
         quantity: Number(quantity.toFixed(3)),
         unitPrice,
-        discountPercent,
+        discountPercent: Number(effectiveDiscPercent.toFixed(2)),
+        discountType,
+        discountValue: discountValue !== undefined ? discountValue : discountPercent,
         lineTotal,
       };
     }
@@ -467,60 +734,16 @@ class MobileStore {
     this.notify();
   }
 
-  // --- Staged / Draft Orders ---
-  getStagedOrders(): StagedOrder[] {
-    const businessId = this.activeUser?.businessId || '';
-    const locId = this.activeLocation?.id;
-    return this.stagedOrders.filter(o => {
-      const matchBiz = !businessId || !o.businessId || o.businessId === businessId;
-      const matchLoc = !locId || !o.locationId || o.locationId === locId;
-      return matchBiz && matchLoc;
-    });
-  }
-
-  stageCurrentOrder(orderData: Omit<StagedOrder, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): StagedOrder {
-    const businessId = this.activeUser?.businessId || '';
-    const now = new Date().toISOString();
-    const existingIdx = orderData.id ? this.stagedOrders.findIndex(o => o.id === orderData.id) : -1;
-
-    let staged: StagedOrder;
-    if (existingIdx >= 0) {
-      staged = {
-        ...this.stagedOrders[existingIdx],
-        ...orderData,
-        businessId,
-        updatedAt: now,
-      };
-      this.stagedOrders[existingIdx] = staged;
-    } else {
-      staged = {
-        ...orderData,
-        id: orderData.id || `stg-${Date.now()}`,
-        businessId,
-        createdAt: now,
-        updatedAt: now,
-      };
-      this.stagedOrders.unshift(staged);
-    }
-
-    this.notify();
-    return staged;
-  }
-
+  // --- Staged / Draft Orders (Local State Accessors) ---
   resumeStagedOrder(stagedOrderId: string, keepInDrafts: boolean = false): StagedOrder | null {
     const found = this.stagedOrders.find(o => o.id === stagedOrderId);
     if (!found) return null;
     if (!keepInDrafts) {
       this.stagedOrders = this.stagedOrders.filter(o => o.id !== stagedOrderId);
     }
-    this.cart = [...found.items];
+    this.cart = [...(found.cart || found.items || [])];
     this.notify();
     return found;
-  }
-
-  deleteStagedOrder(stagedOrderId: string): void {
-    this.stagedOrders = this.stagedOrders.filter(o => o.id !== stagedOrderId);
-    this.notify();
   }
 
   updateStagedOrderLabel(stagedOrderId: string, label: string, notes?: string): boolean {
@@ -548,38 +771,75 @@ class MobileStore {
     try {
       const res = await apiClient.get('/sales', { params: { page: 1, page_size: 50 } });
       if (res.data?.data && Array.isArray(res.data.data)) {
-        this.invoices = res.data.data.map((d: any) => ({
-          id: d.id || d._id,
-          invoiceNumber: d.invoiceNumber || d.invoice_number || `INV-${d.id}`,
-          date: d.date || d.createdAt || new Date().toISOString(),
-          partyId: d.partyId,
-          partyName: d.partyName || d.consumerName,
-          partyPhone: d.partyPhone || d.consumerPhone,
-          consumerName: d.consumerName,
-          consumerPhone: d.consumerPhone,
-          billedByName: d.billedByName,
-          type: 'SALE',
-          items: Array.isArray(d.items) ? d.items.map((it: any) => ({
-            itemId: it.itemId || it.item_id,
-            name: it.name || it.itemName || 'Item',
-            unit: it.unit || 'pcs',
-            quantity: Number(it.quantity || 0),
-            unitPrice: Number(it.unitPrice || it.unit_price || 0),
-            discountPercent: Number(it.discountPercent || 0),
-            taxRate: Number(it.taxRate || it.tax_rate || 0),
-            taxAmount: Number(it.taxAmount || it.tax_amount || 0),
-            total: Number(it.total || 0),
-          })) : [],
-          subtotal: Number(d.subtotal || 0),
-          taxTotal: Number(d.taxTotal || d.tax_total || 0),
-          discountTotal: Number(d.discountTotal || d.discount_total || 0),
-          roundOff: Number(d.roundOff || d.round_off || 0),
-          grandTotal: Number(d.grandTotal || d.grand_total || 0),
-          paidAmount: Number(d.paidAmount || d.paid_amount || 0),
-          balanceAmount: Number(d.balanceAmount || d.balanceDue || d.balance_due || 0),
-          paymentMode: d.paymentMode || 'CASH',
-          status: d.status || 'PAID',
-        }));
+        this.invoices = res.data.data.map((d: any) => {
+          const items: InvoiceItem[] = Array.isArray(d.items) ? d.items.map((it: any) => {
+            const qty = Number(it.quantity || 1);
+            const price = Number(it.unitPrice !== undefined ? it.unitPrice : (it.unit_price || 0));
+            const gross = qty * price;
+            const discAmt = Number(it.discountAmount !== undefined ? it.discountAmount : (it.discount !== undefined ? it.discount : (it.discount_amount || 0)));
+            const discType = it.discountType || it.discount_type || (it.discountPercent > 0 ? 'PERCENT' : 'FLAT');
+            const discVal = Number(it.discountValue !== undefined ? it.discountValue : (it.discount_value !== undefined ? it.discount_value : (discType === 'PERCENT' ? (it.discountPercent || (gross > 0 ? (discAmt / gross) * 100 : 0)) : discAmt)));
+            const discPct = Number(it.discountPercent !== undefined ? it.discountPercent : (it.discount_percent !== undefined ? it.discount_percent : (discType === 'PERCENT' ? discVal : (gross > 0 ? (discAmt / gross) * 100 : 0))));
+            const total = Number(it.total !== undefined ? it.total : (it.lineTotal !== undefined ? it.lineTotal : (it.line_total !== undefined ? it.line_total : (gross - discAmt))));
+
+            return {
+              itemId: it.itemId || it.item_id,
+              name: it.nameSnapshot || it.name_snapshot || it.name || it.itemName || 'Item',
+              unit: it.unit || it.unit_snapshot || 'pcs',
+              quantity: qty,
+              returnedQuantity: Number(it.returnedQuantity !== undefined ? it.returnedQuantity : (it.returned_quantity || 0)),
+              returnReason: it.returnReason || it.return_reason,
+              returnNote: it.returnNote || it.return_note,
+              returnDate: it.returnDate || it.return_date,
+              returnStatus: it.returnStatus || it.return_status,
+              unitPrice: price,
+              discountPercent: Number(discPct.toFixed(2)),
+              discountAmount: Number(discAmt.toFixed(2)),
+              discountType: discType,
+              discountValue: Number(discVal.toFixed(2)),
+              taxRate: Number(it.taxRate !== undefined ? it.taxRate : (it.tax_rate || 0)),
+              taxAmount: Number(it.taxAmount !== undefined ? it.taxAmount : (it.tax_amount || 0)),
+              taxableAmount: it.taxableAmount !== undefined ? Number(it.taxableAmount) : (it.taxable_amount !== undefined ? Number(it.taxable_amount) : undefined),
+              total,
+              originalTotal: it.originalTotal ? Number(it.originalTotal) : Number(gross.toFixed(2)),
+            };
+          }) : [];
+
+          const hasReturns = Boolean(d.hasReturns || d.has_returns || (d.returnTotal && d.returnTotal > 0) || items.some((i: InvoiceItem) => (i.returnedQuantity || 0) > 0));
+          const returnTotal = d.returnTotal !== undefined ? Number(d.returnTotal) : (d.return_total !== undefined ? Number(d.return_total) : (hasReturns ? Math.max(0, (Number(d.originalGrandTotal || d.grandTotal || 0) - Number(d.grandTotal || 0))) : 0));
+
+          return {
+            id: d.id || d._id,
+            invoiceNumber: d.invoiceNumber || d.invoice_number || `INV-${d.id}`,
+            date: d.date || d.createdAt || new Date().toISOString(),
+            partyId: d.partyId,
+            partyName: d.partyName || d.consumerName,
+            partyPhone: d.partyPhone || d.consumerPhone,
+            consumerName: d.consumerName,
+            consumerPhone: d.consumerPhone,
+            billedByName: d.billedByName,
+            locationId: d.locationId || d.location_id,
+            locationName: d.locationName || d.location_name,
+            locationAddress: d.locationAddress || d.location_address,
+            locationPhone: d.locationPhone || d.location_phone,
+            locationGstin: d.locationGstin || d.location_gstin,
+            type: 'SALE',
+            items,
+            subtotal: Number(d.subtotal || 0),
+            taxTotal: Number(d.taxTotal || d.tax_total || 0),
+            discountTotal: Number(d.discountTotal || d.discount_total || 0),
+            roundOff: Number(d.roundOff || d.round_off || 0),
+            grandTotal: Number(d.grandTotal || d.grand_total || 0),
+            originalGrandTotal: d.originalGrandTotal ? Number(d.originalGrandTotal) : (d.original_grand_total ? Number(d.original_grand_total) : undefined),
+            hasReturns,
+            returnTotal,
+            returnStatus: d.returnStatus || d.return_status,
+            paidAmount: Number(d.paidAmount || d.paid_amount || 0),
+            balanceAmount: Number(d.balanceAmount || d.balanceDue || d.balance_due || 0),
+            paymentMode: d.paymentMode || 'CASH',
+            status: d.status || 'PAID',
+          };
+        });
         this.notify();
         return this.invoices;
       }
@@ -599,14 +859,35 @@ class MobileStore {
       billedById: this.activeUser?.id,
       billedByName: this.activeUser?.name || 'Mobile Cashier',
       billedByRole: this.activeUser?.role || 'CASHIER',
-      items: invoiceData.items.map(it => ({
-        item_id: it.itemId,
-        quantity: it.quantity,
-        unit_price: it.unitPrice,
-        discount: it.discountPercent ? ((it.unitPrice * it.quantity) * (it.discountPercent / 100)) : 0,
-        tax_rate: it.taxRate,
-      })),
-      invoiceDiscount: Number(invoiceData.discountTotal || 0),
+      items: invoiceData.items.map(it => {
+        const qty = Number(it.quantity || 1);
+        const price = Number(it.unitPrice || 0);
+        const gross = qty * price;
+        let discAmount = 0;
+        if (it.discountAmount !== undefined && it.discountAmount > 0) {
+          discAmount = it.discountAmount;
+        } else if (it.discountPercent) {
+          discAmount = (gross * it.discountPercent) / 100;
+        }
+
+        return {
+          item_id: it.itemId,
+          quantity: qty,
+          unit_price: price,
+          discount: Number(discAmount.toFixed(2)),
+          tax_rate: Number(it.taxRate || 0),
+          discount_type: it.discountType || (it.discountPercent ? 'PERCENT' : 'FLAT'),
+          discount_value: it.discountValue !== undefined ? Number(it.discountValue) : (it.discountPercent || discAmount),
+          discount_percent: Number(it.discountPercent || (gross > 0 ? (discAmount / gross) * 100 : 0)),
+        };
+      }),
+      invoiceDiscount: Number((
+        invoiceData.orderDiscountAmount !== undefined 
+          ? invoiceData.orderDiscountAmount 
+          : (invoiceData.itemDiscountTotal !== undefined
+              ? Math.max(0, Number(invoiceData.discountTotal || 0) - Number(invoiceData.itemDiscountTotal || 0))
+              : Math.max(0, Number(invoiceData.discountTotal || 0) - invoiceData.items.reduce((s, it) => s + (it.discountAmount || 0), 0)))
+      ).toFixed(2)),
       paidAmount: Number(invoiceData.paidAmount),
       paymentMode: invoiceData.paymentMode || 'CASH',
       enableRoundOff: invoiceData.roundOff !== 0,
@@ -638,11 +919,30 @@ class MobileStore {
       };
     }
 
-    // Deduct local stock
+    // Deduct local stock and record inventory movement
     createdInvoice.items.forEach(invItem => {
       const match = this.items.find(i => i.id === invItem.itemId || i.name === invItem.name);
       if (match) {
-        match.currentStock = Number(Math.max(0, match.currentStock - invItem.quantity).toFixed(3));
+        const prevStock = match.currentStock;
+        const newStock = Number(Math.max(0, match.currentStock - invItem.quantity).toFixed(3));
+        match.currentStock = newStock;
+
+        this.recordInventoryMovement({
+          itemId: match.id,
+          itemName: match.name,
+          sku: match.sku,
+          quantityChange: -invItem.quantity,
+          quantityBefore: prevStock,
+          quantityAfter: newStock,
+          resultingStock: newStock,
+          unitCost: match.purchasePrice,
+          type: 'SALE',
+          movementType: 'SALE',
+          reason: `Sale Invoice #${createdInvoice.invoiceNumber}`,
+          referenceType: 'INVOICE',
+          referenceId: createdInvoice.id,
+          referenceNumber: createdInvoice.invoiceNumber,
+        });
       }
     });
 
@@ -777,6 +1077,7 @@ class MobileStore {
       });
 
       const netGrand = Number((netSubtotal + netTax).toFixed(2));
+      const returnTotalVal = Number(Math.max(0, origGrand - netGrand).toFixed(2));
       const newStatus = allReturned && anyReturn ? 'RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : existing.status);
 
       updatedInvoice = {
@@ -785,21 +1086,104 @@ class MobileStore {
         subtotal: Number(netSubtotal.toFixed(2)),
         taxTotal: Number(netTax.toFixed(2)),
         grandTotal: netGrand,
+        originalGrandTotal: existing.originalGrandTotal || origGrand,
+        returnTotal: returnTotalVal,
+        hasReturns: anyReturn,
+        returnStatus: allReturned ? 'FULLY_RETURNED' : (anyReturn ? 'PARTIALLY_RETURNED' : 'NONE'),
         status: newStatus as any,
       };
     }
 
-    // Restock returned items
+    // Restock returned items & record audit ledger
     updateData.items.forEach(up => {
       const match = this.items.find(i => i.id === up.itemId);
       if (match && up.returnedQuantity > 0 && up.returnReason !== 'DEFECTIVE_DAMAGED') {
-        match.currentStock = Number((match.currentStock + up.returnedQuantity).toFixed(3));
+        const prevStock = match.currentStock;
+        const newStock = Number((match.currentStock + up.returnedQuantity).toFixed(3));
+        match.currentStock = newStock;
+
+        this.recordInventoryMovement({
+          itemId: match.id,
+          itemName: match.name,
+          sku: match.sku,
+          quantityChange: up.returnedQuantity,
+          quantityBefore: prevStock,
+          quantityAfter: newStock,
+          resultingStock: newStock,
+          unitCost: match.purchasePrice,
+          type: 'SALE_RETURN',
+          movementType: 'SALE_RETURN',
+          reason: up.returnReason || 'Customer Sales Return (Restocked)',
+          notes: up.returnNote,
+          referenceType: 'RETURN',
+          referenceId: invoiceId,
+          referenceNumber: existing?.invoiceNumber,
+        });
+      } else if (match && up.returnedQuantity > 0 && up.returnReason === 'DEFECTIVE_DAMAGED') {
+        this.recordInventoryMovement({
+          itemId: match.id,
+          itemName: match.name,
+          sku: match.sku,
+          quantityChange: 0,
+          quantityBefore: match.currentStock,
+          quantityAfter: match.currentStock,
+          resultingStock: match.currentStock,
+          unitCost: match.purchasePrice,
+          type: 'DAMAGED',
+          movementType: 'DAMAGED',
+          reason: 'Defective / Damaged Return (Not Restocked)',
+          notes: up.returnNote,
+          referenceType: 'RETURN',
+          referenceId: invoiceId,
+          referenceNumber: existing?.invoiceNumber,
+        });
       }
     });
 
     this.invoices = this.invoices.map(inv => inv.id === invoiceId ? updatedInvoice! : inv);
     this.notify();
     return updatedInvoice;
+  }
+
+  async recordInvoicePayment(
+    invoiceId: string, 
+    paymentData: { amount: number; paymentMode: string; referenceNumber?: string; notes?: string }
+  ): Promise<Invoice | null> {
+    const inv = this.invoices.find(i => i.id === invoiceId || i.invoiceNumber === invoiceId);
+    if (!inv) return null;
+
+    try {
+      await apiClient.post(`/sales/${inv.id}/payments`, paymentData);
+    } catch (err) {
+      console.warn('Backend sale payment API failed, applying locally:', err);
+    }
+
+    inv.paidAmount = Number(((inv.paidAmount || 0) + paymentData.amount).toFixed(2));
+    inv.balanceAmount = Math.max(0, Number(((inv.balanceAmount || 0) - paymentData.amount).toFixed(2)));
+    inv.status = inv.balanceAmount === 0 ? 'PAID' : 'PARTIAL';
+
+    if (inv.partyId) {
+      const party = this.parties.find(p => p.id === inv.partyId);
+      if (party) {
+        party.currentBalance = Math.max(0, Number((party.currentBalance - paymentData.amount).toFixed(2)));
+      }
+    }
+
+    this.ledgerEntries.unshift({
+      id: `led-inv-pay-${Date.now()}`,
+      date: new Date().toISOString(),
+      type: 'PAYMENT_IN',
+      title: `Invoice Payment #${inv.invoiceNumber}`,
+      partyOrPayee: inv.partyName || 'Customer',
+      partyId: inv.partyId,
+      amount: paymentData.amount,
+      paymentMode: paymentData.paymentMode,
+      referenceNumber: paymentData.referenceNumber,
+      category: 'Customer Dues Clearance',
+    });
+
+    this.notify();
+    return inv;
   }
 
   // --- Parties ---
@@ -905,6 +1289,53 @@ class MobileStore {
     return party;
   }
 
+  async updateParty(id: string, updates: Partial<Party>): Promise<Party | null> {
+    const party = this.parties.find(p => p.id === id);
+    if (!party) return null;
+
+    const updatedParty: Party = {
+      ...party,
+      ...updates,
+      id,
+    };
+
+    try {
+      if (party.type === 'CUSTOMER') {
+        await apiClient.put(`/customers/${id}`, updatedParty);
+      } else {
+        await apiClient.put(`/parties/${id}`, updatedParty);
+      }
+    } catch (err) {
+      console.warn('Update party API failed, applying locally:', err);
+    }
+
+    const idx = this.parties.findIndex(p => p.id === id);
+    if (idx >= 0) {
+      this.parties[idx] = updatedParty;
+    }
+    this.notify();
+    return updatedParty;
+  }
+
+  async deleteParty(id: string): Promise<boolean> {
+    const party = this.parties.find(p => p.id === id);
+    if (!party) return false;
+
+    try {
+      if (party.type === 'CUSTOMER') {
+        await apiClient.delete(`/customers/${id}`);
+      } else {
+        await apiClient.delete(`/parties/${id}`);
+      }
+    } catch (err) {
+      console.warn('Delete party API failed, applying locally:', err);
+    }
+
+    this.parties = this.parties.filter(p => p.id !== id);
+    this.notify();
+    return true;
+  }
+
   // --- Purchase Orders ---
   getPurchaseOrders(): PurchaseOrder[] {
     return [...this.purchaseOrders];
@@ -994,12 +1425,23 @@ class MobileStore {
     return newPO;
   }
 
-  async receivePurchaseOrder(poId: string, options?: { payment?: { amount: number; paymentMode: string; referenceNumber?: string; notes?: string }; notes?: string }) {
+  async receivePurchaseOrder(
+    poId: string, 
+    options?: { 
+      items?: Array<{ itemId: string; qty: number }>;
+      payment?: { amount: number; paymentMode: string; referenceNumber?: string; notes?: string }; 
+      notes?: string;
+    }
+  ) {
     const po = this.purchaseOrders.find(p => p.id === poId);
-    const itemsToReceive = po?.items.map(i => ({
-      itemId: i.itemId,
-      qty: Math.max(0, i.orderedQty - (i.receivedQty || 0))
-    })).filter(i => i.qty > 0) || [];
+    if (!po) return;
+
+    const itemsToReceive = options?.items && options.items.length > 0
+      ? options.items.filter(i => i.qty > 0)
+      : po.items.map(i => ({
+          itemId: i.itemId,
+          qty: Math.max(0, i.orderedQty - (i.receivedQty || 0))
+        })).filter(i => i.qty > 0);
 
     try {
       await apiClient.post(`/purchase-orders/${poId}/receive-goods`, {
@@ -1011,26 +1453,85 @@ class MobileStore {
       console.warn('Receive PO API failed, applying locally:', err);
     }
 
-    if (po && po.status !== 'RECEIVED' && po.status !== 'FULLY_RECEIVED') {
-      po.status = 'RECEIVED';
-      po.totalReceivedAmount = po.grandTotal;
-      if (options?.payment && options.payment.amount > 0) {
-        po.totalPaidAmount = (po.totalPaidAmount || 0) + options.payment.amount;
-        po.balanceDue = Math.max(0, po.grandTotal - (po.totalPaidAmount || 0));
-        po.paymentStatus = po.balanceDue === 0 ? 'PAID' : 'PARTIALLY_PAID';
-      } else {
-        po.balanceDue = Math.max(0, po.grandTotal - (po.totalPaidAmount || 0));
-        po.paymentStatus = (po.totalPaidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
-      }
-      po.items.forEach(poItem => {
-        poItem.receivedQty = poItem.orderedQty;
+    itemsToReceive.forEach(rec => {
+      const poItem = po.items.find(i => i.itemId === rec.itemId);
+      if (poItem && rec.qty > 0) {
+        poItem.receivedQty = (poItem.receivedQty || 0) + rec.qty;
+
         const item = this.items.find(i => i.id === poItem.itemId || i.name === poItem.name);
         if (item) {
-          item.currentStock = Number((item.currentStock + poItem.orderedQty).toFixed(3));
+          const prevStock = item.currentStock;
+          const newStock = Number((item.currentStock + rec.qty).toFixed(3));
+          item.currentStock = newStock;
+
+          this.recordInventoryMovement({
+            itemId: item.id,
+            itemName: item.name,
+            sku: item.sku,
+            quantityChange: rec.qty,
+            quantityBefore: prevStock,
+            quantityAfter: newStock,
+            resultingStock: newStock,
+            unitCost: poItem.unitPrice,
+            type: 'PURCHASE',
+            movementType: 'PURCHASE',
+            reason: `PO #${po.poNumber} Inward (${rec.qty} ${poItem.unit || 'pcs'})`,
+            referenceType: 'PURCHASE_ORDER',
+            referenceId: po.id,
+            referenceNumber: po.poNumber,
+            notes: options?.notes,
+          });
         }
+      }
+    });
+
+    const totalRecVal = po.items.reduce((s, it) => {
+      const q = it.receivedQty || 0;
+      return s + (q * it.unitPrice * (1 + (it.taxRate || 0) / 100));
+    }, 0);
+    po.totalReceivedAmount = Number(totalRecVal.toFixed(2));
+
+    const allReceived = po.items.every(i => (i.receivedQty || 0) >= i.orderedQty);
+    const anyReceived = po.items.some(i => (i.receivedQty || 0) > 0);
+    po.status = allReceived ? 'FULLY_RECEIVED' : (anyReceived ? 'PARTIALLY_RECEIVED' : po.status);
+
+    if (options?.payment && options.payment.amount > 0) {
+      po.totalPaidAmount = (po.totalPaidAmount || 0) + options.payment.amount;
+      if (!po.payments) po.payments = [];
+      po.payments.push({
+        paymentId: `pmt-${Date.now()}`,
+        amount: options.payment.amount,
+        paymentMode: options.payment.paymentMode,
+        referenceNumber: options.payment.referenceNumber,
+        notes: options.payment.notes,
+        paymentDate: new Date().toISOString(),
       });
-      this.notify();
+
+      const sup = this.parties.find(p => p.id === po.supplierId);
+      if (sup) {
+        sup.currentBalance = (sup.currentBalance || 0) - options.payment.amount;
+      }
+
+      this.ledgerEntries.unshift({
+        id: `led-po-${Date.now()}`,
+        date: new Date().toISOString(),
+        type: 'PAYMENT_OUT',
+        title: `PO Payment #${po.poNumber}`,
+        partyOrPayee: po.supplierName || 'Supplier',
+        partyId: po.supplierId,
+        paymentMode: options.payment.paymentMode,
+        amount: options.payment.amount,
+        category: 'Purchase Order Settlement',
+      });
     }
+
+    const effectiveReceived = po.totalReceivedAmount !== undefined ? po.totalReceivedAmount : po.grandTotal;
+    po.balanceDue = Math.max(0, effectiveReceived - (po.totalPaidAmount || 0));
+    po.paymentStatus = po.balanceDue === 0 && effectiveReceived > 0 
+      ? 'PAID' 
+      : ((po.totalPaidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'UNPAID');
+
+    this.notify();
   }
 
   async recordPurchaseOrderPayment(poId: string, paymentData: { amount: number; paymentMode: string; referenceNumber?: string; notes?: string }) {
@@ -1090,13 +1591,114 @@ class MobileStore {
     return [...this.ledgerEntries];
   }
 
-  addPayment(entry: Omit<LedgerEntry, 'id' | 'date'>) {
-    this.ledgerEntries.unshift({
+  async addPayment(entry: Omit<LedgerEntry, 'id' | 'date'>): Promise<LedgerEntry> {
+    const newEntry: LedgerEntry = {
       ...entry,
       id: `led-${Date.now()}`,
       date: new Date().toISOString(),
-    });
+    };
+    this.ledgerEntries.unshift(newEntry);
+
+    // If linked to a party, update the party's currentBalance in local store and sync with API
+    if (entry.partyId) {
+      const party = this.parties.find(p => p.id === entry.partyId);
+      if (party) {
+        if (entry.type === 'PAYMENT_IN') {
+          // Customer paid money towards dues -> receivable decreases
+          party.currentBalance = Number((party.currentBalance - entry.amount).toFixed(2));
+        } else if (entry.type === 'PAYMENT_OUT') {
+          // Supplier was paid -> payable decreases (currentBalance moves closer to 0)
+          party.currentBalance = Number((party.currentBalance + entry.amount).toFixed(2));
+        }
+      }
+
+      // Persist to backend
+      try {
+        await apiClient.post('/payments', {
+          partyId: entry.partyId,
+          partyName: entry.partyOrPayee,
+          type: entry.type,
+          amount: entry.amount,
+          paymentMode: entry.paymentMode,
+          referenceNumber: entry.referenceNumber,
+          notes: entry.notes,
+          category: entry.category,
+        });
+      } catch (err) {
+        console.warn('Backend payment sync failed, saved locally:', err);
+      }
+    } else if (entry.type === 'EXPENSE') {
+      try {
+        await apiClient.post('/expenses', {
+          category: entry.category || 'General',
+          amount: entry.amount,
+          payee: entry.partyOrPayee,
+          paymentMode: entry.paymentMode,
+          referenceNumber: entry.referenceNumber,
+          description: entry.notes,
+          locationId: this.getActiveLocation().id,
+          expenseDate: new Date().toISOString().split('T')[0],
+        });
+      } catch (err) {
+        console.warn('Backend expense sync failed, saved locally:', err);
+      }
+    }
+
     this.notify();
+    return newEntry;
+  }
+
+  getExpenseCategories(): ItemCategory[] {
+    return this.categories.filter(c => c.type === 'EXPENSE');
+  }
+
+  async fetchExpenseCategories(): Promise<ItemCategory[]> {
+    try {
+      const res = await apiClient.get('/categories', { params: { type: 'EXPENSE' } });
+      if (res.data && Array.isArray(res.data)) {
+        const expCats: ItemCategory[] = res.data.map((c: any) => ({
+          id: c.id || c._id,
+          businessId: c.businessId || this.activeUser?.businessId,
+          name: c.name,
+          type: 'EXPENSE',
+          description: c.description,
+        }));
+        this.categories = [
+          ...this.categories.filter(c => c.type !== 'EXPENSE'),
+          ...expCats
+        ];
+        this.notify();
+        return expCats;
+      }
+    } catch (e) {
+      console.warn('Could not fetch expense categories:', e);
+    }
+    return this.getExpenseCategories();
+  }
+
+  async addExpenseCategory(name: string, description?: string): Promise<ItemCategory> {
+    const newCat: ItemCategory = {
+      id: `cat-exp-${Date.now()}`,
+      businessId: this.activeUser?.businessId,
+      name: name.trim(),
+      type: 'EXPENSE',
+      description: description?.trim(),
+    };
+    try {
+      const res = await apiClient.post('/categories', {
+        name: newCat.name,
+        type: 'EXPENSE',
+        description: newCat.description,
+      });
+      if (res.data?.id || res.data?._id) {
+        newCat.id = res.data.id || res.data._id;
+      }
+    } catch (e) {
+      console.warn('Backend add expense category failed:', e);
+    }
+    this.categories.push(newCat);
+    this.notify();
+    return newCat;
   }
 
   // --- Dashboard Stats ---
@@ -1190,6 +1792,59 @@ class MobileStore {
     }
   }
 
+  async updateLocation(locationId: string, updates: Partial<StoreLocation>): Promise<StoreLocation | null> {
+    const idx = this.locations.findIndex(l => l.id === locationId);
+    if (idx === -1) return null;
+
+    try {
+      const res = await apiClient.put(`/locations/${locationId}`, updates);
+      if (res.data) {
+        const live: StoreLocation = {
+          id: res.data.id || res.data._id || locationId,
+          businessId: res.data.businessId || this.activeUser?.businessId || '',
+          name: res.data.name || this.locations[idx].name,
+          code: res.data.code || this.locations[idx].code,
+          address: res.data.address !== undefined ? res.data.address : (this.locations[idx].address || ''),
+          phone: res.data.phone !== undefined ? res.data.phone : (this.locations[idx].phone || ''),
+          gstin: res.data.gstin !== undefined ? res.data.gstin : (this.locations[idx].gstin || ''),
+          isDefault: res.data.isDefault !== undefined ? !!res.data.isDefault : !!this.locations[idx].isDefault,
+          isActive: res.data.isActive !== undefined ? !!res.data.isActive : (this.locations[idx].isActive !== false),
+          createdAt: res.data.createdAt || this.locations[idx].createdAt,
+        };
+        this.locations[idx] = live;
+        if (this.activeLocation?.id === locationId) {
+          this.activeLocation = live;
+        }
+        this.notify();
+        return live;
+      }
+    } catch (err) {
+      console.warn(`Backend /locations/${locationId} update failed, applying local update:`, err);
+    }
+
+    this.locations[idx] = { ...this.locations[idx], ...updates };
+    if (this.activeLocation?.id === locationId) {
+      this.activeLocation = this.locations[idx];
+    }
+    this.notify();
+    return this.locations[idx];
+  }
+
+  async deleteLocation(locationId: string): Promise<boolean> {
+    try {
+      await apiClient.delete(`/locations/${locationId}`);
+    } catch (err) {
+      console.warn(`Backend /locations/${locationId} delete failed:`, err);
+    }
+
+    this.locations = this.locations.filter(l => l.id !== locationId);
+    if (this.activeLocation?.id === locationId) {
+      this.activeLocation = this.locations[0] || null;
+    }
+    this.notify();
+    return true;
+  }
+
   // --- Staff & User Management ---
   getUsers(): User[] {
     return [...this.users];
@@ -1216,13 +1871,21 @@ class MobileStore {
     return this.users;
   }
 
-  async createUser(userData: { name: string; email: string; password?: string; role: 'MANAGER' | 'CASHIER' }): Promise<User> {
+  async createUser(userData: {
+    name: string;
+    email: string;
+    password?: string;
+    role: UserRole;
+    assignedLocationIds?: string[];
+  }): Promise<User> {
     try {
       const res = await apiClient.post('/users', {
         name: userData.name,
         email: userData.email,
         password: userData.password || 'QuickBill@123',
         roles: [userData.role],
+        role: userData.role,
+        assignedLocationIds: userData.assignedLocationIds || [],
       });
       const newUser: User = {
         id: res.data?.id || res.data?._id || `usr-${Date.now()}`,
@@ -1230,6 +1893,7 @@ class MobileStore {
         email: userData.email,
         role: userData.role,
         businessId: this.activeUser?.businessId || '',
+        assignedLocationIds: userData.assignedLocationIds || [],
         isActive: true,
       };
       this.users.push(newUser);
@@ -1242,12 +1906,28 @@ class MobileStore {
         email: userData.email,
         role: userData.role,
         businessId: this.activeUser?.businessId || '',
+        assignedLocationIds: userData.assignedLocationIds || [],
         isActive: true,
       };
       this.users.push(newUser);
       this.notify();
       return newUser;
     }
+  }
+
+  async updateUser(userId: string, updates: Partial<User>): Promise<User | null> {
+    const idx = this.users.findIndex(u => u.id === userId);
+    if (idx === -1) return null;
+
+    try {
+      await apiClient.put(`/users/${userId}`, updates);
+    } catch (e) {
+      console.warn(`Backend /users/${userId} update failed:`, e);
+    }
+
+    this.users[idx] = { ...this.users[idx], ...updates };
+    this.notify();
+    return this.users[idx];
   }
 
   async deleteUser(userId: string) {

@@ -20,20 +20,31 @@ The QuickBill mobile app brings full store management capabilities to Android an
 ```text
 apps/mobile/
 ├── src/
-│   ├── components/         # Mobile UI components (Cards, Inputs, Buttons, Modals)
+│   ├── components/         # Mobile UI components (Cards, Inputs, Buttons, Modals, Camera)
 │   ├── screens/            # Screen views:
-│   │   ├── BillingScreen.tsx     # Mobile POS screen with Camera QR trigger
-│   │   ├── ScannerScreen.tsx     # Fullscreen camera barcode & QR scanner
-│   │   ├── ItemsScreen.tsx       # Product catalog & stock viewer
-│   │   ├── PartiesScreen.tsx     # Customer & Supplier Khata ledger
-│   │   └── ReportsScreen.tsx     # Daily sales & financial summaries
-│   ├── services/           # API client with JWT storage & auth interceptors
-│   ├── hooks/              # Offline storage and network state hooks
-│   └── types/              # Shared TypeScript contracts
-├── App.tsx                 # Mobile app entry point and navigation container
-├── app.json                # Expo project configuration and permissions
+│   │   ├── LoginScreen.tsx            # Tenant authentication & server URL config
+│   │   ├── HomeScreen.tsx             # Dashboard, KPI metrics & quick actions
+│   │   ├── POSScreen.tsx              # Fast mobile POS checkout with camera QR scanner
+│   │   ├── ItemsScreen.tsx            # Inventory catalog & stock adjustment
+│   │   ├── TransactionsScreen.tsx     # Invoices, WhatsApp sharing, thermal print & returns
+│   │   ├── PartiesScreen.tsx          # Customer & Supplier Khata directory
+│   │   ├── LedgerScreen.tsx           # Cash register, Daybook & expenses
+│   │   ├── PurchaseOrdersScreen.tsx   # Supplier POs & stock inwarding
+│   │   ├── ReportsScreen.tsx          # Trading, P&L & financial summaries
+│   │   ├── SettingsScreen.tsx         # Store profile, staff & branch management
+│   │   ├── HubScreen.tsx              # Central shift & business operations hub
+│   │   ├── ShippingDispatchScreen.tsx # [BACKLOG] Parcel packing & dispatch verification
+│   │   └── NewSaleScreen.tsx          # [BACKLOG] Manual invoice creation
+│   ├── services/           # MobileStore singleton & API client with JWT storage
+│   ├── theme/              # Color tokens and styling definitions
+│   ├── utils/              # Print, share, audio, and formatting utilities
+│   └── types/              # TypeScript models and domain contracts
+├── App.tsx                 # Mobile app entry point, role-based navigation & status banners
+├── app.json                # Expo project configuration and camera permissions
 └── package.json            # Mobile dependencies and scripts
 ```
+
+> **Process & Feature Parity Reference**: For complete comparative process mapping against the Web gold standard and the stepwise alignment roadmap, see **[MOBILE_VS_WEB_FEATURE_PARITY_AND_IMPROVEMENT_PLAN.md](../../MOBILE_VS_WEB_FEATURE_PARITY_AND_IMPROVEMENT_PLAN.md)**.
 
 ---
 
@@ -75,3 +86,65 @@ cd apps/mobile
 npm test
 npx tsc --noEmit
 ```
+
+---
+
+## 📦 Building Standalone Android APK
+
+You can build an installable `.apk` file using either **EAS Build** (Recommended: cloud/local, no Android Studio needed) or **Local Native Gradle Build** (offline).
+
+### Method 1: EAS Build (Recommended & Cloud-Free of Android Studio)
+
+1. **Install EAS CLI** (if not already installed):
+   ```bash
+   npm install -g eas-cli
+   ```
+
+2. **Log in to Expo**:
+   ```bash
+   eas login
+   ```
+
+3. **Trigger APK Build**:
+   ```bash
+   cd apps/mobile
+   # Build on EAS Cloud (Outputs a direct download link and QR code for the .apk):
+   eas build --platform android --profile preview
+
+   # OR build locally on your machine with EAS CLI:
+   eas build --platform android --profile preview --local
+   ```
+
+---
+
+### Method 2: Offline Local Gradle Build (Requires Android SDK & Java 17)
+
+1. **Generate the native Android project folder**:
+   ```bash
+   cd apps/mobile
+   npx expo prebuild --platform android
+   ```
+
+2. **Compile the release APK using Gradle**:
+   - **Windows (PowerShell / Command Prompt)**:
+     ```powershell
+     cd android
+     .\gradlew assembleRelease
+     ```
+   - **macOS / Linux**:
+     ```bash
+     cd android
+     ./gradlew assembleRelease
+     ```
+
+3. **Locate the generated APK**:
+   ```text
+   apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+   ```
+   *(Or for debug testing: `.\gradlew assembleDebug` -> `.../apk/debug/app-debug.apk`)*
+
+4. **Install on connected Android device via ADB**:
+   ```bash
+   adb install -r android/app/build/outputs/apk/release/app-release.apk
+   ```
+

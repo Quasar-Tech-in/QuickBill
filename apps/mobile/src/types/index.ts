@@ -34,6 +34,11 @@ export interface Business {
   email?: string;
   address?: string;
   currency: string;
+  logoUrl?: string;
+  tagline?: string;
+  receiptFooterNote?: string;
+  printerPaperSize?: '58mm' | '80mm';
+  upiQrEnabled?: boolean;
 }
 
 export interface ItemLocationInventory {
@@ -126,21 +131,26 @@ export interface CartItem {
 
 export interface StagedOrder {
   id: string;
-  businessId: string;
-  locationId: string;
+  businessId?: string;
+  locationId?: string;
   locationName?: string;
-  label: string;
+  label: string; // e.g. "Table 4", "Rohan (Cold Coffee)", "Order #1"
   customerName?: string;
   customerPhone?: string;
   partyId?: string;
-  items: CartItem[];
-  itemCount: number;
+  selectedPartyId?: string;
+  cart: CartItem[];
+  items?: CartItem[];
+  itemCount?: number;
   discountType?: 'PERCENT' | 'FLAT';
   discountValue?: number;
   discountAmount?: number;
-  subtotal: number;
-  taxTotal: number;
-  grandTotal: number;
+  orderDiscountType?: 'PERCENT' | 'FLAT';
+  orderDiscountValue?: string;
+  paymentMode?: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'BANK_TRANSFER' | 'SPLIT';
+  subtotal?: number;
+  taxTotal?: number;
+  grandTotal?: number;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -151,11 +161,22 @@ export interface InvoiceItem {
   name: string;
   unit?: string;
   quantity: number;
+  returnedQuantity?: number;
+  returnReason?: string;
+  returnNote?: string;
+  returnDate?: string;
+  returnStatus?: 'NONE' | 'PARTIAL' | 'FULL';
   unitPrice: number;
+  discount?: number;
   discountPercent: number;
+  discountType?: 'PERCENT' | 'FLAT';
+  discountValue?: number;
+  discountAmount?: number;
   taxRate: number;
   taxAmount: number;
+  taxableAmount?: number;
   total: number;
+  originalTotal?: number;
 }
 
 export interface Invoice {
@@ -163,6 +184,9 @@ export interface Invoice {
   businessId?: string;
   locationId?: string;
   locationName?: string;
+  locationCode?: string;
+  locationAddress?: string;
+  locationPhone?: string;
   locationGstin?: string;
   invoiceNumber: string;
   date: string;
@@ -175,11 +199,16 @@ export interface Invoice {
   billedByName?: string;
   type: 'SALE' | 'PURCHASE';
   items: InvoiceItem[];
+  grossTotal?: number;
   subtotal: number;
   taxTotal: number;
+  itemDiscountTotal?: number;
+  orderDiscountAmount?: number;
+  invoiceDiscount?: number;
   discountTotal: number;
   roundOff: number;
   grandTotal: number;
+  originalGrandTotal?: number;
   paidAmount: number;
   balanceAmount: number;
   paymentMode: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'BANK_TRANSFER' | 'SPLIT';
@@ -188,7 +217,12 @@ export interface Invoice {
     upi?: number;
     card?: number;
   };
-  status: 'PAID' | 'PARTIAL' | 'UNPAID' | 'CANCELLED';
+  status: 'PAID' | 'PARTIAL' | 'UNPAID' | 'CANCELLED' | 'RETURNS' | 'RETURNED' | 'PARTIALLY_RETURNED';
+  hasReturns?: boolean;
+  returnTotal?: number;
+  returnStatus?: 'NONE' | 'PARTIALLY_RETURNED' | 'FULLY_RETURNED';
+  returnNotes?: string;
+  returns?: any[];
   notes?: string;
 }
 
@@ -286,30 +320,95 @@ export interface DashboardStats {
   netProfit: number;
 }
 
-export interface StagedOrder {
+export type PlanTier = 'STARTER' | 'PROFESSIONAL' | 'ENTERPRISE';
+export type SubscriptionStatus = 'TRIAL' | 'ACTIVE' | 'EXPIRED' | 'SUSPENDED' | 'CANCELLED';
+export type BillingCycle = 'MONTHLY' | 'ANNUAL';
+
+export interface TenantSubscription {
+  planId: PlanTier;
+  planName: string;
+  status: SubscriptionStatus;
+  maxUsers: number;
+  maxLocations: number;
+  billingCycle: BillingCycle;
+  startDate: string;
+  endDate: string;
+  daysRemaining?: number;
+  gracePeriodDays?: number;
+  pricePerCycle?: number;
+  currency?: string;
+  autoRenew?: boolean;
+  features?: string[];
+  notes?: string;
+}
+
+export interface TenantDatabaseConfig {
+  isolationMode: 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER';
+  mongodbUri?: string;
+  databaseName: string;
+}
+
+export interface Tenant {
+  id: string;
+  name: string;
+  slug?: string;
+  plan: PlanTier;
+  status: 'ACTIVE' | 'SUSPENDED';
+  adminEmail: string;
+  phone?: string;
+  gstin?: string;
+  address?: string;
+  logoUrl?: string;
+  tagline?: string;
+  receiptFooterNote?: string;
+  createdAt?: string;
+  databaseConfig?: TenantDatabaseConfig;
+  subscription?: TenantSubscription;
+  stats?: {
+    productsCount: number;
+    invoicesCount: number;
+    monthlyGmv: number;
+    usersCount: number;
+    locationsCount?: number;
+  };
+}
+
+export type InventoryMovementType = 
+  | 'PURCHASE' 
+  | 'SALE' 
+  | 'SALE_RETURN' 
+  | 'MANUAL_ADJUSTMENT' 
+  | 'DAMAGED_WRITE_OFF' 
+  | 'OPENING_STOCK' 
+  | 'PO_CANCEL' 
+  | 'PRICE_CHANGE' 
+  | 'PRODUCT_UPDATE';
+
+export interface InventoryMovement {
   id: string;
   businessId?: string;
+  itemId: string;
+  publicItemId?: string;
+  itemName: string;
+  sku?: string;
   locationId?: string;
   locationName?: string;
-  label: string; // e.g. "Table 4", "Rohan (Cold Coffee)", "Order #1"
-  customerName?: string;
-  customerPhone?: string;
-  partyId?: string;
-  selectedPartyId?: string;
-  cart: CartItem[];
-  items?: CartItem[];
-  itemCount?: number;
-  discountType?: 'PERCENT' | 'FLAT';
-  discountValue?: number;
-  discountAmount?: number;
-  orderDiscountType?: 'PERCENT' | 'FLAT';
-  orderDiscountValue?: string;
-  paymentMode?: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'BANK_TRANSFER' | 'SPLIT';
-  subtotal?: number;
-  taxTotal?: number;
-  grandTotal?: number;
+  type: InventoryMovementType | string;
+  movementType?: InventoryMovementType | string;
+  referenceType?: string;
+  referenceId?: string;
+  referenceNumber?: string;
+  quantity?: number;
+  quantityChange: number;
+  quantityBefore: number;
+  quantityAfter: number;
+  resultingStock?: number;
+  unitCost: number;
+  totalCost?: number;
+  reason?: string;
   notes?: string;
+  createdByUserId?: string;
+  createdByName?: string;
   createdAt: string;
-  updatedAt: string;
 }
 

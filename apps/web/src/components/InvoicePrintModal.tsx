@@ -306,14 +306,18 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     const retQty = line.returnedQuantity ? Math.round(Number(line.returnedQuantity) * 1000) / 1000 : 0;
                     const hasRet = retQty > 0;
                     const activeQty = Math.max(0, Math.round((Number(line.quantity) - retQty) * 1000) / 1000);
-                    const is100PctDisc = line.total === 0 || (line.discountPercent !== undefined && line.discountPercent >= 100) || (line.discountAmount !== undefined && line.originalTotal !== undefined && line.discountAmount >= line.originalTotal);
-                    const hasDisc = is100PctDisc || (line.discountAmount !== undefined && line.discountAmount > 0) || (line.discountPercent !== undefined && line.discountPercent > 0);
+                    const discPercent = Number(line.discountPercent || (line.discountType === 'PERCENT' ? line.discountValue : 0) || 0);
+                    const discAmount = Number(line.discountAmount !== undefined ? line.discountAmount : (line.discountType === 'FLAT' ? line.discountValue : 0) || 0);
+                    const origTotal = Number(line.originalTotal !== undefined ? line.originalTotal : (line.unitPrice * line.quantity));
+
+                    const is100PctDisc = discPercent >= 100 || (discAmount > 0 && origTotal > 0 && discAmount >= origTotal);
+                    const hasDisc = is100PctDisc || discAmount > 0 || discPercent > 0;
                     
                     const discLabel = is100PctDisc 
                       ? 'Disc: 100% OFF (FREE)'
                       : (line.discountType === 'FLAT' 
-                          ? `Disc: -₹${(line.discountValue !== undefined ? line.discountValue : (line.discountAmount || 0)).toFixed(2)}`
-                          : `Disc: ${line.discountValue !== undefined ? line.discountValue : line.discountPercent}% (-₹${(line.discountAmount || 0).toFixed(2)})`);
+                          ? `Disc: -₹${(line.discountValue !== undefined ? line.discountValue : discAmount).toFixed(2)}`
+                          : `Disc: ${line.discountValue !== undefined ? line.discountValue : discPercent}% (-₹${discAmount.toFixed(2)})`);
 
                     return (
                       <tr key={idx} style={{ borderBottom: '1px dotted #e5e5e5' }}>
@@ -338,7 +342,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                         </td>
 
                         <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700 }}>
-                          {hasDisc && line.originalTotal !== undefined && line.originalTotal !== line.total && (
+                          {hasDisc && line.originalTotal !== undefined && Math.abs(line.originalTotal - line.total) > 0.01 && (
                             <div style={{ fontSize: '0.62rem', textDecoration: 'line-through', color: '#777777', fontWeight: 400 }}>
                               {line.originalTotal.toFixed(2)}
                             </div>
@@ -505,14 +509,18 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   {invoice.items.map((line, idx) => {
                     const retQty = line.returnedQuantity ? Math.round(Number(line.returnedQuantity) * 1000) / 1000 : 0;
                     const hasRet = retQty > 0;
-                    const is100PctDisc = line.total === 0 || (line.discountPercent !== undefined && line.discountPercent >= 100) || (line.discountAmount !== undefined && line.originalTotal !== undefined && line.discountAmount >= line.originalTotal);
-                    const hasDisc = is100PctDisc || (line.discountAmount !== undefined && line.discountAmount > 0) || (line.discountPercent !== undefined && line.discountPercent > 0);
+                    const discPercent = Number(line.discountPercent || (line.discountType === 'PERCENT' ? line.discountValue : 0) || 0);
+                    const discAmount = Number(line.discountAmount !== undefined ? line.discountAmount : (line.discountType === 'FLAT' ? line.discountValue : 0) || 0);
+                    const origTotal = Number(line.originalTotal !== undefined ? line.originalTotal : (line.unitPrice * line.quantity));
+
+                    const is100PctDisc = discPercent >= 100 || (discAmount > 0 && origTotal > 0 && discAmount >= origTotal);
+                    const hasDisc = is100PctDisc || discAmount > 0 || discPercent > 0;
                     
                     const discLabel = is100PctDisc 
                       ? '100% (FREE)'
                       : (line.discountType === 'FLAT' 
-                          ? `-₹${(line.discountValue !== undefined ? line.discountValue : (line.discountAmount || 0)).toFixed(2)}`
-                          : `${line.discountValue !== undefined ? line.discountValue : line.discountPercent}%`);
+                          ? `-₹${(line.discountValue !== undefined ? line.discountValue : discAmount).toFixed(2)}`
+                          : `${line.discountValue !== undefined ? line.discountValue : discPercent}%`);
 
                     const lineTaxable = line.taxableAmount !== undefined 
                       ? line.taxableAmount 
@@ -545,7 +553,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                           {line.taxRate > 0 ? `${line.taxRate}% (₹${lineTaxAmt.toFixed(2)})` : '0%'}
                         </td>
                         <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 700 }}>
-                          {hasDisc && line.originalTotal && line.originalTotal !== line.total && (
+                          {hasDisc && line.originalTotal !== undefined && Math.abs(line.originalTotal - line.total) > 0.01 && (
                             <div style={{ fontSize: '0.70rem', textDecoration: 'line-through', color: 'var(--neutral-400)', fontWeight: 400 }}>
                               ₹{line.originalTotal.toFixed(2)}
                             </div>

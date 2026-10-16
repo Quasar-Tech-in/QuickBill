@@ -13,10 +13,15 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.quickbill.pos",
       "adaptiveIcon": {
         "backgroundColor": "#4F46E5"
       },
-      "permissions": ["CAMERA"]
+      "permissions": [
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       [
@@ -25,6 +30,11 @@
           "cameraPermission": "Allow QuickBill to access your camera to scan item QR codes for billing."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d56d512b-6f1a-45f9-b014-c147aa283f89"
+      }
+    }
   }
 }

@@ -14,7 +14,8 @@
 ## 📌 Executive Summary & User Guide
 
 For store owners, cashiers, inventory managers, and accountants seeking a complete operational guide and feature walkthrough, please refer to the dedicated:
-👉 **[📖 Complete End-User Manual (`USER_GUIDE.md`)](USER_GUIDE.md)**
+👉 **[📖 Complete End-User Manual (`USER_GUIDE.md`)](USER_GUIDE.md)**  
+👉 **[📋 Mobile vs. Web Feature & Process Parity Audit (`MOBILE_VS_WEB_FEATURE_PARITY_AND_IMPROVEMENT_PLAN.md`)](MOBILE_VS_WEB_FEATURE_PARITY_AND_IMPROVEMENT_PLAN.md)**
 
 ---
 
@@ -167,6 +168,48 @@ npx expo start
 
 ---
 
+### Step 5: Build Android APK (Standalone Installable)
+
+You can generate an installable `.apk` file for Android devices using either **EAS Cloud/Local Build** (fastest, no Android Studio needed) or **Offline Gradle Build** (local Android SDK):
+
+#### Option A: EAS Cloud Build (Recommended — No Android Studio Required)
+```bash
+cd apps/mobile
+
+# 1. Install EAS CLI globally (one-time setup)
+npm install -g eas-cli
+
+# 2. Log in with your Expo account
+eas login
+
+# 3. Trigger APK build (Generates direct download link & QR code)
+npm run build:apk
+# Or run directly:
+eas build --platform android --profile preview
+```
+*Tip: To build locally with EAS CLI on your machine without cloud queues, run `npm run build:apk:local`.*
+
+#### Option B: Offline Local Gradle Build (Requires Android SDK & Java 17)
+```bash
+cd apps/mobile
+
+# 1. Generate the native android directory
+npm run prebuild:android
+
+# 2. Compile release APK
+# Windows (PowerShell):
+cd android; .\gradlew assembleRelease
+# macOS / Linux:
+cd android && ./gradlew assembleRelease
+```
+* **Output APK Location**: `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`
+* **Install to connected device via ADB**:
+  ```bash
+  adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+  ```
+
+---
+
 ## 🧪 Testing & Quality Assurance
 
 ### Run Backend Tests (Pytest)
@@ -192,6 +235,7 @@ npm run build
 ## 📚 Specialized Documentation Index
 
 - **[End-User Operational Manual (`USER_GUIDE.md`)](USER_GUIDE.md)**
+- **[Mobile vs. Web Feature & Process Parity Audit (`MOBILE_VS_WEB_FEATURE_PARITY_AND_IMPROVEMENT_PLAN.md`)](MOBILE_VS_WEB_FEATURE_PARITY_AND_IMPROVEMENT_PLAN.md)**
 - **[Backend Service Documentation (`apps/api/README.md`)](apps/api/README.md)**
 - **[Web Console Documentation (`apps/web/README.md`)](apps/web/README.md)**
 - **[Mobile Application Documentation (`apps/mobile/README.md`)](apps/mobile/README.md)**
