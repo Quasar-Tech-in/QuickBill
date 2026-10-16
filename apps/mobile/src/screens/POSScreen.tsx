@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   StyleSheet, 
   View, 
@@ -86,12 +86,25 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
     return () => { unsubscribe(); };
   }, []);
 
+  const lastScanRef = useRef<{ code: string; time: number }>({ code: '', time: 0 });
+
   // Barcode / QR Scan Handler
   const handleBarcodeScanned = (barcodeData: string) => {
     let cleanCode = barcodeData.trim();
+    if (!cleanCode) return;
     if (cleanCode.startsWith('ITEM:')) {
       cleanCode = cleanCode.replace('ITEM:', '').trim();
     }
+
+    // Debounce duplicate barcode scans within 700ms (avoids double quantity increments from rapid camera frames or gun bounce)
+    const now = Date.now();
+    if (
+      cleanCode.toLowerCase() === lastScanRef.current.code.toLowerCase() &&
+      now - lastScanRef.current.time < 700
+    ) {
+      return;
+    }
+    lastScanRef.current = { code: cleanCode, time: now };
 
     const matchedItem = store.getItemByCode(cleanCode) || store.getItemById(cleanCode);
 

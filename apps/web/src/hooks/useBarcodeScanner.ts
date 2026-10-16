@@ -19,6 +19,8 @@ export function useBarcodeScanner({
 }: UseBarcodeScannerOptions) {
   const bufferRef = useRef<string>('');
   const lastKeyTimeRef = useRef<number>(0);
+  const lastScanTimeRef = useRef<number>(0);
+  const lastScanCodeRef = useRef<string>('');
 
   useEffect(() => {
     if (!enabled) return;
@@ -49,6 +51,18 @@ export function useBarcodeScanner({
           }
           const scannedCode = bufferRef.current.trim();
           bufferRef.current = '';
+
+          // Debounce identical scans within 600ms to prevent double-firing
+          const scanNow = Date.now();
+          if (
+            scannedCode.toLowerCase() === lastScanCodeRef.current.toLowerCase() &&
+            scanNow - lastScanTimeRef.current < 600
+          ) {
+            return;
+          }
+          lastScanTimeRef.current = scanNow;
+          lastScanCodeRef.current = scannedCode;
+
           onScan(scannedCode);
         } else {
           bufferRef.current = '';

@@ -191,6 +191,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     type: 'success' | 'error';
   } | null>(null);
   const scanNotificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastScanRef = useRef<{ code: string; time: number }>({ code: '', time: 0 });
 
   const showScanNotification = (message: string, type: 'success' | 'error') => {
     if (scanNotificationTimeoutRef.current) {
@@ -206,6 +207,16 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const handleGlobalBarcodeScan = (scannedCode: string) => {
     const clean = scannedCode.trim();
     if (!clean) return;
+
+    // Prevent duplicate double-firing from simultaneous input onKeyDown + global keyboard wedge or camera frames
+    const now = Date.now();
+    if (
+      clean.toLowerCase() === lastScanRef.current.code.toLowerCase() &&
+      now - lastScanRef.current.time < 700
+    ) {
+      return;
+    }
+    lastScanRef.current = { code: clean, time: now };
 
     let publicId = clean;
     if (clean.startsWith('ITEM:')) {
@@ -256,7 +267,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
 
   useBarcodeScanner({
     onScan: handleGlobalBarcodeScan,
-    enabled: true,
+    enabled: !isWebcamOpen,
   });
 
   // Subscribe to store posCart updates (e.g. when cleared upon location switch)
@@ -1443,8 +1454,10 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      if (searchQuery.trim()) {
-                        handleGlobalBarcodeScan(searchQuery.trim());
+                      const query = searchQuery.trim();
+                      if (query) {
+                        setSearchQuery('');
+                        handleGlobalBarcodeScan(query);
                       }
                     }
                   }}

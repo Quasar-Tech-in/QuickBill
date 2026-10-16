@@ -31,6 +31,7 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
   const isStandbyRef = useRef<boolean>(initialStandbyMode);
   const scannerContainerId = 'webcam-scanner-viewport';
   const lastScannedTimeRef = useRef<number>(0);
+  const lastCodeRef = useRef<string | null>(null);
   const usbBufferRef = useRef<string>('');
   const lastKeyTimeRef = useRef<number>(0);
   const testInputRef = useRef<HTMLInputElement | null>(null);
@@ -64,12 +65,18 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
     if (!clean) return;
 
     const now = Date.now();
-    // For continuous camera video stream, throttle duplicate frame detection to 750ms.
-    // For intentional hardware gun triggers or manual clicks, allow immediate re-scans!
-    if (!isHardwareTrigger && now - lastScannedTimeRef.current < 750 && clean === lastCode) {
+    // Throttle duplicate detections:
+    // - Camera continuous video stream: 800ms for identical barcode (avoids multi-frame double fires)
+    // - Hardware trigger: 600ms debounce
+    const throttleWindow = isHardwareTrigger ? 600 : 800;
+    if (
+      clean.toLowerCase() === (lastCodeRef.current || '').toLowerCase() &&
+      now - lastScannedTimeRef.current < throttleWindow
+    ) {
       return;
     }
     lastScannedTimeRef.current = now;
+    lastCodeRef.current = clean;
 
     playBeep();
     setIsScanned(true);
