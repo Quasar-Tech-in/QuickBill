@@ -131,6 +131,11 @@ export interface Party {
   locationIds?: string[]; // Assigned locations (empty/null means Global / All Locations)
   locationId?: string;
   locationName?: string;
+  isNew?: boolean;
+  totalVisits?: number;
+  totalSpent?: number;
+  lastPurchaseDate?: string;
+  firstPurchaseDate?: string;
 }
 
 export interface Customer {
@@ -145,6 +150,8 @@ export interface Customer {
   currentBalance: number;
   totalSpent: number;
   totalVisits: number;
+  isNew?: boolean;
+  firstPurchaseDate?: string;
   lastPurchaseDate?: string;
   tags?: string[];
   marketingConsent?: boolean;
@@ -233,6 +240,7 @@ export interface Invoice {
   partyPhone?: string;
   consumerName?: string;
   consumerPhone?: string;
+  isNewCustomer?: boolean;
   billedById?: string;
   billedByName?: string;
   billedByRole?: string;

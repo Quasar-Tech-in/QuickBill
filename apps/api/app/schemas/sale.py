@@ -60,6 +60,7 @@ class SaleCreateRequest(BaseSchema):
     payment_reference: Optional[str] = Field(None, alias="paymentReference")
     notes: Optional[str] = None
     enable_round_off: bool = Field(default=True, alias="enableRoundOff")
+    is_new_customer: Optional[bool] = Field(default=None, alias="isNewCustomer")
 
 class SaleItemReturnInput(BaseSchema):
     item_id: str = Field(..., alias="itemId")
@@ -123,6 +124,7 @@ class SaleResponse(BaseSchema):
     paid_amount: Decimal = Field(default=Decimal("0.00"), alias="paidAmount")
     balance_due: Decimal = Field(default=Decimal("0.00"), alias="balanceDue")
     payment_mode: Optional[str] = Field(default="CASH", alias="paymentMode")
+    is_new_customer: Optional[bool] = Field(default=False, alias="isNewCustomer")
     type: Optional[str] = "SALE"
     notes: Optional[str] = None
     created_at: Optional[datetime] = Field(default=None, alias="createdAt")

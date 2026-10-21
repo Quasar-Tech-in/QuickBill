@@ -503,8 +503,15 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onViewInvoic
 
                     {/* Customer & Location (Left aligned with padding) */}
                     <td style={{ textAlign: 'left', paddingLeft: 16 }}>
-                      <div className="party-name-primary" style={{ fontSize: '0.88rem' }} title={inv.consumerName || inv.partyName || 'Walk-in Customer'}>
-                        {inv.consumerName || inv.partyName || 'Walk-in Customer'}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div className="party-name-primary" style={{ fontSize: '0.88rem' }} title={inv.consumerName || inv.partyName || 'Walk-in Customer'}>
+                          {inv.consumerName || inv.partyName || 'Walk-in Customer'}
+                        </div>
+                        {inv.isNewCustomer && (
+                          <span style={{ fontSize: '0.68rem', background: '#e0e7ff', color: '#4338ca', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                            🆕 New
+                          </span>
+                        )}
                       </div>
                       <div className="party-meta-sub" style={{ marginTop: 4 }}>
                         {(inv.consumerPhone || inv.partyPhone) && (

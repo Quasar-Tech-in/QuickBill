@@ -14,6 +14,7 @@ class CustomerBase(BaseSchema):
     tags: List[str] = Field(default_factory=list)  # e.g. ["VIP", "Regular", "Wholesale"]
     marketing_consent: bool = Field(default=True, alias="marketingConsent")
     location_ids: List[str] = Field(default_factory=list, alias="locationIds")
+    is_new: Optional[bool] = Field(default=True, alias="isNew")
 
 class CustomerCreate(CustomerBase):
     opening_balance: Decimal = Field(default=Decimal("0.00"), alias="openingBalance")
@@ -28,6 +29,7 @@ class CustomerUpdate(BaseSchema):
     tags: Optional[List[str]] = None
     marketing_consent: Optional[bool] = Field(None, alias="marketingConsent")
     location_ids: Optional[List[str]] = Field(None, alias="locationIds")
+    is_new: Optional[bool] = Field(None, alias="isNew")
 
 class CustomerResponse(CustomerBase):
     id: str = Field(..., alias="_id")
@@ -36,6 +38,8 @@ class CustomerResponse(CustomerBase):
     current_balance: Decimal = Field(default=Decimal("0.00"), alias="currentBalance")
     total_spent: Decimal = Field(default=Decimal("0.00"), alias="totalSpent")
     total_visits: int = Field(default=0, alias="totalVisits")
+    is_new: bool = Field(default=False, alias="isNew")
+    first_purchase_date: Optional[datetime] = Field(None, alias="firstPurchaseDate")
     last_purchase_date: Optional[datetime] = Field(None, alias="lastPurchaseDate")
     created_at: Optional[datetime] = Field(None, alias="createdAt")
 

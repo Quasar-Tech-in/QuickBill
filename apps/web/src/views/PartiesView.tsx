@@ -97,6 +97,14 @@ export const PartiesView: React.FC = () => {
 
   const [initialPartySnapshot, setInitialPartySnapshot] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
+  const [, setStoreTick] = useState(0);
+
+  // Subscribe to store updates so KPI cards reflect live synchronized cache
+  useEffect(() => {
+    return store.subscribe(() => {
+      setStoreTick(t => t + 1);
+    });
+  }, []);
 
   const loadPaginatedParties = useCallback(async (
     page: number = currentPage,
@@ -124,10 +132,12 @@ export const PartiesView: React.FC = () => {
   }, [currentPage, pageSize, selectedLocationId, debouncedSearch, filterType, isCashier]);
 
   useEffect(() => {
+    store.fetchParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId).catch(() => {});
     loadPaginatedParties(currentPage, pageSize, selectedLocationId, debouncedSearch, filterType);
   }, [currentPage, pageSize, selectedLocationId, debouncedSearch, filterType, loadPaginatedParties]);
 
   const refreshData = () => {
+    store.fetchParties(selectedLocationId === 'ALL' ? undefined : selectedLocationId).catch(() => {});
     loadPaginatedParties(currentPage, pageSize, selectedLocationId, debouncedSearch, filterType);
   };
 

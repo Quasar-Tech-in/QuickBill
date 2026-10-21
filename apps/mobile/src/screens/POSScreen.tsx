@@ -307,6 +307,7 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
     customerName: string;
     customerPhone: string;
     partyId?: string;
+    isNewCustomer?: boolean;
     paymentMode: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'SPLIT';
     paidAmount: number;
     balanceAmount: number;
@@ -342,6 +343,7 @@ export const POSScreen: React.FC<POSScreenProps> = () => {
       partyPhone: saleDetails.customerPhone,
       consumerName: saleDetails.customerName,
       consumerPhone: saleDetails.customerPhone,
+      isNewCustomer: saleDetails.isNewCustomer,
       billedById: activeUser?.id,
       billedByName: activeUser?.name || 'Cashier Mobile',
       locationId: activeLoc.id,

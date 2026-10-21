@@ -105,7 +105,14 @@ export const PostSaleModal: React.FC<PostSaleModalProps> = ({
           <Text style={styles.grandTotal}>₹ {invoice.grandTotal.toFixed(2)}</Text>
 
           <View style={styles.customerBox}>
-            <Text style={styles.customerName}>👤 {invoice.partyName || 'Counter Customer'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={styles.customerName}>👤 {invoice.partyName || 'Counter Customer'}</Text>
+              {invoice.isNewCustomer ? (
+                <View style={{ backgroundColor: '#e0e7ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338ca' }}>🆕 New Customer</Text>
+                </View>
+              ) : null}
+            </View>
             <Text style={styles.customerMode}>Tender: {invoice.paymentMode} ({invoice.status})</Text>
           </View>
 

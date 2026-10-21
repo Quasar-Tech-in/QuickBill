@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { colors } from '../../theme/colors';
 import { Party } from '../../types';
+import { store } from '../../services/store';
 
 interface PaymentModalProps {
   visible: boolean;
@@ -25,6 +26,7 @@ interface PaymentModalProps {
     customerName: string;
     customerPhone: string;
     partyId?: string;
+    isNewCustomer?: boolean;
     paymentMode: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'SPLIT';
     paidAmount: number;
     balanceAmount: number;
@@ -46,6 +48,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const [customerName, setCustomerName] = useState('Counter Customer');
   const [customerPhone, setCustomerPhone] = useState('');
   const [selectedPartyId, setSelectedPartyId] = useState<string | undefined>(undefined);
+  const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [paidInput, setPaidInput] = useState<string>(String(grandTotal));
   const [notes, setNotes] = useState('');
 
@@ -60,6 +63,43 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     setSelectedPartyId(party.id);
     setCustomerName(party.name);
     setCustomerPhone(party.phone || '');
+    setIsNewCustomer(Boolean(party.isNew || party.totalVisits === 0));
+  };
+
+  const handleCustomerPhoneChange = (text: string) => {
+    setCustomerPhone(text);
+    const digitsOnly = text.replace(/\D/g, '');
+    const cleanDigits = (digitsOnly.length > 10 && digitsOnly.startsWith('91')) ? digitsOnly.slice(2) : digitsOnly;
+    const digits = cleanDigits.slice(-10);
+
+    const isGenericOrEmpty = !customerName || customerName === 'Counter Customer' || customerName.startsWith('Customer ');
+
+    if (digits.length >= 4 && isGenericOrEmpty) {
+      setCustomerName(`Customer ${digits.slice(-4)}`);
+    } else if (digits.length === 0 && customerName.startsWith('Customer ')) {
+      setCustomerName('Counter Customer');
+    }
+
+    if (digits.length === 10) {
+      store.lookupCustomerByPhone(digits).then(matched => {
+        if (matched) {
+          setSelectedPartyId(matched.id);
+          setCustomerName(matched.name);
+          setIsNewCustomer(Boolean(matched.isNew || (matched as any).totalVisits === 0));
+        } else {
+          setSelectedPartyId(undefined);
+          setIsNewCustomer(true);
+          if (isGenericOrEmpty) {
+            setCustomerName(`Customer ${digits.slice(-4)}`);
+          }
+        }
+      });
+    } else if (digits.length < 10) {
+      if (selectedPartyId) {
+        setSelectedPartyId(undefined);
+      }
+      setIsNewCustomer(digits.length >= 4);
+    }
   };
 
   const currentPaid = selectedPaymentMode === 'SPLIT'
@@ -74,10 +114,20 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   };
 
   const handleCheckout = () => {
+    const rawDigits = customerPhone.replace(/\D/g, '');
+    const cleanDigits = (rawDigits.length > 10 && rawDigits.startsWith('91')) ? rawDigits.slice(2) : rawDigits;
+    const tenDigits = cleanDigits.slice(-10);
+
+    let finalName = customerName.trim();
+    if (!finalName || finalName === 'Counter Customer' || finalName.startsWith('Customer ')) {
+      finalName = tenDigits.length >= 4 ? `Customer ${tenDigits.slice(-4)}` : (finalName || 'Counter Customer');
+    }
+
     onCompleteSale({
-      customerName: customerName.trim() || 'Counter Customer',
+      customerName: finalName,
       customerPhone: customerPhone.trim(),
       partyId: selectedPartyId,
+      isNewCustomer,
       paymentMode: selectedPaymentMode,
       paidAmount: Math.min(currentPaid, grandTotal),
       balanceAmount: balanceDue,
@@ -117,8 +167,23 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               </View>
             </View>
 
-            {/* Customer Details */}
-            <Text style={styles.sectionHeading}>Customer Details</Text>
+            {/* Customer Details Header with Badge */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <Text style={styles.sectionHeading}>Customer Details</Text>
+              {selectedPartyId ? (
+                <View style={{ backgroundColor: isNewCustomer ? '#e0e7ff' : '#dcfce7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: isNewCustomer ? '#4338ca' : '#15803d' }}>
+                    {isNewCustomer ? '🆕 New Customer (1st Purchase)' : '✓ Existing Customer'}
+                  </Text>
+                </View>
+              ) : customerPhone.trim().length >= 5 ? (
+                <View style={{ backgroundColor: '#e0e7ff', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338ca' }}>
+                    🆕 New Customer (will auto-save)
+                  </Text>
+                </View>
+              ) : null}
+            </View>
             <View style={styles.inputRow}>
               <TextInput
                 style={[styles.input, { flex: 1.2, marginRight: 8 }]}
@@ -130,7 +195,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 style={[styles.input, { flex: 1 }]}
                 placeholder="Phone (WhatsApp)"
                 value={customerPhone}
-                onChangeText={setCustomerPhone}
+                onChangeText={handleCustomerPhoneChange}
                 keyboardType="phone-pad"
               />
             </View>

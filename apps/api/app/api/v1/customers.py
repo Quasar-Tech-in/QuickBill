@@ -76,6 +76,8 @@ async def list_customers(
     for d in docs:
         d["_id"] = str(d["_id"])
         d["businessId"] = str(d["businessId"])
+        d["isNew"] = bool(d.get("isNew", True if d.get("totalVisits", 0) == 0 else False))
+        d["firstPurchaseDate"] = d.get("firstPurchaseDate")
         customers.append(CustomerResponse(**d))
 
     return PaginatedResponse(
@@ -104,35 +106,45 @@ async def lookup_customer_by_phone(
     else:
         ten_digits = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
 
-    if len(ten_digits) < 4:
+    if len(ten_digits) != 10:
         return None
 
-    full_phone = f"+91{ten_digits}" if len(ten_digits) == 10 else phone.strip()
+    full_phone = f"+91{ten_digits}"
+    spaced_phone = f"+91 {ten_digits[:5]} {ten_digits[5:]}"
+    local_spaced = f"{ten_digits[:5]} {ten_digits[5:]}"
 
-    query = {
-        "businessId": b_oid,
+    # Strict multi-tenant isolation matching both ObjectId and string representations
+    tenant_filter = {"$or": [{"businessId": b_oid}, {"businessId": business_id}]}
+    phone_filter = {
         "$or": [
             {"phone": full_phone},
             {"phone": ten_digits},
+            {"phone": spaced_phone},
+            {"phone": local_spaced},
             {"phone": phone.strip()},
-            {"phone": {"$regex": ten_digits, "$options": "i"}}
+            {"phone": {"$regex": rf"{ten_digits}$"}}
         ]
     }
+    query = {"$and": [tenant_filter, phone_filter]}
 
     doc = await repo.collection.find_one(query)
     if not doc:
-        # Fallback to parties collection if not yet migrated
+        # Fallback to parties collection if not yet migrated (strictly tenant isolated)
         parties_repo = BaseTenantRepository(db, "parties")
         p_doc = await parties_repo.collection.find_one(query)
         if p_doc:
             p_doc["_id"] = str(p_doc["_id"])
             p_doc["businessId"] = str(p_doc["businessId"])
             p_doc["currentBalance"] = p_doc.get("currentReceivable", 0.0)
+            p_doc["isNew"] = bool(p_doc.get("isNew", True if p_doc.get("totalVisits", 0) == 0 else False))
+            p_doc["firstPurchaseDate"] = p_doc.get("firstPurchaseDate")
             return CustomerResponse(**p_doc)
         return None
 
     doc["_id"] = str(doc["_id"])
     doc["businessId"] = str(doc["businessId"])
+    doc["isNew"] = bool(doc.get("isNew", True if doc.get("totalVisits", 0) == 0 else False))
+    doc["firstPurchaseDate"] = doc.get("firstPurchaseDate")
     return CustomerResponse(**doc)
 
 @router.post("", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
@@ -146,11 +158,11 @@ async def create_customer(
     now = datetime.now(timezone.utc)
     b_oid = repo._to_object_id(business_id)
 
-    # If phone is provided, check if customer already exists for this business
+    # If phone is provided, check if customer already exists for this business (strictly tenant isolated)
     clean_p = normalize_phone(payload.phone) if payload.phone else ""
     if clean_p and len(clean_p) >= 4:
         existing = await repo.collection.find_one({
-            "businessId": b_oid,
+            "$or": [{"businessId": b_oid}, {"businessId": business_id}],
             "phone": {"$regex": clean_p, "$options": "i"}
         })
         if existing:
@@ -171,6 +183,8 @@ async def create_customer(
             if updated_doc:
                 updated_doc["_id"] = str(updated_doc["_id"])
                 updated_doc["businessId"] = str(updated_doc["businessId"])
+                updated_doc["isNew"] = bool(updated_doc.get("isNew", True if updated_doc.get("totalVisits", 0) == 0 else False))
+                updated_doc["firstPurchaseDate"] = updated_doc.get("firstPurchaseDate")
                 return CustomerResponse(**updated_doc)
 
     doc = {
@@ -188,6 +202,8 @@ async def create_customer(
         "currentBalance": float(payload.opening_balance),
         "totalSpent": 0.0,
         "totalVisits": 0,
+        "isNew": True,
+        "firstPurchaseDate": None,
         "lastPurchaseDate": None,
         "createdAt": now,
         "updatedAt": now
@@ -196,6 +212,8 @@ async def create_customer(
     doc_id = await repo.insert(business_id, doc)
     doc["_id"] = doc_id
     doc["businessId"] = business_id
+    doc["isNew"] = True
+    doc["firstPurchaseDate"] = None
 
     # Mirror to parties collection for party ledger compatibility
     try:
@@ -229,7 +247,7 @@ async def export_customers_for_marketing(
     db = await get_tenant_db(business_id)
     repo = BaseTenantRepository(db, "customers")
     b_oid = repo._to_object_id(business_id)
-    query: dict = {"businessId": b_oid}
+    query: dict = {"$or": [{"businessId": b_oid}, {"businessId": business_id}]}
 
     if consent_only:
         query["marketingConsent"] = True
@@ -271,6 +289,8 @@ async def get_customer(
         raise HTTPException(status_code=404, detail="Customer not found in current store")
     doc["_id"] = str(doc["_id"])
     doc["businessId"] = str(doc["businessId"])
+    doc["isNew"] = bool(doc.get("isNew", True if doc.get("totalVisits", 0) == 0 else False))
+    doc["firstPurchaseDate"] = doc.get("firstPurchaseDate")
     return CustomerResponse(**doc)
 
 @router.put("/{customer_id}", response_model=CustomerResponse)

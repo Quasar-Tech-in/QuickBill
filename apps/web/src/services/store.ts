@@ -506,6 +506,11 @@ class StoreService {
   logout() {
     this.currentUser = null;
     this.isSuperAdminMode = false;
+    this.parties = [];
+    this.invoices = [];
+    this.items = [];
+    this.payments = [];
+    this.expenses = [];
     this.saveToStorage();
     this.notifyListeners();
   }
@@ -2538,7 +2543,7 @@ class StoreService {
   // --- Strict Tenant-Isolated Parties & Dedicated Customers (CRM & DB Integration) ---
   getParties(locationId?: string): Party[] {
     const activeId = this.currentTenant?.id || '';
-    const tenantParties = this.parties.filter(p => (p.businessId || activeId) === activeId);
+    const tenantParties = this.parties.filter(p => p.businessId === activeId);
     if (!locationId || locationId === 'ALL') return tenantParties;
 
     return tenantParties.filter(p => 
@@ -2567,7 +2572,12 @@ class StoreService {
             address: c.address || undefined,
             gstin: c.gstin || undefined,
             currentBalance: Number(c.currentBalance || 0),
-            locationIds: c.locationIds || []
+            locationIds: c.locationIds || [],
+            isNew: c.isNew !== undefined ? Boolean(c.isNew) : (c.totalVisits === 0),
+            totalVisits: c.totalVisits || 0,
+            totalSpent: c.totalSpent || 0,
+            lastPurchaseDate: c.lastPurchaseDate,
+            firstPurchaseDate: c.firstPurchaseDate,
           });
         });
       }
@@ -2575,17 +2585,47 @@ class StoreService {
       if (partyRes.status === 'fulfilled' && partyRes.value.data?.data) {
         partyRes.value.data.data.forEach((p: any) => {
           const pId = p.id || p._id;
-          if (!fetchedList.some(x => x.id === pId)) {
+          const pDigits = p.phone ? p.phone.replace(/\D/g, '') : '';
+          const pCleanPhone = pDigits.length >= 10 ? pDigits.slice(-10) : '';
+
+          const existingIndex = fetchedList.findIndex(x => {
+            if (x.id === pId) return true;
+            if (pCleanPhone && x.phone) {
+              const xDigits = x.phone.replace(/\D/g, '');
+              const xCleanPhone = xDigits.length >= 10 ? xDigits.slice(-10) : '';
+              if (xCleanPhone && xCleanPhone === pCleanPhone) return true;
+            }
+            if (!pCleanPhone && x.name && p.name && x.name.trim().toLowerCase() === p.name.trim().toLowerCase()) {
+              return true;
+            }
+            return false;
+          });
+
+          const pType: 'CUSTOMER' | 'SUPPLIER' = Array.isArray(p.type) 
+            ? (p.type.some((t: string) => String(t).toLowerCase().includes('supplier')) ? 'SUPPLIER' : 'CUSTOMER') 
+            : (String(p.type || '').toUpperCase() === 'SUPPLIER' ? 'SUPPLIER' : 'CUSTOMER');
+
+          if (existingIndex >= 0) {
+            // Already present from customers endpoint: enrich with supplier/tax/address details
+            const current = fetchedList[existingIndex];
+            fetchedList[existingIndex] = {
+              ...current,
+              type: pType === 'SUPPLIER' ? 'SUPPLIER' : current.type,
+              address: current.address || p.billingAddress?.street || p.address || undefined,
+              gstin: current.gstin || p.taxId || p.gstin || undefined,
+              email: current.email || p.email || undefined,
+            };
+          } else {
             fetchedList.push({
               id: pId,
               businessId: p.businessId || this.currentTenant?.id || '',
               name: p.name,
-              type: Array.isArray(p.type) ? (p.type.includes('supplier') ? 'SUPPLIER' : 'CUSTOMER') : (p.type || 'CUSTOMER'),
+              type: pType,
               phone: p.phone || undefined,
               email: p.email || undefined,
               address: p.billingAddress?.street || p.address || undefined,
               gstin: p.taxId || p.gstin || undefined,
-              currentBalance: Number(p.currentReceivable || p.currentBalance || 0),
+              currentBalance: Number(p.currentReceivable !== undefined ? p.currentReceivable : (p.currentBalance || 0)),
               locationIds: p.locationIds || []
             });
           }
@@ -2836,15 +2876,16 @@ class StoreService {
     const digitsOnly = phone.replace(/\D/g, '');
     const cleanDigits = (digitsOnly.length > 10 && digitsOnly.startsWith('91')) ? digitsOnly.slice(2) : digitsOnly;
     const tenDigits = cleanDigits.slice(-10);
-    if (!tenDigits || tenDigits.length < 4) return undefined;
+    if (!tenDigits || tenDigits.length !== 10) return undefined;
 
     const partyList = this.getParties(locationId);
     return partyList.find(p => {
       if (!p.phone) return false;
       const pDigits = p.phone.replace(/\D/g, '');
+      if (pDigits.length < 10) return false;
       const pClean = (pDigits.length > 10 && pDigits.startsWith('91')) ? pDigits.slice(2) : pDigits;
       const pTen = pClean.slice(-10);
-      return pTen === tenDigits || pClean.includes(tenDigits) || tenDigits.includes(pTen);
+      return pTen === tenDigits;
     });
   }
 
@@ -2871,20 +2912,28 @@ class StoreService {
           address: res.data.address,
           gstin: res.data.gstin,
           currentBalance: Number(res.data.currentBalance || 0),
-          locationIds: res.data.locationIds || []
+          locationIds: res.data.locationIds || [],
+          isNew: res.data.isNew !== undefined ? Boolean(res.data.isNew) : (res.data.totalVisits === 0),
+          totalVisits: res.data.totalVisits || 0,
+          totalSpent: res.data.totalSpent || 0,
+          lastPurchaseDate: res.data.lastPurchaseDate,
+          firstPurchaseDate: res.data.firstPurchaseDate,
         };
-        // Merge into local parties list
-        if (!this.parties.some(p => p.id === remoteParty.id)) {
+        // Merge or update local parties list
+        const existingIdx = this.parties.findIndex(p => p.id === remoteParty.id);
+        if (existingIdx >= 0) {
+          this.parties[existingIdx] = { ...this.parties[existingIdx], ...remoteParty };
+        } else {
           this.parties.unshift(remoteParty);
-          this.saveToStorage();
         }
+        this.saveToStorage();
         return remoteParty;
       }
     } catch (err) {
       console.warn('API lookup by phone error:', err);
     }
 
-    return this.findPartyByPhone(phone, locationId);
+    return undefined;
   }
 
   updatePartyBalance(partyId: string, delta: number) {
@@ -3363,6 +3412,7 @@ class StoreService {
       partyPhone: doc.partyPhoneSnapshot || doc.party_phone_snapshot || doc.consumerPhone || doc.consumer_phone || undefined,
       consumerName: doc.consumerName || doc.consumer_name || doc.partyNameSnapshot || doc.party_name_snapshot || 'Walk-in Customer',
       consumerPhone: doc.consumerPhone || doc.consumer_phone || doc.partyPhoneSnapshot || doc.party_phone_snapshot || undefined,
+      isNewCustomer: doc.isNewCustomer !== undefined ? Boolean(doc.isNewCustomer) : (doc.is_new_customer !== undefined ? Boolean(doc.is_new_customer) : undefined),
       billedById: doc.billedById || doc.billed_by_id || undefined,
       billedByName: doc.billedByName || doc.billed_by_name || undefined,
       billedByRole: doc.billedByRole || doc.billed_by_role || undefined,
@@ -3823,6 +3873,7 @@ class StoreService {
       paymentMode: invoiceData.paymentMode || 'CASH',
       notes: invoiceData.notes,
       enableRoundOff: invoiceData.roundOff !== 0,
+      isNewCustomer: invoiceData.isNewCustomer,
     };
 
     let createdInvoice: Invoice;

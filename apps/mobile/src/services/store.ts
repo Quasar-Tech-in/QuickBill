@@ -891,6 +891,7 @@ class MobileStore {
       paidAmount: Number(invoiceData.paidAmount),
       paymentMode: invoiceData.paymentMode || 'CASH',
       enableRoundOff: invoiceData.roundOff !== 0,
+      isNewCustomer: invoiceData.isNewCustomer,
     };
 
     let createdInvoice: Invoice;
@@ -904,6 +905,7 @@ class MobileStore {
           id: d.id || d._id || `inv-${Date.now()}`,
           invoiceNumber: d.invoiceNumber || d.invoice_number || `INV-${Date.now()}`,
           date: d.date || d.createdAt || new Date().toISOString(),
+          isNewCustomer: d.isNewCustomer !== undefined ? Boolean(d.isNewCustomer) : (d.is_new_customer !== undefined ? Boolean(d.is_new_customer) : invoiceData.isNewCustomer),
         };
       } else {
         throw new Error('No data from server');
@@ -1186,17 +1188,83 @@ class MobileStore {
     return inv;
   }
 
-  // --- Parties ---
+  // --- Strict Tenant-Isolated Parties ---
   getParties(): Party[] {
-    return [...this.parties];
+    const activeId = this.activeUser?.businessId || '';
+    return this.parties.filter(p => !p.businessId || p.businessId === activeId);
   }
 
   getCustomers(): Party[] {
-    return this.parties.filter(p => p.type === 'CUSTOMER');
+    const activeId = this.activeUser?.businessId || '';
+    return this.parties.filter(p => p.type === 'CUSTOMER' && (!p.businessId || p.businessId === activeId));
   }
 
   getSuppliers(): Party[] {
-    return this.parties.filter(p => p.type === 'SUPPLIER');
+    const activeId = this.activeUser?.businessId || '';
+    return this.parties.filter(p => p.type === 'SUPPLIER' && (!p.businessId || p.businessId === activeId));
+  }
+
+  findPartyByPhone(phone: string): Party | undefined {
+    if (!phone) return undefined;
+    const digitsOnly = phone.replace(/\D/g, '');
+    const cleanDigits = (digitsOnly.length > 10 && digitsOnly.startsWith('91')) ? digitsOnly.slice(2) : digitsOnly;
+    const tenDigits = cleanDigits.slice(-10);
+    if (!tenDigits || tenDigits.length !== 10) return undefined;
+
+    const activeParties = this.getCustomers();
+    return activeParties.find(p => {
+      if (!p.phone) return false;
+      const pDigits = p.phone.replace(/\D/g, '');
+      if (pDigits.length < 10) return false;
+      const pClean = (pDigits.length > 10 && pDigits.startsWith('91')) ? pDigits.slice(2) : pDigits;
+      const pTen = pClean.slice(-10);
+      return pTen === tenDigits;
+    });
+  }
+
+  async lookupCustomerByPhone(phone: string): Promise<Party | undefined> {
+    if (!phone) return undefined;
+    const local = this.findPartyByPhone(phone);
+    if (local) return local;
+
+    const digitsOnly = phone.replace(/\D/g, '');
+    const cleanDigits = (digitsOnly.length > 10 && digitsOnly.startsWith('91')) ? digitsOnly.slice(2) : digitsOnly;
+    const tenDigits = cleanDigits.slice(-10);
+    if (!tenDigits || tenDigits.length !== 10) return undefined;
+
+    try {
+      const res = await apiClient.get('/customers/lookup/by-phone', { params: { phone: `+91${tenDigits}` } });
+      if (res.data) {
+        const remoteParty: Party = {
+          id: res.data.id || res.data._id,
+          businessId: res.data.businessId || this.activeUser?.businessId || '',
+          name: res.data.name,
+          type: 'CUSTOMER',
+          phone: res.data.phone,
+          email: res.data.email,
+          address: res.data.address,
+          gstin: res.data.gstin,
+          currentBalance: Number(res.data.currentBalance || 0),
+          locationIds: res.data.locationIds || [],
+          isNew: res.data.isNew !== undefined ? Boolean(res.data.isNew) : (res.data.totalVisits === 0),
+          totalVisits: res.data.totalVisits || 0,
+          totalSpent: res.data.totalSpent || 0,
+          lastPurchaseDate: res.data.lastPurchaseDate,
+          firstPurchaseDate: res.data.firstPurchaseDate,
+        };
+        const existingIdx = this.parties.findIndex(p => p.id === remoteParty.id);
+        if (existingIdx >= 0) {
+          this.parties[existingIdx] = { ...this.parties[existingIdx], ...remoteParty };
+        } else {
+          this.parties.unshift(remoteParty);
+        }
+        this.notify();
+        return remoteParty;
+      }
+    } catch (err) {
+      console.warn('API lookup by phone error:', err);
+    }
+    return undefined;
   }
 
   async fetchParties(): Promise<Party[]> {
@@ -1220,6 +1288,11 @@ class MobileStore {
             address: c.address || undefined,
             gstin: c.gstin || undefined,
             currentBalance: Number(c.currentBalance || 0),
+            isNew: c.isNew !== undefined ? Boolean(c.isNew) : (c.totalVisits === 0),
+            totalVisits: c.totalVisits || 0,
+            totalSpent: c.totalSpent || 0,
+            lastPurchaseDate: c.lastPurchaseDate,
+            firstPurchaseDate: c.firstPurchaseDate,
           });
         });
       }
@@ -1250,10 +1323,11 @@ class MobileStore {
     } catch (err) {
       console.warn('Could not fetch parties from backend:', err);
     }
-    return this.parties;
+    return this.getParties();
   }
 
   async saveParty(party: Party): Promise<Party> {
+    party.businessId = party.businessId || this.activeUser?.businessId || '';
     const idx = this.parties.findIndex(p => p.id === party.id);
     
     try {

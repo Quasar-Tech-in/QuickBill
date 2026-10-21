@@ -115,6 +115,9 @@ export interface Party {
   locationName?: string;
   totalSpent?: number;
   totalVisits?: number;
+  isNew?: boolean;
+  lastPurchaseDate?: string;
+  firstPurchaseDate?: string;
 }
 
 export interface CartItem {
@@ -195,6 +198,7 @@ export interface Invoice {
   partyPhone?: string;
   consumerName?: string;
   consumerPhone?: string;
+  isNewCustomer?: boolean;
   billedById?: string;
   billedByName?: string;
   type: 'SALE' | 'PURCHASE';

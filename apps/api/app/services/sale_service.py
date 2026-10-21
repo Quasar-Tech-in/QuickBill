@@ -108,22 +108,27 @@ class SaleService:
         party_name_snapshot = request.party_name_input or request.consumer_name or "Walk-in Retail Customer"
         party_phone_snapshot = request.party_phone_input or request.consumer_phone or None
         party_oid = None
+        is_new_customer = bool(request.is_new_customer) if request.is_new_customer is not None else False
 
         if request.party_id:
             p_oid = ObjectId(request.party_id) if ObjectId.is_valid(request.party_id) else None
             if p_oid:
-                # Check customers collection first, fallback to parties
+                # Check customers collection first, fallback to parties (strictly tenant isolated)
                 cust_doc = await self.db.customers.find_one({"_id": p_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
                 if cust_doc:
                     party_oid = p_oid
                     party_name_snapshot = cust_doc.get("name", party_name_snapshot)
                     party_phone_snapshot = cust_doc.get("phone", party_phone_snapshot)
+                    if request.is_new_customer is None:
+                        is_new_customer = bool(cust_doc.get("isNew") or cust_doc.get("totalVisits", 0) == 0 or cust_doc.get("firstPurchaseDate") is None)
                 else:
                     party_doc = await self.db.parties.find_one({"_id": p_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
                     if party_doc:
                         party_oid = p_oid
                         party_name_snapshot = party_doc.get("name", party_name_snapshot)
                         party_phone_snapshot = party_doc.get("phone", party_phone_snapshot)
+                        if request.is_new_customer is None:
+                            is_new_customer = bool(party_doc.get("isNew") or party_doc.get("totalVisits", 0) == 0)
 
         # If party_oid is not yet resolved, try resolving by phone or auto-creating in customers collection
         digits_only = re.sub(r"\D", "", party_phone_snapshot or "")
@@ -137,30 +142,54 @@ class SaleService:
         ten_digit_phone = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
         formatted_phone = f"+91{ten_digit_phone}" if len(ten_digit_phone) == 10 else party_phone_snapshot
 
+        is_generic_name = not party_name_snapshot or party_name_snapshot.strip().lower() in [
+            "walk-in retail customer",
+            "counter customer",
+            "walk-in customer",
+            "walk-in retail",
+            "counter sales",
+            "retail customer"
+        ]
+
         if ten_digit_phone and len(ten_digit_phone) >= 4:
             if not party_oid:
-                existing_cust = await self.db.customers.find_one({
-                    "businessId": b_oid,
-                    "phone": {"$regex": ten_digit_phone, "$options": "i"}
-                })
+                phone_or = [
+                    {"phone": formatted_phone},
+                    {"phone": ten_digit_phone},
+                ]
+                if len(ten_digit_phone) == 10:
+                    phone_or.extend([
+                        {"phone": f"+91 {ten_digit_phone[:5]} {ten_digit_phone[5:]}"},
+                        {"phone": f"{ten_digit_phone[:5]} {ten_digit_phone[5:]}"},
+                        {"phone": {"$regex": rf"{ten_digit_phone}$"}},
+                    ])
+                phone_lookup_query = {
+                    "$and": [
+                        {"$or": [{"businessId": b_oid}, {"businessId": business_id}]},
+                        {"$or": phone_or}
+                    ]
+                }
+                existing_cust = await self.db.customers.find_one(phone_lookup_query)
                 if existing_cust:
                     party_oid = existing_cust["_id"]
                     party_phone_snapshot = existing_cust.get("phone", formatted_phone)
-                    if party_name_snapshot and party_name_snapshot.lower() != "walk-in retail customer" and party_name_snapshot != existing_cust.get("name"):
+                    if request.is_new_customer is None:
+                        is_new_customer = bool(existing_cust.get("isNew") or existing_cust.get("totalVisits", 0) == 0 or existing_cust.get("firstPurchaseDate") is None)
+                    if party_name_snapshot and not is_generic_name and party_name_snapshot != existing_cust.get("name"):
                         await self.db.customers.update_one({"_id": party_oid}, {"$set": {"name": party_name_snapshot, "updatedAt": now}})
                     else:
                         party_name_snapshot = existing_cust.get("name", party_name_snapshot)
                 else:
-                    existing_party = await self.db.parties.find_one({
-                        "businessId": b_oid,
-                        "phone": {"$regex": ten_digit_phone, "$options": "i"}
-                    })
+                    existing_party = await self.db.parties.find_one(phone_lookup_query)
                     if existing_party:
                         party_oid = existing_party["_id"]
                         party_name_snapshot = existing_party.get("name", party_name_snapshot)
                         party_phone_snapshot = existing_party.get("phone", formatted_phone)
+                        if request.is_new_customer is None:
+                            is_new_customer = bool(existing_party.get("isNew") or existing_party.get("totalVisits", 0) == 0)
                     else:
-                        valid_cust_name = party_name_snapshot if (party_name_snapshot and party_name_snapshot.lower() != "walk-in retail customer") else f"Customer {ten_digit_phone[-4:]}"
+                        is_new_customer = True
+                        valid_cust_name = f"Customer {ten_digit_phone[-4:]}" if is_generic_name else party_name_snapshot
                         new_cust_doc = {
                             "businessId": b_oid,
                             "name": valid_cust_name,
@@ -172,6 +201,8 @@ class SaleService:
                             "currentBalance": 0.0,
                             "totalSpent": 0.0,
                             "totalVisits": 0,
+                            "isNew": True,
+                            "firstPurchaseDate": None,
                             "lastPurchaseDate": now,
                             "createdAt": now,
                             "updatedAt": now
@@ -180,6 +211,24 @@ class SaleService:
                         party_oid = res_cust.inserted_id
                         party_name_snapshot = valid_cust_name
                         party_phone_snapshot = formatted_phone
+
+                        # Mirror to parties collection so CRM directory and ledgers stay consistent
+                        try:
+                            await self.db.parties.insert_one({
+                                "_id": party_oid,
+                                "businessId": b_oid,
+                                "name": valid_cust_name,
+                                "phone": formatted_phone,
+                                "type": ["customer"],
+                                "openingBalance": 0.0,
+                                "currentReceivable": 0.0,
+                                "currentPayable": 0.0,
+                                "locationIds": [request.location_id] if request.location_id else [],
+                                "createdAt": now,
+                                "updatedAt": now
+                            })
+                        except Exception:
+                            pass
 
         payment_status = "PAID" if totals.balance_due == Decimal("0.00") else ("PARTIAL" if totals.paid_amount > 0 else "UNPAID")
 
@@ -190,8 +239,9 @@ class SaleService:
             "partyId": party_oid,
             "partyNameSnapshot": party_name_snapshot,
             "partyPhoneSnapshot": party_phone_snapshot,
-            "consumerName": request.consumer_name or party_name_snapshot,
+            "consumerName": party_name_snapshot if (is_generic_name and not party_oid) else (request.consumer_name or party_name_snapshot),
             "consumerPhone": request.consumer_phone or party_phone_snapshot,
+            "isNewCustomer": is_new_customer,
             "locationId": request.location_id,
             "locationName": request.location_name,
             "locationCode": request.location_code,
@@ -346,10 +396,13 @@ class SaleService:
                 "totalVisits": 1
             },
             "$set": {
+                "isNew": False,
                 "lastPurchaseDate": now,
                 "updatedAt": now
             }
         }
+        if is_new_customer:
+            customer_update["$set"]["firstPurchaseDate"] = now
         if totals.balance_due > Decimal("0.00"):
             customer_update["$inc"]["currentBalance"] = float(totals.balance_due)
 
@@ -367,12 +420,13 @@ class SaleService:
             clean_p = party_phone_snapshot.strip().replace(" ", "").replace("-", "").replace("+91", "")
             if len(clean_p) >= 4:
                 await self.db.customers.update_one(
-                    {"businessId": b_oid, "phone": {"$regex": clean_p, "$options": "i"}},
+                    {"$or": [{"businessId": b_oid}, {"businessId": business_id}], "phone": {"$regex": clean_p, "$options": "i"}},
                     customer_update
                 )
 
         invoice_doc["_id"] = str(invoice_id)
         invoice_doc["businessId"] = str(b_oid)
+        invoice_doc["isNewCustomer"] = is_new_customer
         if party_oid:
             invoice_doc["partyId"] = str(party_oid)
         return invoice_doc

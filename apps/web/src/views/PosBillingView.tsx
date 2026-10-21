@@ -459,14 +459,23 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     const { digits, formatted } = cleanAndFormatIndianPhone(rawInput);
     setCustomerPhone(formatted);
 
-    // If phone number is empty / cleared, reset name and party selection to blank
+    const isAutoName = !customerName || customerName.startsWith('Customer ') || customerName === 'Walk-in Retail Customer';
+
+    // If phone number is empty / cleared, reset party selection and default auto name
     if (digits.length === 0) {
       setSelectedPartyId('');
-      setCustomerName('');
+      if (isAutoName) {
+        setCustomerName('');
+      }
       return;
     }
 
-    // Only query backend if exactly 10 digits are entered
+    // Set immediate default name "Customer <last 4 digits>" as soon as at least 4 digits are entered
+    if (digits.length >= 4 && isAutoName) {
+      setCustomerName(`Customer ${digits.slice(-4)}`);
+    }
+
+    // Live query backend only when full 10 digits are entered
     if (digits.length === 10) {
       const matched = await store.lookupPartyByPhone(digits, activeLocation.id);
       if (matched) {
@@ -474,14 +483,20 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
         setCustomerName(matched.name);
         setParties(store.getParties(activeLocation.id).filter(p => p.type === 'CUSTOMER'));
       } else {
-        // Customer not found in DB (response is null) -> reset to default Customer <last 4 digits>
+        // Customer not found in DB -> keep unselected and ensure default Customer <last 4 digits>
         setSelectedPartyId('');
-        setCustomerName(`Customer ${digits.slice(-4)}`);
+        if (isAutoName) {
+          setCustomerName(`Customer ${digits.slice(-4)}`);
+        }
       }
     } else {
-      // Whenever number is revised to less than 10 digits, reset previously matched customer name and partyId
-      setSelectedPartyId('');
-      setCustomerName('');
+      // Whenever number is revised to less than 10 digits, reset linked existing party
+      if (selectedPartyId) {
+        setSelectedPartyId('');
+      }
+      if (isAutoName && digits.length < 4) {
+        setCustomerName('');
+      }
     }
   };
 
@@ -1055,38 +1070,48 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
     if (cart.length === 0) return;
 
     const rawDigits = customerPhone.replace(/\D/g, '');
-    const trimmedPhone = rawDigits.length === 10
-      ? `+91${rawDigits}`
-      : (rawDigits ? `+91${rawDigits}` : '');
+    const cleanDigits = (rawDigits.length > 10 && rawDigits.startsWith('91')) ? rawDigits.slice(2) : rawDigits;
+    const tenDigits = cleanDigits.slice(-10);
+    const trimmedPhone = tenDigits.length === 10
+      ? `+91${tenDigits}`
+      : (tenDigits ? `+91${tenDigits}` : '');
     const trimmedName = customerName.trim();
 
+    let isNewCustomer = false;
     let partyId = selectedPartyId || undefined;
     let finalCustomerName = trimmedName;
+
+    const isGenericOrEmpty = !trimmedName || trimmedName === 'Walk-in Retail Customer' || trimmedName === 'Counter Customer' || trimmedName.startsWith('Customer ');
 
     // 1. Existing customer party linked
     if (partyId) {
       const existingParty = parties.find(p => p.id === partyId);
-      if (existingParty && trimmedName && trimmedName !== existingParty.name) {
+      if (existingParty && trimmedName && !isGenericOrEmpty && trimmedName !== existingParty.name) {
         // User edited the name -> Update party record in store & MongoDB
         store.updateParty(partyId, { name: trimmedName });
         finalCustomerName = trimmedName;
       } else if (existingParty) {
         finalCustomerName = existingParty.name;
       }
-    } else if (rawDigits) {
+      isNewCustomer = Boolean(existingParty && (existingParty.isNew || (existingParty as any).totalVisits === 0));
+    } else if (tenDigits) {
       // 2. Lookup if phone matches an existing customer in DB
-      const matched = await store.lookupPartyByPhone(rawDigits, activeLocation.id);
+      const matched = await store.lookupPartyByPhone(tenDigits, activeLocation.id);
       if (matched) {
         partyId = matched.id;
-        if (trimmedName && trimmedName !== matched.name) {
+        if (trimmedName && !isGenericOrEmpty && trimmedName !== matched.name) {
           store.updateParty(matched.id, { name: trimmedName });
           finalCustomerName = trimmedName;
         } else {
           finalCustomerName = matched.name;
         }
+        isNewCustomer = Boolean(matched.isNew || (matched as any).totalVisits === 0);
       } else {
         // 3. New Customer -> Auto-register in dedicated MongoDB customers table
-        const defaultOrTypedName = trimmedName || `Customer ${rawDigits.slice(-4)}`;
+        isNewCustomer = true;
+        const defaultOrTypedName = (!trimmedName || isGenericOrEmpty)
+          ? `Customer ${tenDigits.slice(-4)}`
+          : trimmedName;
         const newParty = await store.createCustomer({
           name: defaultOrTypedName,
           phone: trimmedPhone,
@@ -1143,6 +1168,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       partyPhone: finalCustomerPhone,
       consumerName: finalCustomerName,
       consumerPhone: finalCustomerPhone,
+      isNewCustomer,
       billedById: currentUser?.id,
       billedByName: currentUser?.name || 'Staff Cashier',
       billedByRole: currentUser?.role || 'CASHIER',
@@ -2744,9 +2770,15 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                   </div>
                   {selectedParty ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: '0.72rem', background: 'var(--success-100)', color: 'var(--success-700)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
-                        ✓ Existing Customer
-                      </span>
+                      {Boolean(selectedParty.isNew || (selectedParty as any).totalVisits === 0) ? (
+                        <span style={{ fontSize: '0.72rem', background: 'var(--primary-100)', color: 'var(--primary-700)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                          🆕 New Customer (1st Purchase)
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.72rem', background: 'var(--success-100)', color: 'var(--success-700)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                          ✓ Existing Customer
+                        </span>
+                      )}
                       {selectedParty.currentBalance !== undefined && selectedParty.currentBalance !== 0 && (
                         <span style={{ fontSize: '0.72rem', color: Number(selectedParty.currentBalance || 0) > 0 ? 'var(--danger-700)' : 'var(--success-700)', fontWeight: 700 }}>
                           Bal: ₹{Number(selectedParty.currentBalance || 0).toFixed(2)}
@@ -2803,7 +2835,7 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                         placeholder="98765 43210"
                         value={customerPhone}
                         onChange={(e) => handlePhoneChange(e.target.value)}
-                        maxLength={11} // 10 digits + 1 space e.g. "98765 43210"
+                        maxLength={16} // Allows pasting formatted +91 98765 43210 without premature truncation
                         style={{
                           border: 'none',
                           outline: 'none',
