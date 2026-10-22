@@ -733,7 +733,7 @@ export const ItemsScreen: React.FC = () => {
                     <Text style={styles.fieldLabel}>SKU</Text>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
                       <TouchableOpacity onPress={() => setIsScanningForField('SKU')}>
-                        <Text style={styles.formActionLink}>📷 Scan</Text>
+                        <Text style={styles.formActionLink}>⚡ Scan</Text>
                       </TouchableOpacity>
                       <TouchableOpacity onPress={handleAutoGenerateSku}>
                         <Text style={styles.formActionLink}>⚡ Auto</Text>
@@ -758,7 +758,7 @@ export const ItemsScreen: React.FC = () => {
                     <Text style={styles.fieldLabel}>Barcode</Text>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
                       <TouchableOpacity onPress={() => setIsScanningForField('BARCODE')}>
-                        <Text style={styles.formActionLink}>📷 Scan</Text>
+                        <Text style={styles.formActionLink}>⚡ Scan</Text>
                       </TouchableOpacity>
                       <TouchableOpacity onPress={handleAutoGenerateBarcode}>
                         <Text style={styles.formActionLink}>⚡ Auto</Text>
@@ -945,11 +945,13 @@ export const ItemsScreen: React.FC = () => {
         />
       )}
 
-      {/* Camera Barcode Scanner for Product Form */}
+      {/* Barcode Scanner Modal for Product Form (Primary Barcode Scanner with Camera Toggle) */}
       {isScanningForField && (
         <QRScannerModal
           visible={true}
           initialStandbyMode={false}
+          initialMode="SCANNER"
+          title={isScanningForField === 'SKU' ? 'Scan Product SKU' : 'Scan Product Barcode'}
           onClose={() => setIsScanningForField(null)}
           onScanSuccess={(scannedCode) => {
             if (isScanningForField === 'SKU') {

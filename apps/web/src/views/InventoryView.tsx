@@ -2140,11 +2140,12 @@ export const InventoryView: React.FC = () => {
         storeName={store.getActiveTenant()?.name || currentUser?.tenantName || store.getActiveLocation()?.name}
       />
 
-      {/* Camera Scanner Modal for SKU / Barcode */}
+      {/* Camera / Gun Scanner Modal for SKU / Barcode */}
       <WebcamScannerModal
         isOpen={!!activeScanField}
         onClose={() => setActiveScanField(null)}
         onScanSuccess={handleCodeScanned}
+        initialTab="GUN"
         title={activeScanField === 'sku' ? 'Scan Product SKU Code' : 'Scan Product Barcode'}
       />
 

@@ -8,6 +8,7 @@ interface WebcamScannerModalProps {
   onScanSuccess: (barcodeData: string, isContinuous?: boolean) => void;
   initialStandbyMode?: boolean;
   title?: string;
+  initialTab?: 'CAMERA' | 'GUN';
 }
 
 export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
@@ -16,8 +17,9 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
   onScanSuccess,
   initialStandbyMode = false,
   title = 'Barcode & QR Scanner',
+  initialTab = 'GUN',
 }) => {
-  const [activeTab, setActiveTab] = useState<'CAMERA' | 'GUN'>('CAMERA');
+  const [activeTab, setActiveTab] = useState<'CAMERA' | 'GUN'>(initialTab);
   const [isStandby, setIsStandby] = useState(initialStandbyMode);
   const [isScanned, setIsScanned] = useState(false);
   const [lastCode, setLastCode] = useState<string | null>(null);
@@ -225,7 +227,21 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, isStandby, lastCode]);
 
-  // Focus test input when opening GUN tab
+  // Focus test input when opening GUN tab or when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+      setTestGunInput('');
+      setIsScanned(false);
+      setLastCode(null);
+      if (initialTab === 'GUN' || activeTab === 'GUN') {
+        setTimeout(() => {
+          testInputRef.current?.focus();
+        }, 100);
+      }
+    }
+  }, [isOpen, initialTab]);
+
   useEffect(() => {
     if (activeTab === 'GUN' && testInputRef.current) {
       testInputRef.current.focus();
@@ -376,20 +392,20 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
           }}>
             <button
               type="button"
-              className={`scanner-mode-tab ${activeTab === 'CAMERA' ? 'active' : ''}`}
-              onClick={() => setActiveTab('CAMERA')}
-            >
-              <Camera size={14} />
-              <span>Camera Viewfinder</span>
-            </button>
-
-            <button
-              type="button"
               className={`scanner-mode-tab ${activeTab === 'GUN' ? 'active' : ''}`}
               onClick={() => setActiveTab('GUN')}
             >
               <Radio size={14} />
-              <span>Hardware Scanner Gun</span>
+              <span>Barcode Scanner (Primary)</span>
+            </button>
+
+            <button
+              type="button"
+              className={`scanner-mode-tab ${activeTab === 'CAMERA' ? 'active' : ''}`}
+              onClick={() => setActiveTab('CAMERA')}
+            >
+              <Camera size={14} />
+              <span>Phone / Webcam Camera</span>
             </button>
           </div>
 
@@ -577,7 +593,7 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
             </div>
           ) : (
             /* ================= MODE 2: HARDWARE SCANNER GUN ================= */
-            <div className="scanner-gun-bench">
+            <div className="scanner-gun-bench" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* Top Status Card */}
               <div style={{
                 display: 'flex',
@@ -604,45 +620,15 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
                 </div>
                 <div>
                   <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#ffffff' }}>
-                    Hardware 2D/1D Scanner Gun Ready
+                    Hardware Barcode Scanner Ready (Primary)
                   </div>
                   <div style={{ fontSize: '0.74rem', color: '#cbd5e1', marginTop: 2 }}>
-                    Standard USB, 2.4GHz Wireless Dongle, or Bluetooth guns are recognized automatically without any driver setup.
+                    Standard USB, 2.4GHz Wireless Dongle, or Bluetooth guns are recognized automatically without opening your camera.
                   </div>
                 </div>
               </div>
 
-              {/* Step-by-Step Instructions */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  How to Use Your Barcode Gun:
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-                  <div style={{ padding: 12, borderRadius: 10, backgroundColor: 'rgba(2, 6, 23, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                    <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#38bdf8' }}>1. Plug & Play</div>
-                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
-                      Plug your gun's USB cable or wireless dongle into your PC or Mac. It acts like a fast keyboard.
-                    </div>
-                  </div>
-
-                  <div style={{ padding: 12, borderRadius: 10, backgroundColor: 'rgba(2, 6, 23, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                    <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#818cf8' }}>2. Point & Trigger</div>
-                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
-                      Point the gun's red aiming light at any product barcode or 2D QR code and pull the trigger.
-                    </div>
-                  </div>
-
-                  <div style={{ padding: 12, borderRadius: 10, backgroundColor: 'rgba(2, 6, 23, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                    <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#34d399' }}>3. Auto Ingest</div>
-                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
-                      QuickBill instantly catches the code, beeps, and verifies if the product already exists in your inventory.
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Live Gun Trigger Test Box */}
+              {/* Primary Gun Trigger / Input Box */}
               <div style={{
                 padding: '14px 16px',
                 borderRadius: 12,
@@ -654,10 +640,11 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <label style={{ fontSize: '0.74rem', fontWeight: 700, color: '#cbd5e1' }}>
-                    Live Gun Trigger Test Bench:
+                    Scanner Input (Auto-Captured on Gun Trigger):
                   </label>
-                  <span style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 700 }}>
-                    ⚡ Focus & Trigger Test
+                  <span style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span className="scanner-pulse-dot" style={{ width: 6, height: 6 }} />
+                    <span>Listening for Barcode</span>
                   </span>
                 </div>
 
@@ -674,18 +661,19 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
                         setTestGunInput('');
                       }
                     }}
-                    placeholder="Pull scanner gun trigger now to test..."
+                    placeholder="Point scanner gun at barcode & pull trigger, or enter code..."
                     style={{
                       flex: 1,
                       backgroundColor: 'rgba(15, 23, 42, 0.9)',
                       border: '1px solid rgba(255, 255, 255, 0.15)',
                       borderRadius: 8,
-                      padding: '8px 12px',
+                      padding: '10px 14px',
                       color: '#ffffff',
-                      fontSize: '0.85rem',
+                      fontSize: '0.9rem',
                       fontFamily: 'var(--font-mono)',
                       outline: 'none'
                     }}
+                    autoFocus
                   />
                   <button
                     type="button"
@@ -696,18 +684,79 @@ export const WebcamScannerModal: React.FC<WebcamScannerModalProps> = ({
                       }
                     }}
                     style={{
-                      padding: '8px 16px',
+                      padding: '8px 18px',
                       borderRadius: 8,
                       backgroundColor: '#4f46e5',
                       color: '#ffffff',
                       border: 'none',
-                      fontSize: '0.78rem',
+                      fontSize: '0.8rem',
                       fontWeight: 700,
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      boxShadow: '0 4px 12px rgba(79, 70, 229, 0.4)'
                     }}
                   >
-                    Accept
+                    <CheckCircle2 size={15} />
+                    <span>Accept</span>
                   </button>
+                </div>
+              </div>
+
+              {/* Toggle to Phone / Device Camera Button */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('CAMERA')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  padding: '11px 16px',
+                  borderRadius: 10,
+                  backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  color: '#a5b4fc',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  width: '100%',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Camera size={16} />
+                <span>On Phone or Tablet? Switch to Camera Scanner</span>
+                <ArrowRight size={14} />
+              </button>
+
+              {/* Step-by-Step Instructions */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  How to Use Your Barcode Gun:
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
+                  <div style={{ padding: 10, borderRadius: 10, backgroundColor: 'rgba(2, 6, 23, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#38bdf8' }}>1. Plug & Play</div>
+                    <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: 3, lineHeight: 1.4 }}>
+                      Connect your gun via USB or wireless dongle.
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 10, borderRadius: 10, backgroundColor: 'rgba(2, 6, 23, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#818cf8' }}>2. Point & Trigger</div>
+                    <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: 3, lineHeight: 1.4 }}>
+                      Aim red laser at barcode and pull trigger.
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 10, borderRadius: 10, backgroundColor: 'rgba(2, 6, 23, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#34d399' }}>3. Auto Captured</div>
+                    <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: 3, lineHeight: 1.4 }}>
+                      QuickBill captures the code & populates the form.
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
