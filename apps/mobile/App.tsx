@@ -50,12 +50,16 @@ export default function App() {
   };
 
   if (!isAuthenticated || !currentUser) {
-    return <LoginScreen onLoginSuccess={() => {
-      setIsAuthenticated(true);
-      const user = store.getActiveUser();
-      setCurrentUser(user);
-      setActiveTab(user?.role === 'CASHIER' ? 'POS' : 'Home');
-    }} />;
+    return (
+      <SafeAreaProvider>
+        <LoginScreen onLoginSuccess={() => {
+          setIsAuthenticated(true);
+          const user = store.getActiveUser();
+          setCurrentUser(user);
+          setActiveTab(user?.role === 'CASHIER' ? 'POS' : 'Home');
+        }} />
+      </SafeAreaProvider>
+    );
   }
 
   const tenantDisplayName = currentUser.tenantName || 'QuickBill Store';

@@ -21,19 +21,23 @@ import {
   InventoryMovement
 } from '../types';
 
-// Auto-detect host IP from Metro bundler URL or fallback to Wi-Fi/LAN IP
+// Sourced from environment configuration, defaulting to QuickBill cloud backend
 const resolveDefaultBaseUrl = (): string => {
-  try {
-    const scriptURL = NativeModules?.SourceCode?.scriptURL;
-    if (scriptURL) {
-      const match = scriptURL.match(/^https?:\/\/([^:/]+)/);
-      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1' && match[1] !== '10.0.2.2') {
-        return `http://${match[1]}:8000/api/v1`;
-      }
-    }
-  } catch {}
+  const envUrl = 
+    process.env.EXPO_PUBLIC_API_BASE_URL || 
+    process.env.VITE_API_BASE_URL || 
+    process.env.API_BASE_URL;
 
-  return 'http://192.168.6.4:8000/api/v1';
+  if (envUrl && envUrl.trim()) {
+    let clean = envUrl.trim().replace(/\/+$/, '');
+    if (!clean.endsWith('/api/v1')) {
+      if (clean.endsWith('/api')) clean = `${clean}/v1`;
+      else clean = `${clean}/api/v1`;
+    }
+    return clean;
+  }
+
+  return 'https://quick-bill-alpha.vercel.app/api/v1';
 };
 
 let currentApiBaseUrl = resolveDefaultBaseUrl();
