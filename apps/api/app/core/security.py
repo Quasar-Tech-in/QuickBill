@@ -52,8 +52,8 @@ async def get_current_user(
     auth: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)
 ) -> TokenPayload:
     if not auth or not auth.credentials:
-        # Development fallback bypass if DEBUG is True and no auth header
-        if settings.DEBUG:
+        # Development fallback bypass ONLY if DEBUG is True and not running in production
+        if settings.DEBUG and not settings.is_production:
             return TokenPayload(
                 sub="demo_user_001",
                 email="admin@quickbill.local",

@@ -1,14 +1,19 @@
-from typing import List
+from typing import List, Optional
+import logging
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("quickbill.config")
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "QuickBill & Inventory API"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
     
-    # Environment
-    APP_ENV: str = "development"
+    # Environment & Documentation Controls
+    APP_ENV: str = "development"  # Options: 'development', 'staging', 'prod', 'production'
     DEBUG: bool = True
+    ENABLE_DOCS: Optional[bool] = None  # None = auto-detect (False in prod, True in dev)
     
     # MongoDB
     MONGODB_URI: str = "mongodb://admin:secretpassword@localhost:27017/quickbill_db?authSource=admin"
@@ -51,4 +56,33 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
+    @property
+    def is_production(self) -> bool:
+        """Returns True if running in production mode."""
+        return self.APP_ENV.strip().lower() in ("prod", "production")
+
+    @property
+    def docs_enabled(self) -> bool:
+        """
+        Returns True if API docs (/docs, /redoc, /openapi.json) should be exposed.
+        Defaults to False in production, True in other environments.
+        Can be explicitly overridden with ENABLE_DOCS=True or ENABLE_DOCS=False.
+        """
+        if self.ENABLE_DOCS is not None:
+            return bool(self.ENABLE_DOCS)
+        return not self.is_production
+
+    @model_validator(mode="after")
+    def validate_environment_mode(self):
+        """Auto-adjust security settings for production mode."""
+        if self.is_production:
+            # Enforce DEBUG=False in production to prevent stack trace leaks
+            self.DEBUG = False
+            
+            # Wildcard '*' is unsafe when credentials are used; remove from CORS origins in prod
+            if "*" in self.BACKEND_CORS_ORIGINS:
+                self.BACKEND_CORS_ORIGINS = [o for o in self.BACKEND_CORS_ORIGINS if o != "*"]
+        return self
+
 settings = Settings()
+

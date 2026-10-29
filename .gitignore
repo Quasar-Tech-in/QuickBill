@@ -36,6 +36,8 @@ out/
 .env.development.local
 .env.test.local
 .env.production.local
+*.env
+*.env*
 
 # OS & IDE Files
 .DS_Store

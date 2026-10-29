@@ -1,34 +1,56 @@
 import os
+import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
 from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection
 from app.api.v1 import auth, items, sales, parties, customers, payments, expenses, reports, tenants, users, locations, categories, purchase_orders, labels, shipping, staged_orders, inventory
 
+logger = logging.getLogger("quickbill.main")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Production configuration audit
+    if settings.is_production:
+        logger.info(f"Starting {settings.PROJECT_NAME} in PRODUCTION mode (APP_ENV={settings.APP_ENV}, docs_enabled={settings.docs_enabled})")
+        if "development" in settings.JWT_SECRET.lower():
+            logger.warning("CRITICAL SECURITY WARNING: Insecure default JWT_SECRET detected in production environment! Set JWT_SECRET in environment variables.")
+        if settings.SUPERADMIN_PASSWORD == "superadmin123":
+            logger.warning("SECURITY WARNING: Default superadmin password detected in production environment.")
+    else:
+        logger.info(f"Starting {settings.PROJECT_NAME} in DEVELOPMENT mode (APP_ENV={settings.APP_ENV}, docs_enabled={settings.docs_enabled})")
+
     # Ensure uploads directory exists
     try:
-        os.makedirs("uploads/item-images", exist_ok=True)
+        os.makedirs(os.path.join(settings.MEDIA_ROOT, "item-images"), exist_ok=True)
     except Exception:
         pass
     # Startup
     try:
         await connect_to_mongo()
     except Exception as e:
-        print(f"Warning: Could not connect to MongoDB on startup ({e}). Continuing in standalone mode.")
+        logger.warning(f"Could not connect to MongoDB on startup ({e}). Continuing in standalone mode.")
     yield
     # Shutdown
     await close_mongo_connection()
 
+# Configure documentation endpoints based on environment flag
+docs_url = "/docs" if settings.docs_enabled else None
+redoc_url = "/redoc" if settings.docs_enabled else None
+openapi_url = "/openapi.json" if settings.docs_enabled else None
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
+    debug=settings.DEBUG,
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc"
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
 )
 
 # CORS Middleware
@@ -40,24 +62,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
-from fastapi.responses import JSONResponse
-from fastapi import Request
+# Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if settings.is_production:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 @app.exception_handler(ServerSelectionTimeoutError)
 @app.exception_handler(PyMongoError)
 async def mongo_exception_handler(request: Request, exc: Exception):
+    req_path = request.scope.get("path", "/")
+    logger.error(f"Database error on {request.method} {req_path}: {exc}")
+    if settings.is_production:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Database service temporarily unavailable. Please try again later."
+            }
+        )
     return JSONResponse(
         status_code=503,
         content={
-            "detail": f"Database unreachable: {str(exc)}. Please ensure MongoDB Atlas Network Access has 0.0.0.0/0 enabled and MONGODB_URI is correctly configured in Vercel environment variables."
+            "detail": f"Database unreachable: {str(exc)}. Please ensure MongoDB Atlas Network Access has 0.0.0.0/0 enabled and MONGODB_URI is correctly configured in environment variables."
         }
     )
 
 # Static media mount
 try:
-    os.makedirs("uploads", exist_ok=True)
-    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+    os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
+    app.mount(f"/{settings.MEDIA_ROOT}", StaticFiles(directory=settings.MEDIA_ROOT), name=settings.MEDIA_ROOT)
 except Exception:
     pass
 
