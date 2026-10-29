@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import logging
 import secrets
 import urllib.request
@@ -10,6 +11,7 @@ from decimal import Decimal
 from typing import Optional, List
 from pydantic import BaseModel
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from app.core.config import settings
@@ -102,16 +104,44 @@ async def create_item(
 ):
     db = await get_tenant_db(business_id)
     repo = ItemRepository(db)
-    # Validate Barcode uniqueness within tenant if provided
-    if payload.barcode and payload.barcode.strip():
-        clean_barcode = payload.barcode.strip()
-        b_filter = {"$in": [business_id, ObjectId(business_id)]} if ObjectId.is_valid(business_id) else business_id
-        existing_barcode_item = await db.items.find_one({"businessId": b_filter, "barcode": clean_barcode})
-        if existing_barcode_item:
-            dup_name = existing_barcode_item.get("name", "Unknown Item")
+    b_filter = {"$in": [business_id, ObjectId(business_id)]} if ObjectId.is_valid(business_id) else business_id
+
+    # Validate SKU uniqueness within tenant if provided (cannot match another product's SKU or Barcode)
+    clean_sku = payload.sku.strip() if payload.sku else None
+    if clean_sku:
+        existing_sku_item = await db.items.find_one({
+            "businessId": b_filter,
+            "$or": [
+                {"sku": {"$regex": f"^{re.escape(clean_sku)}$", "$options": "i"}},
+                {"barcode": {"$regex": f"^{re.escape(clean_sku)}$", "$options": "i"}}
+            ],
+            "isActive": {"$ne": False}
+        })
+        if existing_sku_item:
+            dup_name = existing_sku_item.get("name", "Unknown Item")
+            match_type = "Barcode" if (existing_sku_item.get("barcode") or "").strip().lower() == clean_sku.lower() else "SKU"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Barcode '{clean_barcode}' is already assigned to product '{dup_name}'."
+                detail=f"SKU '{clean_sku}' is already assigned as a {match_type} to product '{dup_name}'. Codes must be unique across all products."
+            )
+
+    # Validate Barcode uniqueness within tenant if provided (cannot match another product's Barcode or SKU)
+    clean_barcode = payload.barcode.strip() if payload.barcode else None
+    if clean_barcode:
+        existing_barcode_item = await db.items.find_one({
+            "businessId": b_filter,
+            "$or": [
+                {"barcode": {"$regex": f"^{re.escape(clean_barcode)}$", "$options": "i"}},
+                {"sku": {"$regex": f"^{re.escape(clean_barcode)}$", "$options": "i"}}
+            ],
+            "isActive": {"$ne": False}
+        })
+        if existing_barcode_item:
+            dup_name = existing_barcode_item.get("name", "Unknown Item")
+            match_type = "SKU" if (existing_barcode_item.get("sku") or "").strip().lower() == clean_barcode.lower() else "Barcode"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Barcode '{clean_barcode}' is already assigned as a {match_type} to product '{dup_name}'. Codes must be unique across all products."
             )
 
     public_id = f"itm_{secrets.token_hex(6)}"
@@ -169,8 +199,8 @@ async def create_item(
         "businessId": ObjectId(business_id),
         "publicItemId": public_id,
         "name": payload.name,
-        "sku": payload.sku,
-        "barcode": payload.barcode,
+        "sku": clean_sku if clean_sku else None,
+        "barcode": clean_barcode if clean_barcode else None,
         "category": payload.category or "General",
         "unit": payload.unit,
         "purchasePrice": float(payload.purchase_price),
@@ -182,7 +212,7 @@ async def create_item(
         "currentStock": float(initial_stock),
         "minStockAlert": float(payload.min_stock_alert),
         "allowParts": bool(payload.allow_parts),
-        "description": payload.description,
+        "description": payload.description.strip() if payload.description and payload.description.strip() else None,
         "hasDiscount": bool(payload.has_discount),
         "discountType": payload.discount_type or "PERCENT",
         "discountValue": float(payload.discount_value or 0),
@@ -195,7 +225,13 @@ async def create_item(
         "updatedAt": now
     }
 
-    doc_id = await repo.insert(business_id, item_doc)
+    try:
+        doc_id = await repo.insert(business_id, item_doc)
+    except DuplicateKeyError as dke:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A product with this SKU or Barcode already exists in your store catalog."
+        )
     item_doc["_id"] = doc_id
     item_doc["businessId"] = business_id
 
@@ -320,27 +356,72 @@ async def update_item(
                 update_data[k] = float(v)
             else:
                 update_data[k] = v
+        else:
+            # Explicitly allow clearing fields passed as null
+            update_data[k] = None
 
     # Disallow direct stock alterations in update_item to preserve audit ledger integrity
     update_data.pop("currentStock", None)
 
-    # Validate Barcode uniqueness within tenant if barcode is being updated
-    if "barcode" in update_data and update_data["barcode"]:
-        clean_barcode = str(update_data["barcode"]).strip()
+    b_filter = {"$in": [business_id, ObjectId(business_id)]} if ObjectId.is_valid(business_id) else business_id
+    target_oid = ObjectId(item_id) if ObjectId.is_valid(item_id) else item_id
+
+    # Validate SKU uniqueness within tenant if sku is being updated (cannot match another product's SKU or Barcode)
+    if "sku" in update_data:
+        val = update_data["sku"]
+        clean_sku = str(val).strip() if val else ""
+        if clean_sku:
+            update_data["sku"] = clean_sku
+            existing_sku_item = await db.items.find_one({
+                "businessId": b_filter,
+                "$or": [
+                    {"sku": {"$regex": f"^{re.escape(clean_sku)}$", "$options": "i"}},
+                    {"barcode": {"$regex": f"^{re.escape(clean_sku)}$", "$options": "i"}}
+                ],
+                "_id": {"$ne": target_oid},
+                "isActive": {"$ne": False}
+            })
+            if existing_sku_item:
+                dup_name = existing_sku_item.get("name", "Unknown Item")
+                match_type = "Barcode" if (existing_sku_item.get("barcode") or "").strip().lower() == clean_sku.lower() else "SKU"
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"SKU '{clean_sku}' is already assigned as a {match_type} to product '{dup_name}'. Codes must be unique across all products."
+                )
+        else:
+            # Cleared field: store None so database partial index is not violated
+            update_data["sku"] = None
+
+    # Validate Barcode uniqueness within tenant if barcode is being updated (cannot match another product's Barcode or SKU)
+    if "barcode" in update_data:
+        val = update_data["barcode"]
+        clean_barcode = str(val).strip() if val else ""
         if clean_barcode:
-            b_filter = {"$in": [business_id, ObjectId(business_id)]} if ObjectId.is_valid(business_id) else business_id
-            target_oid = ObjectId(item_id) if ObjectId.is_valid(item_id) else item_id
+            update_data["barcode"] = clean_barcode
             existing_barcode_item = await db.items.find_one({
                 "businessId": b_filter,
-                "barcode": clean_barcode,
-                "_id": {"$ne": target_oid}
+                "$or": [
+                    {"barcode": {"$regex": f"^{re.escape(clean_barcode)}$", "$options": "i"}},
+                    {"sku": {"$regex": f"^{re.escape(clean_barcode)}$", "$options": "i"}}
+                ],
+                "_id": {"$ne": target_oid},
+                "isActive": {"$ne": False}
             })
             if existing_barcode_item:
                 dup_name = existing_barcode_item.get("name", "Unknown Item")
+                match_type = "SKU" if (existing_barcode_item.get("sku") or "").strip().lower() == clean_barcode.lower() else "Barcode"
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Barcode '{clean_barcode}' is already assigned to product '{dup_name}'."
+                    detail=f"Barcode '{clean_barcode}' is already assigned as a {match_type} to product '{dup_name}'. Codes must be unique across all products."
                 )
+        else:
+            # Cleared field: store None so database partial index is not violated
+            update_data["barcode"] = None
+
+    if "description" in update_data:
+        val = update_data["description"]
+        clean_desc = str(val).strip() if val else ""
+        update_data["description"] = clean_desc if clean_desc else None
 
     # Float conversion for monetary / numeric fields
     for float_field in ["purchasePrice", "averageCostPrice", "salePrice", "mrp", "taxRate", "minStockAlert", "discountValue"]:
@@ -550,7 +631,13 @@ async def update_item(
 
     update_data["updatedAt"] = now
 
-    success = await repo.update_by_id(business_id, item_id, update_data)
+    try:
+        success = await repo.update_by_id(business_id, item_id, update_data)
+    except DuplicateKeyError as dke:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A product with this SKU or Barcode already exists in your store catalog."
+        )
     if not success:
         raise HTTPException(status_code=400, detail="Failed to update item")
 
@@ -564,7 +651,7 @@ async def update_item(
                 "itemId": item_oid,
                 "publicItemId": existing.get("publicItemId"),
                 "itemName": update_data.get("name") or existing.get("name", "Product"),
-                "sku": update_data.get("sku") or existing.get("sku"),
+                "sku": update_data.get("sku") if "sku" in update_data else existing.get("sku"),
                 "locationId": rec["locationId"],
                 "locationName": rec["locationName"],
                 "type": rec["type"],

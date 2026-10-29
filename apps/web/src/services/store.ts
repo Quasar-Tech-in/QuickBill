@@ -2133,8 +2133,30 @@ class StoreService {
         this.saveToStorage();
         return created;
       }
-    } catch (e) {
+    } catch (e: any) {
+      // Re-throw 4xx validation errors (e.g. duplicate SKU or Barcode rejection) so callers can notify user
+      if (e?.response?.status === 400 || e?.response?.status === 409 || e?.response?.status === 422) {
+        throw e;
+      }
       console.warn('Backend /items creation failed, fallback local:', e);
+    }
+
+    // In local fallback mode, validate cross-field SKU and Barcode uniqueness across existing items
+    if (item.sku && item.sku.trim()) {
+      const cleanSku = item.sku.trim().toLowerCase();
+      const dupSku = storeItems.find(i => (i.sku && i.sku.trim().toLowerCase() === cleanSku) || (i.barcode && i.barcode.trim().toLowerCase() === cleanSku));
+      if (dupSku) {
+        const matchType = dupSku.barcode && dupSku.barcode.trim().toLowerCase() === cleanSku ? 'Barcode' : 'SKU';
+        throw new Error(`SKU '${item.sku.trim()}' is already assigned as a ${matchType} to product '${dupSku.name}'. Codes must be unique across all products.`);
+      }
+    }
+    if (item.barcode && item.barcode.trim()) {
+      const cleanBar = item.barcode.trim().toLowerCase();
+      const dupBar = storeItems.find(i => (i.barcode && i.barcode.trim().toLowerCase() === cleanBar) || (i.sku && i.sku.trim().toLowerCase() === cleanBar));
+      if (dupBar) {
+        const matchType = dupBar.sku && dupBar.sku.trim().toLowerCase() === cleanBar ? 'SKU' : 'Barcode';
+        throw new Error(`Barcode '${item.barcode.trim()}' is already assigned as a ${matchType} to product '${dupBar.name}'. Codes must be unique across all products.`);
+      }
     }
 
     const newItem: Item = {
@@ -2149,7 +2171,7 @@ class StoreService {
     return newItem;
   }
 
-  async updateItem(id: string, updates: Partial<Item>): Promise<Item | null> {
+  async updateItem(id: string, updates: Partial<Omit<Item, 'sku' | 'barcode' | 'description'>> & { sku?: string | null; barcode?: string | null; description?: string | null }): Promise<Item | null> {
     const activeId = this.currentTenant?.id || '';
     const idx = this.items.findIndex(
       i => (i.businessId || activeId) === activeId && i.id === id
@@ -2198,11 +2220,32 @@ class StoreService {
         this.saveToStorage();
         return updated;
       }
-    } catch (e) {
+    } catch (e: any) {
+      // Re-throw 4xx validation errors (e.g. duplicate SKU or Barcode rejection)
+      if (e?.response?.status === 400 || e?.response?.status === 409 || e?.response?.status === 422) {
+        throw e;
+      }
       console.warn(`Backend /items/${id} update failed, fallback local:`, e);
     }
 
     if (idx === -1) return null;
+
+    if (updates.sku && updates.sku.trim()) {
+      const cleanSku = updates.sku.trim().toLowerCase();
+      const dupSku = this.items.find(i => i.id !== id && (i.businessId || activeId) === activeId && ((i.sku && i.sku.trim().toLowerCase() === cleanSku) || (i.barcode && i.barcode.trim().toLowerCase() === cleanSku)));
+      if (dupSku) {
+        const matchType = dupSku.barcode && dupSku.barcode.trim().toLowerCase() === cleanSku ? 'Barcode' : 'SKU';
+        throw new Error(`SKU '${updates.sku.trim()}' is already assigned as a ${matchType} to product '${dupSku.name}'. Codes must be unique across all products.`);
+      }
+    }
+    if (updates.barcode && updates.barcode.trim()) {
+      const cleanBar = updates.barcode.trim().toLowerCase();
+      const dupBar = this.items.find(i => i.id !== id && (i.businessId || activeId) === activeId && ((i.barcode && i.barcode.trim().toLowerCase() === cleanBar) || (i.sku && i.sku.trim().toLowerCase() === cleanBar)));
+      if (dupBar) {
+        const matchType = dupBar.sku && dupBar.sku.trim().toLowerCase() === cleanBar ? 'SKU' : 'Barcode';
+        throw new Error(`Barcode '${updates.barcode.trim()}' is already assigned as a ${matchType} to product '${dupBar.name}'. Codes must be unique across all products.`);
+      }
+    }
     const { currentStock: _ignoreStock, ...safeUpdates } = updates as any;
     this.items[idx] = { ...this.items[idx], ...safeUpdates, businessId: activeId };
     this.saveToStorage();

@@ -447,7 +447,7 @@ class MobileStore {
     return this.items;
   }
 
-  async saveItem(item: Item): Promise<Item> {
+  async saveItem(item: Item | (Omit<Item, 'sku' | 'barcode' | 'description'> & { sku?: string | null; barcode?: string | null; description?: string | null })): Promise<Item> {
     const idx = this.items.findIndex(i => i.id === item.id || i.publicItemId === item.publicItemId);
     
     try {
@@ -462,17 +462,45 @@ class MobileStore {
           item.id = res.data.id || res.data._id || item.id;
         }
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.response?.status === 400 || err?.response?.status === 409 || err?.response?.status === 422) {
+        throw err;
+      }
       console.warn('Item save backend sync failed, saving locally:', err);
     }
 
+    // Local offline cross-field uniqueness validation
+    if (item.sku && item.sku.trim()) {
+      const clean = item.sku.trim().toLowerCase();
+      const dup = this.items.find(i => (i.id !== item.id && i.publicItemId !== item.publicItemId) && ((i.sku && i.sku.trim().toLowerCase() === clean) || (i.barcode && i.barcode.trim().toLowerCase() === clean)));
+      if (dup) {
+        const matchType = dup.barcode && dup.barcode.trim().toLowerCase() === clean ? 'Barcode' : 'SKU';
+        throw new Error(`SKU '${item.sku.trim()}' is already assigned as a ${matchType} to product '${dup.name}'. Codes must be unique across all products.`);
+      }
+    }
+    if (item.barcode && item.barcode.trim()) {
+      const clean = item.barcode.trim().toLowerCase();
+      const dup = this.items.find(i => (i.id !== item.id && i.publicItemId !== item.publicItemId) && ((i.barcode && i.barcode.trim().toLowerCase() === clean) || (i.sku && i.sku.trim().toLowerCase() === clean)));
+      if (dup) {
+        const matchType = dup.sku && dup.sku.trim().toLowerCase() === clean ? 'SKU' : 'Barcode';
+        throw new Error(`Barcode '${item.barcode.trim()}' is already assigned as a ${matchType} to product '${dup.name}'. Codes must be unique across all products.`);
+      }
+    }
+
+    const cleanItem: Item = {
+      ...(item as any),
+      sku: item.sku ? String(item.sku).trim() : undefined,
+      barcode: item.barcode ? String(item.barcode).trim() : undefined,
+      description: item.description ? String(item.description).trim() : undefined,
+    };
+
     if (idx >= 0) {
-      this.items[idx] = { ...item };
+      this.items[idx] = cleanItem;
     } else {
-      this.items.unshift({ ...item });
+      this.items.unshift(cleanItem);
     }
     this.notify();
-    return item;
+    return cleanItem;
   }
 
   async adjustStock(itemId: string, adjustmentQty: number, reason?: string, unitCost?: number, notes?: string) {

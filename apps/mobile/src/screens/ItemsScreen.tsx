@@ -115,23 +115,63 @@ export const ItemsScreen: React.FC = () => {
   const handleAutoGenerateSku = () => {
     const rawCat = (itemCategory || 'GEN').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     const prefix = rawCat.length >= 3 ? rawCat.substring(0, 3) : 'GEN';
-    const randSuffix = Math.floor(1000 + Math.random() * 9000);
-    setItemSku(`INT-SKU-${prefix}-${randSuffix}`);
+    let candidate = '';
+    let attempts = 0;
+    do {
+      const randSuffix = Math.floor(1000 + Math.random() * 9000);
+      candidate = `INT-SKU-${prefix}-${randSuffix}`;
+      attempts++;
+    } while (
+      items.some(i => i.id !== editingItem?.id && (
+        (i.sku && i.sku.trim().toLowerCase() === candidate.toLowerCase()) ||
+        (i.barcode && i.barcode.trim().toLowerCase() === candidate.toLowerCase())
+      )) &&
+      attempts < 100
+    );
+    setItemSku(candidate);
   };
 
   const handleAutoGenerateBarcode = () => {
-    const middleDigits = String(Math.floor(100000000 + Math.random() * 900000000));
-    setItemBarcode(`INT-${middleDigits}`);
+    let candidate = '';
+    let attempts = 0;
+    do {
+      const middleDigits = String(Math.floor(100000000 + Math.random() * 900000000));
+      candidate = `INT-${middleDigits}`;
+      attempts++;
+    } while (
+      items.some(i => i.id !== editingItem?.id && (
+        (i.barcode && i.barcode.trim().toLowerCase() === candidate.toLowerCase()) ||
+        (i.sku && i.sku.trim().toLowerCase() === candidate.toLowerCase())
+      )) &&
+      attempts < 100
+    );
+    setItemBarcode(candidate);
   };
 
-  // Collision detection for duplicate SKU and Barcode
-  const skuCollision = itemSku.trim()
-    ? items.find(i => i.sku?.toLowerCase() === itemSku.trim().toLowerCase() && i.id !== editingItem?.id)
-    : null;
+  // Cross-field collision detection for duplicate SKU and Barcode
+  const skuCollision = (() => {
+    const clean = itemSku.trim().toLowerCase();
+    if (!clean) return null;
+    const match = items.find(i => i.id !== editingItem?.id && (
+      (i.sku && i.sku.trim().toLowerCase() === clean) ||
+      (i.barcode && i.barcode.trim().toLowerCase() === clean)
+    ));
+    if (!match) return null;
+    const matchedField = match.barcode && match.barcode.trim().toLowerCase() === clean ? 'Barcode' : 'SKU';
+    return { ...match, matchedField };
+  })();
 
-  const barcodeCollision = itemBarcode.trim()
-    ? items.find(i => i.barcode?.toLowerCase() === itemBarcode.trim().toLowerCase() && i.id !== editingItem?.id)
-    : null;
+  const barcodeCollision = (() => {
+    const clean = itemBarcode.trim().toLowerCase();
+    if (!clean) return null;
+    const match = items.find(i => i.id !== editingItem?.id && (
+      (i.barcode && i.barcode.trim().toLowerCase() === clean) ||
+      (i.sku && i.sku.trim().toLowerCase() === clean)
+    ));
+    if (!match) return null;
+    const matchedField = match.sku && match.sku.trim().toLowerCase() === clean ? 'SKU' : 'Barcode';
+    return { ...match, matchedField };
+  })();
 
   const filteredItems = items.filter(item => {
     const matchesCat = selectedCategory === 'ALL' || item.category === selectedCategory;
@@ -162,7 +202,7 @@ export const ItemsScreen: React.FC = () => {
     return true;
   });
 
-  const handleSaveItem = () => {
+  const handleSaveItem = async () => {
     if (!itemName.trim()) {
       Alert.alert('Validation Error', 'Item name is required.');
       return;
@@ -170,16 +210,44 @@ export const ItemsScreen: React.FC = () => {
 
     if (skuCollision) {
       Alert.alert(
-        'Duplicate SKU Detected', 
-        `The SKU "${itemSku}" is already assigned to "${skuCollision.name}". Each SKU must be unique.`
+        'Duplicate Code Detected',
+        `The SKU "${itemSku}" is already assigned as a ${skuCollision.matchedField} to "${skuCollision.name}". Codes cannot match any other product's SKU or Barcode.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Generate New SKU',
+            onPress: () => handleAutoGenerateSku(),
+          },
+          {
+            text: 'Edit Old Product',
+            onPress: () => {
+              setIsCreateModalOpen(false);
+              openEditModal(skuCollision);
+            },
+          },
+        ]
       );
       return;
     }
 
     if (barcodeCollision) {
       Alert.alert(
-        'Duplicate Barcode Detected', 
-        `The Barcode "${itemBarcode}" is already assigned to "${barcodeCollision.name}". Each Barcode must be unique.`
+        'Duplicate Code Detected',
+        `The Barcode "${itemBarcode}" is already assigned as a ${barcodeCollision.matchedField} to "${barcodeCollision.name}". Codes cannot match any other product's Barcode or SKU.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Generate New QR/Barcode',
+            onPress: () => handleAutoGenerateBarcode(),
+          },
+          {
+            text: 'Edit Old Product',
+            onPress: () => {
+              setIsCreateModalOpen(false);
+              openEditModal(barcodeCollision);
+            },
+          },
+        ]
       );
       return;
     }
@@ -190,46 +258,95 @@ export const ItemsScreen: React.FC = () => {
     const minStockAlert = parseFloat(itemMinStock) || 5;
     const taxRate = parseFloat(itemTaxRate) || 0;
 
-    if (editingItem) {
-      const updated: Item = {
-        ...editingItem,
-        name: itemName.trim(),
-        sku: itemSku.trim() || undefined,
-        barcode: itemBarcode.trim() || undefined,
-        category: itemCategory,
-        salePrice,
-        mrp: salePrice,
-        purchasePrice,
-        currentStock,
-        minStockAlert,
-        taxRate,
-        unit: itemUnit,
-        allowParts: itemAllowParts,
-      };
-      store.saveItem(updated);
-      setEditingItem(null);
-      Alert.alert('Item Updated', 'Product catalog record saved successfully.');
-    } else {
-      const publicItemId = `ITM-${1000 + items.length + 1}`;
-      const newItem: Item = {
-        id: `itm-${Date.now()}`,
-        publicItemId,
-        name: itemName.trim(),
-        sku: itemSku.trim() || undefined,
-        barcode: itemBarcode.trim() || undefined,
-        category: itemCategory,
-        salePrice,
-        mrp: salePrice,
-        purchasePrice,
-        currentStock,
-        minStockAlert,
-        taxRate,
-        unit: itemUnit,
-        allowParts: itemAllowParts,
-      };
-      store.saveItem(newItem);
-      setIsCreateModalOpen(false);
-      Alert.alert('Item Created', 'New product added to catalog.');
+    try {
+      if (editingItem) {
+        const updated: Item = {
+          ...editingItem,
+          name: itemName.trim(),
+          sku: itemSku.trim() || undefined,
+          barcode: itemBarcode.trim() || undefined,
+          category: itemCategory,
+          salePrice,
+          mrp: salePrice,
+          purchasePrice,
+          currentStock,
+          minStockAlert,
+          taxRate,
+          unit: itemUnit,
+          allowParts: itemAllowParts,
+        };
+        await store.saveItem(updated);
+        setEditingItem(null);
+        Alert.alert('Item Updated', 'Product catalog record saved successfully.');
+      } else {
+        const publicItemId = `ITM-${1000 + items.length + 1}`;
+        const newItem: Item = {
+          id: `itm-${Date.now()}`,
+          publicItemId,
+          name: itemName.trim(),
+          sku: itemSku.trim() || undefined,
+          barcode: itemBarcode.trim() || undefined,
+          category: itemCategory,
+          salePrice,
+          mrp: salePrice,
+          purchasePrice,
+          currentStock,
+          minStockAlert,
+          taxRate,
+          unit: itemUnit,
+          allowParts: itemAllowParts,
+        };
+        await store.saveItem(newItem);
+        setIsCreateModalOpen(false);
+        Alert.alert('Item Created', 'New product added to catalog.');
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || 'Could not save product.';
+      const errorText = typeof msg === 'string' ? msg : JSON.stringify(msg);
+
+      if (
+        errorText.toLowerCase().includes('already assigned') ||
+        errorText.toLowerCase().includes('already exists') ||
+        errorText.toLowerCase().includes('duplicate') ||
+        errorText.toLowerCase().includes('must be unique')
+      ) {
+        const cleanSku = itemSku.trim().toLowerCase();
+        const cleanBar = itemBarcode.trim().toLowerCase();
+        const conflict = items.find(i =>
+          i.id !== editingItem?.id && (
+            (cleanSku && ((i.sku && i.sku.trim().toLowerCase() === cleanSku) || (i.barcode && i.barcode.trim().toLowerCase() === cleanSku))) ||
+            (cleanBar && ((i.barcode && i.barcode.trim().toLowerCase() === cleanBar) || (i.sku && i.sku.trim().toLowerCase() === cleanBar)))
+          )
+        );
+
+        const conflictName = conflict?.name || errorText.match(/product '([^']+)'/)?.[1] || 'Existing Product';
+        const code = cleanSku || cleanBar;
+
+        Alert.alert(
+          'Existing Product Conflict',
+          `Code "${code}" is already assigned to "${conflictName}". Codes must be unique across all products.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: cleanSku ? 'Generate New SKU' : 'Generate New QR/Barcode',
+              onPress: () => {
+                if (cleanSku) handleAutoGenerateSku();
+                else handleAutoGenerateBarcode();
+              },
+            },
+            ...(conflict ? [{
+              text: 'Edit Old Product',
+              onPress: () => {
+                setIsCreateModalOpen(false);
+                openEditModal(conflict);
+              },
+            }] : []),
+          ]
+        );
+        return;
+      }
+
+      Alert.alert('Save Failed', msg);
     }
   };
 

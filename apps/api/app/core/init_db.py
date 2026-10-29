@@ -43,6 +43,21 @@ async def init_primary_superadmin_database(db: AsyncIOMotorDatabase) -> None:
         await db.locations.create_index([("businessId", 1), ("code", 1)])
         await db.locations.create_index("businessId")
 
+        # items collection partial unique indexes
+        try:
+            await db.items.create_index(
+                [("businessId", 1), ("sku", 1)],
+                unique=True,
+                partialFilterExpression={"sku": {"$type": "string", "$gt": ""}, "isActive": True}
+            )
+            await db.items.create_index(
+                [("businessId", 1), ("barcode", 1)],
+                unique=True,
+                partialFilterExpression={"barcode": {"$type": "string", "$gt": ""}, "isActive": True}
+            )
+        except Exception as idx_err:
+            logger.warning(f"Note on items unique indexes in primary DB: {idx_err}")
+
         print("[DB Init] Primary DB collections and indexes verified.")
     except Exception as e:
         print(f"[DB Init] Note on creating indexes: {e}")
