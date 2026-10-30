@@ -34,10 +34,11 @@ import {
   Calendar,
   Upload,
   Image as ImageIcon,
-  X
+  X,
+  Coffee
 } from 'lucide-react';
 import { store } from '../services/store';
-import { User, StoreLocation, UserRole, Tenant } from '../types';
+import { User, StoreLocation, UserRole, Tenant, BusinessPersona, CafeConfig } from '../types';
 import { SyncInventoryModal } from '../components/SyncInventoryModal';
 import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
 import { uploadItemImage } from '../services/supabaseStorage';
@@ -148,6 +149,19 @@ export const SettingsView: React.FC = () => {
   const [profileLogoUrl, setProfileLogoUrl] = useState(activeTenant?.logoUrl || '');
   const [profileTagline, setProfileTagline] = useState(activeTenant?.tagline || '');
   const [profileReceiptFooter, setProfileReceiptFooter] = useState(activeTenant?.receiptFooterNote || '');
+  const [businessPersona, setBusinessPersona] = useState<BusinessPersona>(
+    activeTenant?.settings?.businessPersona || 'RETAIL'
+  );
+  const [cafeConfig, setCafeConfig] = useState<CafeConfig>(
+    activeTenant?.settings?.cafeConfig || {
+      enableKOT: true,
+      enableQROrdering: true,
+      allowCustomerOrdering: true,
+      autoAcceptOrders: false,
+      taxRate: 5.0,
+      serviceChargeRate: 0.0,
+    }
+  );
   const [profileCurrency, setProfileCurrency] = useState('₹ (INR)');
   const [profileSavedMsg, setProfileSavedMsg] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -600,6 +614,10 @@ export const SettingsView: React.FC = () => {
         logoUrl: profileLogoUrl.trim(),
         tagline: profileTagline.trim(),
         receiptFooterNote: profileReceiptFooter.trim(),
+        settings: {
+          businessPersona,
+          cafeConfig,
+        },
       });
       setInitialProfileSnapshot(JSON.stringify({
         name: profileName.trim(),
@@ -610,6 +628,10 @@ export const SettingsView: React.FC = () => {
         logoUrl: profileLogoUrl.trim(),
         tagline: profileTagline.trim(),
         receiptFooterNote: profileReceiptFooter.trim(),
+        settings: {
+          businessPersona,
+          cafeConfig,
+        },
       }));
       setProfileSavedMsg(true);
       setTimeout(() => setProfileSavedMsg(false), 3500);
@@ -1191,6 +1213,144 @@ export const SettingsView: React.FC = () => {
             )}
 
             <form onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Business Persona & Operating Mode */}
+              <div style={{
+                padding: '16px 20px',
+                borderRadius: '12px',
+                border: '1.5px solid var(--primary-200, #bfdbfe)',
+                backgroundColor: 'var(--primary-50, #eff6ff)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Store size={20} color="var(--primary-600)" />
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                      Operating Persona & Business Mode
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--neutral-600)' }}>
+                      Tailors your QuickBill POS layout, floor management, self-ordering, and kitchen workflows.
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                  {/* Retail Mode Card */}
+                  <div
+                    onClick={() => setBusinessPersona('RETAIL')}
+                    style={{
+                      padding: '14px 16px',
+                      borderRadius: '10px',
+                      border: `2px solid ${businessPersona === 'RETAIL' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                      backgroundColor: '#ffffff',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 12,
+                      boxShadow: businessPersona === 'RETAIL' ? '0 2px 8px rgba(37, 99, 235, 0.15)' : 'none',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="businessPersona"
+                      checked={businessPersona === 'RETAIL'}
+                      onChange={() => setBusinessPersona('RETAIL')}
+                      style={{ marginTop: 3 }}
+                    />
+                    <div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                        Retail & Supermarket POS
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', marginTop: 2, lineHeight: 1.4 }}>
+                        Fast barcode scanning, multi-register counters, wholesale MRP billing, and inventory tracking.
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Cafe Mode Card */}
+                  <div
+                    onClick={() => setBusinessPersona('CAFE')}
+                    style={{
+                      padding: '14px 16px',
+                      borderRadius: '10px',
+                      border: `2px solid ${businessPersona === 'CAFE' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                      backgroundColor: '#ffffff',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 12,
+                      boxShadow: businessPersona === 'CAFE' ? '0 2px 8px rgba(37, 99, 235, 0.15)' : 'none',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="businessPersona"
+                      checked={businessPersona === 'CAFE'}
+                      onChange={() => setBusinessPersona('CAFE')}
+                      style={{ marginTop: 3 }}
+                    />
+                    <div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--neutral-900)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>Café & Dine-In Bistro</span>
+                        <span style={{ fontSize: '0.68rem', backgroundColor: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: '4px', fontWeight: 800 }}>
+                          NEW
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', marginTop: 2, lineHeight: 1.4 }}>
+                        Table floor plan, diner QR code self-ordering, cashier review queues, and Kitchen Order Tickets (KOT).
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cafe Specific Toggles */}
+                {businessPersona === 'CAFE' && (
+                  <div style={{
+                    marginTop: 8,
+                    paddingTop: 12,
+                    borderTop: '1px dashed var(--neutral-300)',
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 16,
+                    fontSize: '0.8rem',
+                    color: 'var(--neutral-700)'
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={cafeConfig.enableKOT}
+                        onChange={e => setCafeConfig(prev => ({ ...prev, enableKOT: e.target.checked }))}
+                      />
+                      <span style={{ fontWeight: 600 }}>Enable Kitchen Order Tickets (KOT)</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={cafeConfig.enableQROrdering}
+                        onChange={e => setCafeConfig(prev => ({ ...prev, enableQROrdering: e.target.checked }))}
+                      />
+                      <span style={{ fontWeight: 600 }}>Enable Table QR Self-Ordering</span>
+                    </label>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontWeight: 600 }}>Dine-In GST (%):</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={28}
+                        step={0.5}
+                        className="form-input form-input-sm"
+                        style={{ width: 70, padding: '2px 8px' }}
+                        value={cafeConfig.taxRate}
+                        onChange={e => setCafeConfig(prev => ({ ...prev, taxRate: Number(e.target.value) }))}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Store Branding Section: Logo, Name & Tagline */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
                 {/* Store Name */}

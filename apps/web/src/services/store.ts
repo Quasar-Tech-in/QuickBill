@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement, ItemImportResponse } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement, ItemImportResponse, CafeTable, TableStatus, KOT, TableSession, BusinessPersona } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -1321,6 +1321,7 @@ class StoreService {
     status?: 'ACTIVE' | 'SUSPENDED';
     plan?: any;
     databaseConfig?: TenantDatabaseConfig;
+    settings?: any;
   }): Promise<Tenant> {
     const targetId = updates.tenantId || this.getActiveTenant().id;
     const current = this.tenants.find(t => t.id === targetId) || this.getActiveTenant();
@@ -1337,6 +1338,7 @@ class StoreService {
       status: updates.status || current.status,
       plan: updates.plan || current.plan,
       databaseConfig: updates.databaseConfig || current.databaseConfig,
+      settings: updates.settings !== undefined ? updates.settings : current.settings,
     };
 
     // Update in local array
@@ -1365,6 +1367,9 @@ class StoreService {
           logo_url: updates.logoUrl,
           tagline: updates.tagline,
           receipt_footer: updates.receiptFooterNote,
+          settings: updates.settings,
+          business_persona: updates.settings?.businessPersona,
+          cafe_config: updates.settings?.cafeConfig,
           status: updates.status,
           plan: updates.plan,
           database_config: updates.databaseConfig ? {
@@ -5078,8 +5083,158 @@ class StoreService {
       return true;
     }
   }
+
+  // --- Cafe Persona Store Methods ---
+  private cafeTables: CafeTable[] = [];
+  private activeTableSessions: TableSession[] = [];
+  private kots: KOT[] = [];
+
+  getBusinessPersona(): BusinessPersona {
+    return this.currentTenant?.settings?.businessPersona || 'RETAIL';
+  }
+
+  isCafePersona(): boolean {
+    const p = this.getBusinessPersona();
+    return p === 'CAFE' || p === 'HYBRID';
+  }
+
+  async updateBusinessPersona(persona: BusinessPersona, cafeConfig?: any): Promise<void> {
+    const active = this.getActiveTenant();
+    const newSettings = {
+      ...active.settings,
+      businessPersona: persona,
+      cafeConfig: cafeConfig || active.settings?.cafeConfig,
+    };
+    await this.updateTenantProfile({
+      settings: newSettings,
+    });
+  }
+
+  getCafeTables(): CafeTable[] {
+    return this.cafeTables;
+  }
+
+  getActiveTableSessions(): TableSession[] {
+    return this.activeTableSessions;
+  }
+
+  async fetchTables(locationId?: string): Promise<CafeTable[]> {
+    try {
+      const loc = locationId || this.activeLocation?.id;
+      const res = await apiClient.get('/cafe/tables', {
+        params: { locationId: loc }
+      });
+      this.cafeTables = res.data || [];
+      this.notifyListeners();
+      return this.cafeTables;
+    } catch (err) {
+      console.warn('Failed to fetch cafe tables:', err);
+      return this.cafeTables;
+    }
+  }
+
+  async createTable(payload: Partial<CafeTable>): Promise<CafeTable> {
+    const loc = payload.locationId || this.activeLocation?.id;
+    const res = await apiClient.post('/cafe/tables', {
+      ...payload,
+      locationId: loc
+    });
+    const created: CafeTable = res.data;
+    this.cafeTables.push(created);
+    this.notifyListeners();
+    return created;
+  }
+
+  async updateTable(tableId: string, payload: Partial<CafeTable>): Promise<CafeTable> {
+    const res = await apiClient.put('/cafe/tables/' + tableId, payload);
+    const updated: CafeTable = res.data;
+    const idx = this.cafeTables.findIndex(t => t.id === tableId);
+    if (idx !== -1) this.cafeTables[idx] = updated;
+    this.notifyListeners();
+    return updated;
+  }
+
+  async updateTableStatus(tableId: string, status: TableStatus): Promise<CafeTable> {
+    const res = await apiClient.patch('/cafe/tables/' + tableId + '/status', { status });
+    const updated: CafeTable = res.data;
+    const idx = this.cafeTables.findIndex(t => t.id === tableId);
+    if (idx !== -1) this.cafeTables[idx] = updated;
+    this.notifyListeners();
+    return updated;
+  }
+
+  async deleteTable(tableId: string): Promise<boolean> {
+    try {
+      await apiClient.delete('/cafe/tables/' + tableId);
+      this.cafeTables = this.cafeTables.filter(t => t.id !== tableId);
+      this.notifyListeners();
+      return true;
+    } catch (err) {
+      console.warn('Failed to delete table:', err);
+      return false;
+    }
+  }
+
+  async fetchActiveTableSessions(locationId?: string): Promise<TableSession[]> {
+    try {
+      const loc = locationId || this.activeLocation?.id;
+      const res = await apiClient.get('/cafe/sessions/active', {
+        params: { locationId: loc }
+      });
+      this.activeTableSessions = res.data || [];
+      this.notifyListeners();
+      return this.activeTableSessions;
+    } catch (err) {
+      console.warn('Failed to fetch active table sessions:', err);
+      return this.activeTableSessions;
+    }
+  }
+
+  async acceptSessionOrder(sessionId: string, orderId: string): Promise<any> {
+    const res = await apiClient.post('/cafe/sessions/' + sessionId + '/orders/' + orderId + '/accept');
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
+
+  async rejectSessionOrder(sessionId: string, orderId: string, reason?: string): Promise<any> {
+    const res = await apiClient.post('/cafe/sessions/' + sessionId + '/orders/' + orderId + '/reject', {
+      reason: reason || 'Item unavailable'
+    });
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
+
+  async fetchKOTs(locationId?: string, status?: string): Promise<KOT[]> {
+    try {
+      const loc = locationId || this.activeLocation?.id;
+      const res = await apiClient.get('/cafe/sessions/kots', {
+        params: { locationId: loc, status }
+      });
+      this.kots = res.data || [];
+      this.notifyListeners();
+      return this.kots;
+    } catch (err) {
+      console.warn('Failed to fetch KOTs:', err);
+      return this.kots;
+    }
+  }
+
+  async updateKOTStatus(kotId: string, status: string): Promise<any> {
+    const res = await apiClient.patch('/cafe/sessions/kots/' + kotId + '/status', { status });
+    const idx = this.kots.findIndex(k => k.id === kotId);
+    if (idx !== -1) this.kots[idx].kitchenStatus = status as any;
+    this.notifyListeners();
+    return res.data;
+  }
+
+  async settleTableSession(sessionId: string, payload: any): Promise<any> {
+    const res = await apiClient.post('/cafe/sessions/' + sessionId + '/settle', payload);
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
 }
 
-
 export const store = new StoreService();
-

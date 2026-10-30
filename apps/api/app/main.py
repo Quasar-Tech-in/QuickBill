@@ -8,7 +8,11 @@ from fastapi.staticfiles import StaticFiles
 from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
 from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection
-from app.api.v1 import auth, items, sales, parties, customers, payments, expenses, reports, tenants, users, locations, categories, purchase_orders, labels, shipping, staged_orders, inventory
+from app.api.v1 import (
+    auth, items, sales, parties, customers, payments, expenses, reports,
+    tenants, users, locations, categories, purchase_orders, labels,
+    shipping, staged_orders, inventory, cafe_tables, cafe_sessions, cafe_public
+)
 
 logger = logging.getLogger("quickbill.main")
 
@@ -118,6 +122,9 @@ app.include_router(labels.router, prefix=settings.API_V1_STR)
 app.include_router(shipping.router, prefix=settings.API_V1_STR)
 app.include_router(staged_orders.router, prefix=settings.API_V1_STR)
 app.include_router(inventory.router, prefix=settings.API_V1_STR)
+app.include_router(cafe_tables.router, prefix=settings.API_V1_STR)
+app.include_router(cafe_sessions.router, prefix=settings.API_V1_STR)
+app.include_router(cafe_public.router, prefix=settings.API_V1_STR)
 
 @app.get("/", tags=["Health"])
 @app.get("/api/v1/health", tags=["Health"])

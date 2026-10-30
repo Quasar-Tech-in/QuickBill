@@ -26,6 +26,11 @@ import { WorkspacePreviewView } from './views/WorkspacePreviewView';
 import { TenantLoginView } from './views/TenantLoginView';
 import { SuperAdminLoginView } from './views/SuperAdminLoginView';
 import { InvoicePrintModal } from './components/InvoicePrintModal';
+import { CafeDashboardView } from './views/CafeDashboardView';
+import { TableManagementView } from './views/TableManagementView';
+import { IncomingOrdersView } from './views/IncomingOrdersView';
+import { KitchenOrdersView } from './views/KitchenOrdersView';
+import { DigitalMenuPage } from './customer/DigitalMenuPage';
 import { store } from './services/store';
 import { Invoice, Tenant, User } from './types';
 
@@ -35,6 +40,7 @@ import { AlertTriangle, RefreshCw, LogOut, Lock, ShieldCheck, Clock, ArrowRight 
 const getDefaultPathForRole = (user: User | null): string => {
   if (!user) return '/login';
   if (user.role === 'SUPER_ADMIN') return '/superadmin';
+  if (store.isCafePersona()) return '/cafe/dashboard';
   if (user.role === 'CASHIER') return '/pos';
   return '/dashboard';
 };
@@ -527,7 +533,8 @@ export const App: React.FC = () => {
         />
         
         <Route 
-          path="/superadmin/login" 
+          path="/superadmin/login"
+
           element={
             currentUser && currentUser.role === 'SUPER_ADMIN' ? (
               <Navigate to="/superadmin" replace />
@@ -536,6 +543,9 @@ export const App: React.FC = () => {
             )
           } 
         />
+
+        {/* Public Customer Self-Ordering Digital Menu Route */}
+        <Route path="/order/:businessId/:tableId" element={<DigitalMenuPage />} />
 
         {/* Protected Authenticated Routes */}
         {currentUser ? (
@@ -568,6 +578,25 @@ export const App: React.FC = () => {
                 />
               } 
             />
+            {/* Dedicated Café Persona Routes */}
+            <Route 
+              path="/cafe/dashboard" 
+              element={
+                <CafeDashboardView 
+                  onNavigate={(tab) => {
+                    if (tab === 'cafe-incoming') window.location.assign('/cafe/orders/incoming');
+                    else if (tab === 'cafe-kitchen') window.location.assign('/cafe/kitchen');
+                    else if (tab === 'cafe-tables') window.location.assign('/cafe/tables');
+                  }}
+                  onViewInvoice={(inv) => setViewingInvoice(inv)} 
+                />
+              } 
+            />
+            <Route path="/cafe" element={<Navigate to="/cafe/dashboard" replace />} />
+            <Route path="/cafe/tables" element={<TableManagementView />} />
+            <Route path="/cafe/orders/incoming" element={<IncomingOrdersView />} />
+            <Route path="/cafe/kitchen" element={<KitchenOrdersView />} />
+
             <Route path="/inventory" element={<InventoryView />} />
             <Route path="/purchase-orders" element={<PurchaseOrdersView />} />
             <Route path="/parties" element={<PartiesView />} />

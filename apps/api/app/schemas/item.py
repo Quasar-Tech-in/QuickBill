@@ -63,6 +63,11 @@ class ItemBase(BaseSchema):
     locations: Optional[List[LocationInventorySchema]] = None
     images: Optional[List[ItemImageSchema]] = None
     image_url: Optional[str] = Field(None, alias="imageUrl")
+    item_type: Optional[str] = Field(default="MENU_ITEM", alias="itemType")
+    is_customer_visible: Optional[bool] = Field(default=True, alias="isCustomerVisible")
+    dietary_flags: Optional[dict] = Field(default=None, alias="dietaryFlags")
+    variants: Optional[List[dict]] = Field(default=[], alias="variants")
+    modifiers: Optional[List[dict]] = Field(default=[], alias="modifiers")
 
 class ItemCreate(ItemBase):
     opening_stock: Optional[Decimal] = Field(default=Decimal("0.0"), ge=0, alias="openingStock")
@@ -90,6 +95,11 @@ class ItemUpdate(BaseSchema):
     locations: Optional[List[LocationInventorySchema]] = None
     images: Optional[List[ItemImageSchema]] = None
     image_url: Optional[str] = Field(None, alias="imageUrl")
+    item_type: Optional[str] = Field(None, alias="itemType")
+    is_customer_visible: Optional[bool] = Field(None, alias="isCustomerVisible")
+    dietary_flags: Optional[dict] = Field(None, alias="dietaryFlags")
+    variants: Optional[List[dict]] = Field(None, alias="variants")
+    modifiers: Optional[List[dict]] = Field(None, alias="modifiers")
     is_active: Optional[bool] = Field(None, alias="isActive")
     current_stock: Optional[Decimal] = Field(None, alias="currentStock")
 

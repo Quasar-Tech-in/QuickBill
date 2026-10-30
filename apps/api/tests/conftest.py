@@ -1,5 +1,6 @@
 import pytest
 import copy
+import re
 from typing import Dict, Any, List, Optional
 from bson import ObjectId
 from app.main import app
@@ -118,10 +119,23 @@ class MockCollection:
                 if str(doc_val) != str(v):
                     return False
             elif isinstance(v, dict):
-                if "$regex" in v:
-                    pattern = v["$regex"].lower()
-                    if pattern not in str(doc_val).lower():
+                if "$ne" in v:
+                    if doc_val == v["$ne"] or (isinstance(v["$ne"], (str, ObjectId)) and str(doc_val) == str(v["$ne"])):
                         return False
+                elif "$in" in v:
+                    in_list = [str(x) if isinstance(x, ObjectId) else x for x in v["$in"]]
+                    check_val = str(doc_val) if isinstance(doc_val, ObjectId) else doc_val
+                    if check_val not in in_list:
+                        return False
+                elif "$regex" in v:
+                    pattern = v["$regex"]
+                    flags = re.IGNORECASE if "i" in v.get("$options", "i").lower() else 0
+                    try:
+                        if not re.search(pattern, str(doc_val or ""), flags):
+                            return False
+                    except Exception:
+                        if pattern.lower() not in str(doc_val or "").lower():
+                            return False
             else:
                 if doc_val != v:
                     return False
@@ -156,6 +170,11 @@ class MockCollection:
                 if "$inc" in update:
                     for field, inc_val in update["$inc"].items():
                         d[field] = d.get(field, 0) + inc_val
+                if "$push" in update:
+                    for field, push_val in update["$push"].items():
+                        if field not in d or not isinstance(d[field], list):
+                            d[field] = []
+                        d[field].append(copy.deepcopy(push_val))
                 return MockUpdateResult(1)
         if upsert:
             new_doc = copy.deepcopy(filter_query)
@@ -166,9 +185,28 @@ class MockCollection:
             if "$inc" in update:
                 for field, inc_val in update["$inc"].items():
                     new_doc[field] = inc_val
+            if "$push" in update:
+                for field, push_val in update["$push"].items():
+                    new_doc[field] = [copy.deepcopy(push_val)]
             self.data.append(new_doc)
             return MockUpdateResult(1)
         return MockUpdateResult(0)
+
+    async def find_one_and_update(self, filter_query: Dict[str, Any], update: Dict[str, Any], return_document=True) -> Optional[Dict[str, Any]]:
+        for d in self.data:
+            if self._matches(d, filter_query):
+                if "$set" in update:
+                    _apply_set(d, update["$set"])
+                if "$inc" in update:
+                    for field, inc_val in update["$inc"].items():
+                        d[field] = d.get(field, 0) + inc_val
+                if "$push" in update:
+                    for field, push_val in update["$push"].items():
+                        if field not in d or not isinstance(d[field], list):
+                            d[field] = []
+                        d[field].append(copy.deepcopy(push_val))
+                return copy.deepcopy(d)
+        return None
 
     async def delete_one(self, filter_query: Dict[str, Any], session=None) -> MockDeleteResult:
         for idx, d in enumerate(self.data):
@@ -217,6 +255,24 @@ def override_db(monkeypatch):
         "tenantId": ObjectId("65f2a1b9a000000000000001"),
         "authorizedTenantIds": ["65f2a1b9a000000000000001"],
         "isActive": True
+    })
+
+    # Seed default store A tenant
+    mock_primary_db.tenants.data.append({
+        "_id": ObjectId("65f2a1b9a000000000000001"),
+        "slug": "65f2a1b9a000000000000001",
+        "name": "Store A",
+        "status": "ACTIVE",
+        "subscription": {
+            "status": "ACTIVE",
+            "tier": "PROFESSIONAL",
+            "maxUsers": 10,
+            "maxLocations": 3,
+            "endDate": "2027-01-01T00:00:00Z"
+        },
+        "settings": {
+            "businessPersona": "RETAIL"
+        }
     })
 
     # Seed default store B tenant

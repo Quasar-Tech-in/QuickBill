@@ -93,6 +93,7 @@ class TenantResponse(BaseModel):
     database_config: DatabaseConfig
     subscription: TenantSubscriptionModel
     stats: Dict[str, Any]
+    settings: Optional[Dict[str, Any]] = None
 
 class TestConnectionRequest(BaseModel):
     mongodb_uri: str
@@ -315,7 +316,8 @@ def build_tenant_response(t: dict, stats_override: Optional[dict] = None) -> Ten
         created_at=str(t.get("createdAt", now.isoformat())),
         database_config=db_config_model,
         subscription=subscription_model,
-        stats=stats_doc
+        stats=stats_doc,
+        settings=t.get("settings", {"businessPersona": "RETAIL"})
     )
 
 @router.get("", response_model=List[TenantResponse])
@@ -441,6 +443,9 @@ class TenantUpdateRequest(BaseModel):
     status: Optional[str] = None
     plan: Optional[str] = None
     database_config: Optional[DatabaseConfig] = None
+    settings: Optional[Dict[str, Any]] = None
+    business_persona: Optional[str] = Field(None, alias="businessPersona")
+    cafe_config: Optional[Dict[str, Any]] = Field(None, alias="cafeConfig")
 
 @router.put("/{tenant_id}")
 async def update_tenant_profile(
@@ -491,6 +496,13 @@ async def update_tenant_profile(
             "mongodbUri": req.database_config.mongodb_uri,
             "databaseName": req.database_config.database_name
         }
+    if req.business_persona is not None:
+        update_data["settings.businessPersona"] = req.business_persona.strip().upper()
+    if req.cafe_config is not None:
+        update_data["settings.cafeConfig"] = req.cafe_config
+    if req.settings is not None:
+        for k, v in req.settings.items():
+            update_data[f"settings.{k}"] = v
 
     if update_data:
         query = {"_id": t_oid} if t_oid else {"slug": tenant_id}
