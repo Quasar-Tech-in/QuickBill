@@ -57,6 +57,7 @@ class CafeSessionService:
             d["businessId"] = str(d["businessId"])
             if d.get("activeSessionId"):
                 d["activeSessionId"] = str(d["activeSessionId"])
+            d["qrCodeToken"] = d.get("qrCodeSecret") or d.get("qrCodeToken")
             results.append(d)
         return results
 
@@ -98,6 +99,7 @@ class CafeSessionService:
             "currentStatus": "AVAILABLE",
             "activeSessionId": None,
             "qrCodeSecret": token,
+            "qrCodeToken": token,
             "qrCodeUrl": qr_url,
             "isActive": True,
             "createdAt": now,
@@ -107,6 +109,7 @@ class CafeSessionService:
         await self.db.tables.insert_one(table_doc)
         table_doc["_id"] = str(table_doc["_id"])
         table_doc["businessId"] = str(table_doc["businessId"])
+        table_doc["qrCodeToken"] = table_doc.get("qrCodeSecret") or table_doc.get("qrCodeToken")
         return table_doc
 
     async def update_table(self, business_id: str, table_id: str, payload: TableUpdate) -> Dict[str, Any]:
@@ -140,6 +143,7 @@ class CafeSessionService:
         res["businessId"] = str(res["businessId"])
         if res.get("activeSessionId"):
             res["activeSessionId"] = str(res["activeSessionId"])
+        res["qrCodeToken"] = res.get("qrCodeSecret") or res.get("qrCodeToken")
         return res
 
     async def update_table_status(self, business_id: str, table_id: str, new_status: str) -> Dict[str, Any]:
@@ -536,6 +540,12 @@ class CafeSessionService:
         customer_name = payload.customer_name or session.get("customerName") or (f"Table {session.get('tableNumber')} Guest")
         customer_phone = payload.customer_phone or session.get("customerPhone")
 
+        disc_type = payload.discount_type
+        disc_val = Decimal(str(payload.discount_value)) if payload.discount_value else None
+        if disc_val is None and payload.discount_amount is not None:
+            disc_type = "FIXED"
+            disc_val = Decimal(str(payload.discount_amount))
+
         sale_request = SaleCreateRequest(
             locationId=location_id,
             consumerName=customer_name,
@@ -543,8 +553,8 @@ class CafeSessionService:
             items=sale_items,
             paymentMode=payload.payment_mode or "CASH",
             paidAmount=Decimal(str(payload.paid_amount)) if payload.paid_amount is not None else None,
-            discountType=payload.discount_type,
-            discountValue=Decimal(str(payload.discount_value)) if payload.discount_value else None,
+            discountType=disc_type,
+            discountValue=disc_val,
             notes=f"Table {session.get('tableNumber')} Dine-In Settlement" + (f": {payload.notes}" if payload.notes else ""),
             billedByName=user_name,
             billedByRole="CASHIER"

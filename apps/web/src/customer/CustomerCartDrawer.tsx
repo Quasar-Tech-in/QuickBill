@@ -80,6 +80,7 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
       const payload = {
         businessId,
         tableId,
+        qrToken: token || '',
         token: token || undefined,
         customerName: customerName.trim() || undefined,
         customerPhone: customerPhone.trim() || undefined,

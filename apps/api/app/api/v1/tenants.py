@@ -18,6 +18,8 @@ def is_tenant_admin(user: TokenPayload) -> bool:
     normalized_roles = [r.upper() for r in user.roles]
     return "TENANT_ADMIN" in normalized_roles or is_super_admin(user)
 
+VALID_PERSONAS = {"RETAIL", "CAFE", "HYBRID"}
+
 # Default Plan Quotas
 PLAN_DEFAULTS = {
     "STARTER": {"max_users": 2, "max_locations": 1, "features": ["pos", "inventory", "ledger"]},
@@ -27,9 +29,12 @@ PLAN_DEFAULTS = {
 }
 
 class DatabaseConfig(BaseModel):
-    isolation_mode: str = Field(default="SHARED", description="SHARED | DEDICATED_DATABASE | CUSTOM_CLUSTER")
-    mongodb_uri: Optional[str] = None
-    database_name: str = "quickbill_main_db"
+    isolation_mode: str = Field(default="SHARED", alias="isolationMode", description="SHARED | DEDICATED_DATABASE | CUSTOM_CLUSTER")
+    mongodb_uri: Optional[str] = Field(default=None, alias="mongodbUri")
+    database_name: str = Field(default="quickbill_main_db", alias="databaseName")
+
+    class Config:
+        populate_by_name = True
 
 class SubscriptionRenewalHistoryItem(BaseModel):
     date: Optional[str] = None
@@ -64,17 +69,21 @@ class TenantSubscriptionModel(BaseModel):
 class TenantCreateRequest(BaseModel):
     name: str
     slug: str
-    admin_email: str
-    admin_password: str
+    admin_email: str = Field(..., alias="adminEmail")
+    admin_password: str = Field(..., alias="adminPassword")
     plan: str = "PROFESSIONAL"  # STARTER, PROFESSIONAL, ENTERPRISE, CUSTOM
     gstin: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
-    max_users: Optional[int] = None
-    max_locations: Optional[int] = None
-    billing_cycle: Optional[str] = "ANNUAL"
-    duration_days: Optional[int] = 365
-    database_config: DatabaseConfig
+    max_users: Optional[int] = Field(default=None, alias="maxUsers")
+    max_locations: Optional[int] = Field(default=None, alias="maxLocations")
+    billing_cycle: Optional[str] = Field(default="ANNUAL", alias="billingCycle")
+    duration_days: Optional[int] = Field(default=365, alias="durationDays")
+    database_config: DatabaseConfig = Field(..., alias="databaseConfig")
+    business_persona: Optional[str] = Field(default="RETAIL", alias="businessPersona")
+
+    class Config:
+        populate_by_name = True
 
 class TenantResponse(BaseModel):
     id: str
@@ -447,6 +456,9 @@ class TenantUpdateRequest(BaseModel):
     business_persona: Optional[str] = Field(None, alias="businessPersona")
     cafe_config: Optional[Dict[str, Any]] = Field(None, alias="cafeConfig")
 
+    class Config:
+        populate_by_name = True
+
 @router.put("/{tenant_id}")
 async def update_tenant_profile(
     tenant_id: str,
@@ -461,6 +473,25 @@ async def update_tenant_profile(
 
     if not is_super_admin(user) and user.default_business_id != tenant_id:
         raise HTTPException(status_code=403, detail="Unauthorized access to modify this store profile.")
+
+    # Detect persona modification attempt
+    persona_attempted = req.business_persona is not None
+    persona_val = req.business_persona
+
+    if req.settings is not None and isinstance(req.settings, dict):
+        if "businessPersona" in req.settings:
+            persona_attempted = True
+            persona_val = req.settings["businessPersona"]
+        elif "business_persona" in req.settings:
+            persona_attempted = True
+            persona_val = req.settings["business_persona"]
+
+    # RBAC Guard: Only Super Admin can modify business persona
+    if persona_attempted and not is_super_admin(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Super Administrators are authorized to configure business persona."
+        )
 
     primary_db = get_database()
     t_oid = ObjectId(tenant_id) if ObjectId.is_valid(tenant_id) else None
@@ -496,12 +527,24 @@ async def update_tenant_profile(
             "mongodbUri": req.database_config.mongodb_uri,
             "databaseName": req.database_config.database_name
         }
-    if req.business_persona is not None:
-        update_data["settings.businessPersona"] = req.business_persona.strip().upper()
+
+    # Super Admin only: Business Persona Assignment & Validation
+    if persona_attempted and is_super_admin(user):
+        clean_persona = str(persona_val).strip().upper() if persona_val is not None else "RETAIL"
+        if clean_persona not in VALID_PERSONAS:
+            valid_list = ", ".join(sorted(VALID_PERSONAS))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid business persona '{persona_val}'. Valid personas are: {valid_list}."
+            )
+        update_data["settings.businessPersona"] = clean_persona
+
     if req.cafe_config is not None:
         update_data["settings.cafeConfig"] = req.cafe_config
-    if req.settings is not None:
+    if req.settings is not None and isinstance(req.settings, dict):
         for k, v in req.settings.items():
+            if k in ("businessPersona", "business_persona"):
+                continue  # already handled above
             update_data[f"settings.{k}"] = v
 
     if update_data:
@@ -707,6 +750,14 @@ async def create_tenant(req: TenantCreateRequest, user: TokenPayload = Depends(g
                 detail="A valid MongoDB connection URI (starting with mongodb:// or mongodb+srv://) is required for Dedicated MongoDB Cluster mode."
             )
 
+    clean_persona = (req.business_persona or "RETAIL").strip().upper()
+    if clean_persona not in VALID_PERSONAS:
+        valid_list = ", ".join(sorted(VALID_PERSONAS))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid business persona '{req.business_persona}'. Valid personas are: {valid_list}."
+        )
+
     new_tenant_doc = {
         "name": req.name.strip(),
         "slug": req.slug.strip().lower(),
@@ -723,6 +774,9 @@ async def create_tenant(req: TenantCreateRequest, user: TokenPayload = Depends(g
             "databaseName": target_db_name if db_mode != "SHARED" else settings.DEFAULT_TENANT_DATABASE_NAME
         },
         "subscription": sub_doc,
+        "settings": {
+            "businessPersona": clean_persona
+        },
         "stats": {
             "productsCount": 0,
             "invoicesCount": 0,
@@ -797,5 +851,8 @@ async def create_tenant(req: TenantCreateRequest, user: TokenPayload = Depends(g
             "monthlyGmv": 0.0,
             "usersCount": 1,
             "locationsCount": 1
+        },
+        settings={
+            "businessPersona": clean_persona
         }
     )

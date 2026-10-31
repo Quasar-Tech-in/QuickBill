@@ -205,6 +205,8 @@ export const CafeDashboardView: React.FC<CafeDashboardViewProps> = ({
         customerName: customerName.trim() || undefined,
         customerPhone: customerPhone.trim() || undefined,
         discountAmount: discountVal,
+        discountType: discountVal > 0 ? 'FIXED' : undefined,
+        discountValue: discountVal > 0 ? discountVal : undefined,
       });
 
       setIsSettleModalOpen(false);

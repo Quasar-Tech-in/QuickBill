@@ -47,7 +47,7 @@ export const DigitalMenuPage: React.FC = () => {
       setError(null);
       try {
         const res = await axios.get(`${API_BASE_URL}/public/cafe/${businessId}/menu`, {
-          params: { token: token || undefined }
+          params: { tableId: tableId, token: token || undefined }
         });
         setMenuData(res.data);
       } catch (err: any) {
@@ -227,8 +227,8 @@ export const DigitalMenuPage: React.FC = () => {
     );
   }
 
-  const tenantName = menuData?.tenantName || 'Café & Bistro';
-  const tableName = menuData?.tableName || `Table #${menuData?.tableNumber || tableId}`;
+  const tenantName = menuData?.storeName || menuData?.tenantName || 'Café & Bistro';
+  const tableName = menuData?.table?.label || (menuData?.table?.tableNumber ? `Table ${menuData.table.tableNumber}` : (menuData?.tableName || `Table #${menuData?.tableNumber || tableId}`));
 
   return (
     <div style={{

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement, ItemImportResponse, CafeTable, TableStatus, KOT, TableSession, BusinessPersona } from '../types';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement, ItemImportResponse, CafeTable, TableStatus, KOT, TableSession, BusinessPersona, TenantSettings } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -1120,51 +1120,64 @@ class StoreService {
     try {
       const res = await apiClient.get('/tenants');
       if (Array.isArray(res.data)) {
-        this.tenants = res.data.map((t: any) => ({
-          id: t.id || t._id,
-          name: t.name,
-          slug: t.slug,
-          plan: t.plan || t.subscription?.planId || 'PROFESSIONAL',
-          status: t.status || 'ACTIVE',
-          adminEmail: t.admin_email || t.adminEmail || '',
-          phone: t.phone,
-          gstin: t.gstin,
-          address: t.address,
-          logoUrl: t.logo_url || t.logoUrl,
-          tagline: t.tagline,
-          receiptFooterNote: t.receipt_footer || t.receiptFooterNote || t.receiptFooter,
-          createdAt: t.created_at || t.createdAt || new Date().toISOString(),
-          databaseConfig: {
-            isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
-            mongodbUri: t.database_config?.mongodb_uri || t.databaseConfig?.mongodbUri,
-            databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_main_db',
-          },
-          subscription: {
-            planId: t.subscription?.plan_id || t.subscription?.planId || 'PROFESSIONAL',
-            planName: t.subscription?.plan_name || t.subscription?.planName || 'Professional Tier',
-            status: t.subscription?.status || 'ACTIVE',
-            maxUsers: t.subscription?.max_users || t.subscription?.maxUsers || 5,
-            maxLocations: t.subscription?.max_locations || t.subscription?.maxLocations || 3,
-            billingCycle: t.subscription?.billing_cycle || t.subscription?.billingCycle || 'ANNUAL',
-            startDate: t.subscription?.start_date || t.subscription?.startDate || t.created_at,
-            endDate: t.subscription?.end_date || t.subscription?.endDate || new Date(Date.now() + 365*24*3600*1000).toISOString(),
-            daysRemaining: t.subscription?.days_remaining ?? 365,
-            gracePeriodDays: t.subscription?.grace_period_days || 7,
-            pricePerCycle: t.subscription?.price_per_cycle || 1999,
-            currency: '₹',
-            autoRenew: t.subscription?.auto_renew || false,
-            features: t.subscription?.features || ['pos', 'inventory', 'ledger'],
-            renewalHistory: t.subscription?.renewal_history || [],
-            notes: t.subscription?.notes,
-          },
-          stats: t.stats || {
-            productsCount: 0,
-            invoicesCount: 0,
-            monthlyGmv: 0,
-            usersCount: 0,
-            locationsCount: 0,
+        this.tenants = res.data.map((t: any) => {
+          const tenantSettings = t.settings || {
+            businessPersona: t.business_persona || t.businessPersona || 'RETAIL',
+            cafeConfig: t.cafe_config || t.cafeConfig,
+          };
+          if (!tenantSettings.businessPersona) {
+            tenantSettings.businessPersona = t.business_persona || t.businessPersona || 'RETAIL';
           }
-        }));
+          if (!tenantSettings.cafeConfig && (t.cafe_config || t.cafeConfig)) {
+            tenantSettings.cafeConfig = t.cafe_config || t.cafeConfig;
+          }
+          return {
+            id: t.id || t._id,
+            name: t.name,
+            slug: t.slug,
+            plan: t.plan || t.subscription?.planId || 'PROFESSIONAL',
+            status: t.status || 'ACTIVE',
+            adminEmail: t.admin_email || t.adminEmail || '',
+            phone: t.phone,
+            gstin: t.gstin,
+            address: t.address,
+            logoUrl: t.logo_url || t.logoUrl,
+            tagline: t.tagline,
+            receiptFooterNote: t.receipt_footer || t.receiptFooterNote || t.receiptFooter,
+            createdAt: t.created_at || t.createdAt || new Date().toISOString(),
+            databaseConfig: {
+              isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
+              mongodbUri: t.database_config?.mongodb_uri || t.databaseConfig?.mongodbUri,
+              databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_main_db',
+            },
+            subscription: {
+              planId: t.subscription?.plan_id || t.subscription?.planId || 'PROFESSIONAL',
+              planName: t.subscription?.plan_name || t.subscription?.planName || 'Professional Tier',
+              status: t.subscription?.status || 'ACTIVE',
+              maxUsers: t.subscription?.max_users || t.subscription?.maxUsers || 5,
+              maxLocations: t.subscription?.max_locations || t.subscription?.maxLocations || 3,
+              billingCycle: t.subscription?.billing_cycle || t.subscription?.billingCycle || 'ANNUAL',
+              startDate: t.subscription?.start_date || t.subscription?.startDate || t.created_at,
+              endDate: t.subscription?.end_date || t.subscription?.endDate || new Date(Date.now() + 365*24*3600*1000).toISOString(),
+              daysRemaining: t.subscription?.days_remaining ?? 365,
+              gracePeriodDays: t.subscription?.grace_period_days || 7,
+              pricePerCycle: t.subscription?.price_per_cycle || 1999,
+              currency: '₹',
+              autoRenew: t.subscription?.auto_renew || false,
+              features: t.subscription?.features || ['pos', 'inventory', 'ledger'],
+              renewalHistory: t.subscription?.renewal_history || [],
+              notes: t.subscription?.notes,
+            },
+            stats: t.stats || {
+              productsCount: 0,
+              invoicesCount: 0,
+              monthlyGmv: 0,
+              usersCount: 0,
+              locationsCount: 0,
+            },
+            settings: tenantSettings,
+          };
+        });
 
         if (this.tenants.length === 0) {
           this.currentTenant = null;
@@ -1186,6 +1199,16 @@ class StoreService {
       const res = await apiClient.get('/tenants/current');
       if (res.data && (res.data.id || res.data._id)) {
         const t = res.data;
+        const tenantSettings = t.settings || {
+          businessPersona: t.business_persona || t.businessPersona || 'RETAIL',
+          cafeConfig: t.cafe_config || t.cafeConfig,
+        };
+        if (!tenantSettings.businessPersona) {
+          tenantSettings.businessPersona = t.business_persona || t.businessPersona || 'RETAIL';
+        }
+        if (!tenantSettings.cafeConfig && (t.cafe_config || t.cafeConfig)) {
+          tenantSettings.cafeConfig = t.cafe_config || t.cafeConfig;
+        }
         const normalizedTenant: Tenant = {
           id: t.id || t._id,
           name: t.name,
@@ -1229,7 +1252,8 @@ class StoreService {
             monthlyGmv: 0,
             usersCount: 0,
             locationsCount: 0,
-          }
+          },
+          settings: tenantSettings,
         };
 
         this.currentTenant = normalizedTenant;
@@ -1338,7 +1362,10 @@ class StoreService {
       status: updates.status || current.status,
       plan: updates.plan || current.plan,
       databaseConfig: updates.databaseConfig || current.databaseConfig,
-      settings: updates.settings !== undefined ? updates.settings : current.settings,
+      settings: updates.settings !== undefined ? {
+        ...(current.settings || {}),
+        ...updates.settings,
+      } : current.settings,
     };
 
     // Update in local array
@@ -1358,7 +1385,7 @@ class StoreService {
     // Sync to backend if online
     if (targetId) {
       try {
-        await apiClient.put(`/tenants/${targetId}`, {
+        const payload: any = {
           name: updates.name,
           gstin: updates.gstin,
           phone: updates.phone,
@@ -1367,9 +1394,6 @@ class StoreService {
           logo_url: updates.logoUrl,
           tagline: updates.tagline,
           receipt_footer: updates.receiptFooterNote,
-          settings: updates.settings,
-          business_persona: updates.settings?.businessPersona,
-          cafe_config: updates.settings?.cafeConfig,
           status: updates.status,
           plan: updates.plan,
           database_config: updates.databaseConfig ? {
@@ -1377,7 +1401,17 @@ class StoreService {
             mongodb_uri: updates.databaseConfig.mongodbUri,
             database_name: updates.databaseConfig.databaseName
           } : undefined
-        });
+        };
+        if (updates.settings !== undefined) {
+          payload.settings = updates.settings;
+          if (updates.settings.businessPersona !== undefined) {
+            payload.business_persona = updates.settings.businessPersona;
+          }
+          if (updates.settings.cafeConfig !== undefined) {
+            payload.cafe_config = updates.settings.cafeConfig;
+          }
+        }
+        await apiClient.put(`/tenants/${targetId}`, payload);
       } catch (e) {
         console.warn('Backend tenant profile update error:', e);
       }
@@ -1656,6 +1690,7 @@ class StoreService {
     maxLocations?: number;
     durationDays?: number;
     billingCycle?: any;
+    settings?: TenantSettings;
   }): Tenant {
     const now = new Date();
     const durationDays = tenantData.durationDays || 365;
@@ -1664,12 +1699,16 @@ class StoreService {
     const planTier = tenantData.plan || 'PROFESSIONAL';
     const defaultMaxUsers = planTier === 'STARTER' ? 2 : (planTier === 'ENTERPRISE' ? 25 : 5);
     const defaultMaxLocations = planTier === 'STARTER' ? 1 : (planTier === 'ENTERPRISE' ? 10 : 3);
+    const persona: BusinessPersona = tenantData.settings?.businessPersona || 'RETAIL';
 
     const newTenant: Tenant = {
       ...tenantData,
       id: `tenant_${Date.now()}`,
       status: 'ACTIVE',
       createdAt: now.toISOString(),
+      settings: tenantData.settings || {
+        businessPersona: persona,
+      },
       subscription: {
         planId: planTier,
         planName: `${planTier} Tier`,
@@ -1720,7 +1759,9 @@ class StoreService {
         isolation_mode: tenantData.databaseConfig.isolationMode,
         mongodb_uri: tenantData.databaseConfig.mongodbUri,
         database_name: tenantData.databaseConfig.databaseName,
-      }
+      },
+      settings: tenantData.settings,
+      business_persona: persona,
     }).catch(err => console.warn('Backend tenant create failed:', err));
 
     return newTenant;

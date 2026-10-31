@@ -1,7 +1,13 @@
+from enum import Enum
 from typing import List, Optional, Any, Dict
 from datetime import datetime
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, model_validator
 from app.schemas.common import BaseSchema
+
+class BusinessPersona(str, Enum):
+    RETAIL = "RETAIL"
+    CAFE = "CAFE"
+    HYBRID = "HYBRID"
 
 class CafeConfig(BaseSchema):
     enable_qr_ordering: bool = Field(default=True, alias="enableQrOrdering")
@@ -13,7 +19,7 @@ class CafeConfig(BaseSchema):
     sections: List[str] = Field(default=["Main Hall", "Indoor AC", "Outdoor Patio", "Terrace"])
 
 class TenantSettings(BaseSchema):
-    business_persona: str = Field(default="RETAIL", alias="businessPersona") # RETAIL | CAFE | HYBRID
+    business_persona: BusinessPersona = Field(default=BusinessPersona.RETAIL, alias="businessPersona")
     cafe_config: Optional[CafeConfig] = Field(default=None, alias="cafeConfig")
     currency: str = "INR"
     currency_symbol: str = Field(default="₹", alias="currencySymbol")
@@ -49,6 +55,7 @@ class TableResponse(BaseSchema):
     current_status: str = Field(default="AVAILABLE", alias="currentStatus")
     active_session_id: Optional[str] = Field(None, alias="activeSessionId")
     qr_code_url: Optional[str] = Field(None, alias="qrCodeUrl")
+    qr_code_token: Optional[str] = Field(None, alias="qrCodeToken")
     is_active: bool = Field(default=True, alias="isActive")
     created_at: Optional[Any] = Field(None, alias="createdAt")
     updated_at: Optional[Any] = Field(None, alias="updatedAt")
@@ -70,6 +77,16 @@ class PublicOrderSubmitRequest(BaseSchema):
     customer_phone: Optional[str] = Field(None, alias="customerPhone")
     items: List[PublicOrderItem] = Field(..., min_length=1)
     notes: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_qr_token(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            token_val = data.get("qrToken") or data.get("qr_token") or data.get("token")
+            if token_val is not None:
+                data["qrToken"] = token_val
+                data["qr_token"] = token_val
+        return data
 
 class KOTItem(BaseSchema):
     item_id: str = Field(..., alias="itemId")
@@ -126,6 +143,7 @@ class TableSettleRequest(BaseSchema):
     paid_amount: Optional[float] = Field(None, alias="paidAmount")
     discount_type: Optional[str] = Field(None, alias="discountType")
     discount_value: Optional[float] = Field(None, alias="discountValue")
+    discount_amount: Optional[float] = Field(None, alias="discountAmount")
     customer_name: Optional[str] = Field(None, alias="customerName")
     customer_phone: Optional[str] = Field(None, alias="customerPhone")
     notes: Optional[str] = None

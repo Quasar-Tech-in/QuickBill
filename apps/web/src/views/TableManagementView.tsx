@@ -158,7 +158,10 @@ export const TableManagementView: React.FC = () => {
     setPreviewTable(table);
     const tenantSlug = activeTenant?.id || 'demo';
     const baseUrl = window.location.origin;
-    const url = `${baseUrl}/order/${tenantSlug}/${table.id}?token=${encodeURIComponent(table.qrCodeToken || '')}`;
+    const token = table.qrCodeToken || (table.qrCodeUrl ? new URL(table.qrCodeUrl, window.location.origin).searchParams.get('token') : '');
+    const url = table.qrCodeUrl 
+      ? (table.qrCodeUrl.startsWith('http') ? table.qrCodeUrl : `${baseUrl}${table.qrCodeUrl}`)
+      : `${baseUrl}/order/${tenantSlug}/${table.id}?token=${encodeURIComponent(token || '')}`;
     
     try {
       const dataUrl = await QRCode.toDataURL(url, {

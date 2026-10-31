@@ -167,7 +167,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
 
     // Enforce store suspension / expiration lockout guard for tenant users
     if (!isSuperAdmin && store.isStoreLocked()) {
-      const lockedPaths = ['/pos', '/inventory', '/purchase-orders', '/parties', '/ledger'];
+      const lockedPaths = ['/pos', '/inventory', '/purchase-orders', '/parties', '/ledger', '/cafe'];
       if (lockedPaths.some(p => path === p || path.startsWith(p + '/'))) {
         navigate('/dashboard', { replace: true });
         return;
@@ -175,7 +175,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     }
 
     if (role === 'CASHIER') {
-      const allowedCashierPaths = ['/pos', '/invoices', '/transactions', '/parties', '/ledger'];
+      const allowedCashierPaths = ['/pos', '/invoices', '/transactions', '/parties', '/ledger', '/cafe'];
       const isAllowed = allowedCashierPaths.some(p => path === p || path.startsWith(p + '/'));
       if (!isAllowed) {
         navigate('/pos', { replace: true });
@@ -488,6 +488,20 @@ const DashboardRoute: React.FC<{ role: string; setViewingInvoice: (inv: Invoice 
   );
 };
 
+const CafeDashboardRoute: React.FC<{ setViewingInvoice: (inv: Invoice) => void }> = ({ setViewingInvoice }) => {
+  const navigate = useNavigate();
+  return (
+    <CafeDashboardView 
+      onNavigate={(tab) => {
+        if (tab === 'cafe-incoming') navigate('/cafe/orders/incoming');
+        else if (tab === 'cafe-kitchen') navigate('/cafe/kitchen');
+        else if (tab === 'cafe-tables') navigate('/cafe/tables');
+      }}
+      onViewInvoice={(inv) => setViewingInvoice(inv)} 
+    />
+  );
+};
+
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(store.getCurrentUser());
   const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
@@ -581,16 +595,7 @@ export const App: React.FC = () => {
             {/* Dedicated Café Persona Routes */}
             <Route 
               path="/cafe/dashboard" 
-              element={
-                <CafeDashboardView 
-                  onNavigate={(tab) => {
-                    if (tab === 'cafe-incoming') window.location.assign('/cafe/orders/incoming');
-                    else if (tab === 'cafe-kitchen') window.location.assign('/cafe/kitchen');
-                    else if (tab === 'cafe-tables') window.location.assign('/cafe/tables');
-                  }}
-                  onViewInvoice={(inv) => setViewingInvoice(inv)} 
-                />
-              } 
+              element={<CafeDashboardRoute setViewingInvoice={setViewingInvoice} />} 
             />
             <Route path="/cafe" element={<Navigate to="/cafe/dashboard" replace />} />
             <Route path="/cafe/tables" element={<TableManagementView />} />

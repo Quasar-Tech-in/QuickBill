@@ -42,7 +42,7 @@ import {
 } from 'lucide-react';
 import { MetricCard } from '../components/MetricCard';
 import { store } from '../services/store';
-import { Tenant, TenantDatabaseConfig, PlanTier, BillingCycle, SubscriptionStatus } from '../types';
+import { Tenant, TenantDatabaseConfig, PlanTier, BillingCycle, SubscriptionStatus, BusinessPersona, CafeConfig } from '../types';
 
 interface SuperAdminViewProps {
   onTenantSwitched: (tenant: Tenant) => void;
@@ -97,6 +97,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     gstin: '',
     address: '',
     plan: 'PROFESSIONAL' as PlanTier,
+    businessPersona: 'RETAIL' as BusinessPersona,
     maxUsers: 5 as number | string,
     maxLocations: 3 as number | string,
     durationDays: 365 as number | string,
@@ -129,6 +130,12 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
     address: '',
     status: 'ACTIVE' as 'ACTIVE' | 'SUSPENDED',
     plan: 'PROFESSIONAL' as PlanTier,
+    businessPersona: 'RETAIL' as BusinessPersona,
+    cafeConfig: {
+      enableKOT: true,
+      enableQROrdering: true,
+      taxRate: 5.0,
+    } as CafeConfig,
     isolationMode: 'SHARED' as 'SHARED' | 'DEDICATED_DATABASE' | 'CUSTOM_CLUSTER',
     mongodbUri: '',
     databaseName: 'quickbill_main_db',
@@ -285,6 +292,14 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
         mongodbUri: newTenant.isolationMode === 'CUSTOM_CLUSTER' ? newTenant.mongodbUri.trim() : undefined,
         databaseName: dbName,
       },
+      settings: {
+        businessPersona: newTenant.businessPersona,
+        cafeConfig: {
+          enableKOT: true,
+          enableQROrdering: true,
+          taxRate: 5.0,
+        }
+      },
       initialPassword: newTenant.initialPassword || 'StoreAdmin@2026',
     });
 
@@ -302,6 +317,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       gstin: '',
       address: '',
       plan: 'PROFESSIONAL',
+      businessPersona: 'RETAIL',
       maxUsers: 5,
       maxLocations: 3,
       durationDays: 365,
@@ -395,6 +411,13 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
 
   // Open Edit Tenant Modal
   const openEditTenantModal = (t: Tenant) => {
+    const persona: BusinessPersona = t.settings?.businessPersona || 'RETAIL';
+    const cafeCfg: CafeConfig = {
+      enableKOT: t.settings?.cafeConfig?.enableKOT ?? true,
+      enableQROrdering: t.settings?.cafeConfig?.enableQROrdering ?? true,
+      taxRate: t.settings?.cafeConfig?.taxRate ?? 5.0,
+      ...t.settings?.cafeConfig,
+    };
     setSelectedTenant(t);
     setEditTenantForm({
       name: t.name,
@@ -407,6 +430,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       isolationMode: t.databaseConfig?.isolationMode || 'SHARED',
       mongodbUri: t.databaseConfig?.mongodbUri || '',
       databaseName: t.databaseConfig?.databaseName || 'quickbill_main_db',
+      businessPersona: persona,
+      cafeConfig: cafeCfg,
     });
     setInitialEditTenantSnapshot(JSON.stringify({
       name: t.name.trim(),
@@ -419,6 +444,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       isolationMode: t.databaseConfig?.isolationMode || 'SHARED',
       mongodbUri: (t.databaseConfig?.mongodbUri || '').trim(),
       databaseName: (t.databaseConfig?.databaseName || 'quickbill_main_db').trim(),
+      businessPersona: persona,
+      cafeConfig: cafeCfg,
     }));
     setEditDbTestResult(null);
     setIsEditTenantModalOpen(true);
@@ -437,6 +464,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
       isolationMode: editTenantForm.isolationMode,
       mongodbUri: editTenantForm.mongodbUri.trim(),
       databaseName: editTenantForm.databaseName.trim(),
+      businessPersona: editTenantForm.businessPersona,
+      cafeConfig: editTenantForm.cafeConfig,
     });
     return current !== initialEditTenantSnapshot;
   }, [initialEditTenantSnapshot, editTenantForm]);
@@ -478,6 +507,11 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
         isolationMode: editTenantForm.isolationMode,
         mongodbUri: editTenantForm.isolationMode === 'CUSTOM_CLUSTER' ? editTenantForm.mongodbUri.trim() : undefined,
         databaseName: editTenantForm.isolationMode === 'SHARED' ? 'quickbill_main_db' : (editTenantForm.databaseName.trim() || 'quickbill_main_db'),
+      },
+      settings: {
+        ...selectedTenant.settings,
+        businessPersona: editTenantForm.businessPersona,
+        cafeConfig: editTenantForm.cafeConfig,
       }
     });
 
@@ -601,6 +635,71 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
         }}
       >
         {isEnt ? '⚡ ENTERPRISE' : (isPro ? '⭐ PROFESSIONAL' : (isCustom ? '🛠️ CUSTOM' : '🌱 STARTER'))}
+      </span>
+    );
+  };
+
+  const getPersonaBadge = (persona?: BusinessPersona) => {
+    const p = persona || 'RETAIL';
+    if (p === 'CAFE') {
+      return (
+        <span 
+          style={{ 
+            fontSize: '0.72rem', 
+            fontWeight: 700, 
+            padding: '3px 8px', 
+            borderRadius: 6, 
+            backgroundColor: '#fef3c7',
+            color: '#92400e',
+            border: '1px solid #fde68a',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4
+          }}
+        >
+          <span>☕</span>
+          <span>Café & Bistro</span>
+        </span>
+      );
+    }
+    if (p === 'HYBRID') {
+      return (
+        <span 
+          style={{ 
+            fontSize: '0.72rem', 
+            fontWeight: 700, 
+            padding: '3px 8px', 
+            borderRadius: 6, 
+            backgroundColor: '#f3e8ff',
+            color: '#6b21a8',
+            border: '1px solid #e9d5ff',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4
+          }}
+        >
+          <span>🍽️</span>
+          <span>Hybrid (POS + Café)</span>
+        </span>
+      );
+    }
+    return (
+      <span 
+        style={{ 
+          fontSize: '0.72rem', 
+          fontWeight: 700, 
+          padding: '3px 8px', 
+          borderRadius: 6, 
+          backgroundColor: '#e0f2fe',
+          color: '#0369a1',
+          border: '1px solid #bae6fd',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4
+        }}
+      >
+        <span>🛒</span>
+        <span>Retail / Supermarket</span>
       </span>
     );
   };
@@ -815,6 +914,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               <thead>
                 <tr>
                   <th>Store / Business</th>
+                  <th>Operating Persona</th>
                   <th>Plan & License</th>
                   <th>Users Quota</th>
                   <th>Branches Quota</th>
@@ -827,7 +927,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
               <tbody>
                 {filteredTenants.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '36px 0', color: 'var(--neutral-400)' }}>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '36px 0', color: 'var(--neutral-400)' }}>
                       No business tenants found in database. Click "Provision New Store" to onboard your first store.
                     </td>
                   </tr>
@@ -859,6 +959,10 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                               </span>
                             </div>
                           </div>
+                        </td>
+
+                        <td>
+                          {getPersonaBadge(t.settings?.businessPersona)}
                         </td>
 
                         <td>
@@ -1606,6 +1710,98 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                       />
                     </div>
                   </div>
+
+                  <div className="form-group" style={{ marginTop: 12 }}>
+                    <label className="form-label">Operating Business Persona *</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                      <div
+                        onClick={() => setNewTenant({ ...newTenant, businessPersona: 'RETAIL' })}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          border: `2px solid ${newTenant.businessPersona === 'RETAIL' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                          backgroundColor: newTenant.businessPersona === 'RETAIL' ? 'var(--primary-50)' : '#ffffff',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                          boxShadow: newTenant.businessPersona === 'RETAIL' ? '0 2px 6px rgba(37, 99, 235, 0.12)' : 'none'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-900)' }}>
+                          <input
+                            type="radio"
+                            name="newBusinessPersona"
+                            checked={newTenant.businessPersona === 'RETAIL'}
+                            onChange={() => setNewTenant({ ...newTenant, businessPersona: 'RETAIL' })}
+                            style={{ margin: 0 }}
+                          />
+                          <span>🛒 Retail</span>
+                        </div>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', lineHeight: 1.3 }}>
+                          Barcode POS, MRP & standard inventory
+                        </span>
+                      </div>
+
+                      <div
+                        onClick={() => setNewTenant({ ...newTenant, businessPersona: 'CAFE' })}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          border: `2px solid ${newTenant.businessPersona === 'CAFE' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                          backgroundColor: newTenant.businessPersona === 'CAFE' ? 'var(--primary-50)' : '#ffffff',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                          boxShadow: newTenant.businessPersona === 'CAFE' ? '0 2px 6px rgba(37, 99, 235, 0.12)' : 'none'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-900)' }}>
+                          <input
+                            type="radio"
+                            name="newBusinessPersona"
+                            checked={newTenant.businessPersona === 'CAFE'}
+                            onChange={() => setNewTenant({ ...newTenant, businessPersona: 'CAFE' })}
+                            style={{ margin: 0 }}
+                          />
+                          <span>☕ Café</span>
+                        </div>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', lineHeight: 1.3 }}>
+                          Tables, KOT tickets & QR self-ordering
+                        </span>
+                      </div>
+
+                      <div
+                        onClick={() => setNewTenant({ ...newTenant, businessPersona: 'HYBRID' })}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          border: `2px solid ${newTenant.businessPersona === 'HYBRID' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                          backgroundColor: newTenant.businessPersona === 'HYBRID' ? 'var(--primary-50)' : '#ffffff',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                          boxShadow: newTenant.businessPersona === 'HYBRID' ? '0 2px 6px rgba(37, 99, 235, 0.12)' : 'none'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-900)' }}>
+                          <input
+                            type="radio"
+                            name="newBusinessPersona"
+                            checked={newTenant.businessPersona === 'HYBRID'}
+                            onChange={() => setNewTenant({ ...newTenant, businessPersona: 'HYBRID' })}
+                            style={{ margin: 0 }}
+                          />
+                          <span>🍽️ Hybrid</span>
+                        </div>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', lineHeight: 1.3 }}>
+                          Dual counter POS & table dine-in
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* 2. Subscription Plan & Quotas */}
@@ -2077,6 +2273,169 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({ onTenantSwitched
                     value={editTenantForm.address}
                     onChange={(e) => setEditTenantForm({ ...editTenantForm, address: e.target.value })}
                   />
+                </div>
+
+                {/* Operating Business Persona (Super Admin Exclusive) */}
+                <div style={{ borderTop: '1px solid var(--neutral-100)', paddingTop: 14 }}>
+                  <label className="form-label" style={{ fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <ShieldCheck size={16} color="var(--primary-600)" />
+                    <span>Operating Business Persona *</span>
+                  </label>
+                  <p style={{ fontSize: '0.74rem', color: 'var(--neutral-500)', marginTop: 0, marginBottom: 10 }}>
+                    Super Admin exclusive: configure business persona and operational capabilities.
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                    {/* Retail Option */}
+                    <div
+                      onClick={() => setEditTenantForm({ ...editTenantForm, businessPersona: 'RETAIL' })}
+                      style={{
+                        padding: '10px 10px',
+                        borderRadius: 8,
+                        border: `2px solid ${editTenantForm.businessPersona === 'RETAIL' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                        backgroundColor: editTenantForm.businessPersona === 'RETAIL' ? 'var(--primary-50)' : '#ffffff',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                        boxShadow: editTenantForm.businessPersona === 'RETAIL' ? '0 2px 6px rgba(37, 99, 235, 0.12)' : 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-900)' }}>
+                        <input
+                          type="radio"
+                          name="editBusinessPersona"
+                          checked={editTenantForm.businessPersona === 'RETAIL'}
+                          onChange={() => setEditTenantForm({ ...editTenantForm, businessPersona: 'RETAIL' })}
+                          style={{ margin: 0 }}
+                        />
+                        <span>🛒 Retail</span>
+                      </div>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', lineHeight: 1.3 }}>
+                        Barcode POS, MRP & standard inventory
+                      </span>
+                    </div>
+
+                    {/* Cafe Option */}
+                    <div
+                      onClick={() => setEditTenantForm({ ...editTenantForm, businessPersona: 'CAFE' })}
+                      style={{
+                        padding: '10px 10px',
+                        borderRadius: 8,
+                        border: `2px solid ${editTenantForm.businessPersona === 'CAFE' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                        backgroundColor: editTenantForm.businessPersona === 'CAFE' ? 'var(--primary-50)' : '#ffffff',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                        boxShadow: editTenantForm.businessPersona === 'CAFE' ? '0 2px 6px rgba(37, 99, 235, 0.12)' : 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-900)' }}>
+                        <input
+                          type="radio"
+                          name="editBusinessPersona"
+                          checked={editTenantForm.businessPersona === 'CAFE'}
+                          onChange={() => setEditTenantForm({ ...editTenantForm, businessPersona: 'CAFE' })}
+                          style={{ margin: 0 }}
+                        />
+                        <span>☕ Café</span>
+                      </div>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', lineHeight: 1.3 }}>
+                        Tables, KOT tickets & QR self-ordering
+                      </span>
+                    </div>
+
+                    {/* Hybrid Option */}
+                    <div
+                      onClick={() => setEditTenantForm({ ...editTenantForm, businessPersona: 'HYBRID' })}
+                      style={{
+                        padding: '10px 10px',
+                        borderRadius: 8,
+                        border: `2px solid ${editTenantForm.businessPersona === 'HYBRID' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                        backgroundColor: editTenantForm.businessPersona === 'HYBRID' ? 'var(--primary-50)' : '#ffffff',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                        boxShadow: editTenantForm.businessPersona === 'HYBRID' ? '0 2px 6px rgba(37, 99, 235, 0.12)' : 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.82rem', color: 'var(--neutral-900)' }}>
+                        <input
+                          type="radio"
+                          name="editBusinessPersona"
+                          checked={editTenantForm.businessPersona === 'HYBRID'}
+                          onChange={() => setEditTenantForm({ ...editTenantForm, businessPersona: 'HYBRID' })}
+                          style={{ margin: 0 }}
+                        />
+                        <span>🍽️ Hybrid</span>
+                      </div>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', lineHeight: 1.3 }}>
+                        Dual counter POS & table dine-in
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Cafe Operational Settings when CAFE or HYBRID */}
+                  {(editTenantForm.businessPersona === 'CAFE' || editTenantForm.businessPersona === 'HYBRID') && (
+                    <div style={{
+                      marginTop: 10,
+                      padding: '12px 14px',
+                      backgroundColor: 'var(--neutral-50)',
+                      borderRadius: 8,
+                      border: '1px dashed var(--neutral-300)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10
+                    }}>
+                      <span style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--neutral-800)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Café Operational Preferences
+                      </span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: '0.78rem', color: 'var(--neutral-700)' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!editTenantForm.cafeConfig?.enableKOT}
+                            onChange={(e) => setEditTenantForm({
+                              ...editTenantForm,
+                              cafeConfig: { ...editTenantForm.cafeConfig, enableKOT: e.target.checked }
+                            })}
+                          />
+                          <span style={{ fontWeight: 600 }}>Enable KOT Printing</span>
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!editTenantForm.cafeConfig?.enableQROrdering}
+                            onChange={(e) => setEditTenantForm({
+                              ...editTenantForm,
+                              cafeConfig: { ...editTenantForm.cafeConfig, enableQROrdering: e.target.checked }
+                            })}
+                          />
+                          <span style={{ fontWeight: 600 }}>Enable QR Ordering</span>
+                        </label>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontWeight: 600 }}>Dine-In GST (%):</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={28}
+                            step={0.5}
+                            className="form-input form-input-sm"
+                            style={{ width: 65, padding: '2px 6px', fontSize: '0.75rem' }}
+                            value={editTenantForm.cafeConfig?.taxRate ?? 5.0}
+                            onChange={(e) => setEditTenantForm({
+                              ...editTenantForm,
+                              cafeConfig: { ...editTenantForm.cafeConfig, taxRate: Number(e.target.value) }
+                            })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Database Architecture Configuration */}

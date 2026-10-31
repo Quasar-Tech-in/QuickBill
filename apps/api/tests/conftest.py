@@ -1,10 +1,43 @@
+import sys
+import os
+import signal
+import asyncio
 import pytest
 import copy
 import re
 from typing import Dict, Any, List, Optional
 from bson import ObjectId
+
+# On Windows in sandboxed test environments, loopback socket creation (127.0.0.1)
+# is restricted with WinError 10013, causing asyncio ProactorEventLoop._make_self_pipe()
+# to hang indefinitely on accept(). Patch proactor self-pipe for single-threaded async tests.
+if sys.platform == "win32":
+    import asyncio.proactor_events
+
+    class _SandboxDummySock:
+        def fileno(self):
+            return 999
+
+        def setblocking(self, b):
+            pass
+
+        def close(self):
+            pass
+
+    def _dummy_make_self_pipe(self):
+        self._ssock = _SandboxDummySock()
+        self._csock = _SandboxDummySock()
+        self._internal_fds += 1
+
+    signal.set_wakeup_fd = lambda fd, *args, **kwargs: -1
+    asyncio.proactor_events.BaseProactorEventLoop._make_self_pipe = _dummy_make_self_pipe
+    asyncio.proactor_events.BaseProactorEventLoop._loop_self_reading = lambda self, f=None: None
+    asyncio.proactor_events.BaseProactorEventLoop._write_to_self = lambda self: None
+    asyncio.proactor_events.BaseProactorEventLoop._close_self_pipe = lambda self: setattr(self, '_internal_fds', self._internal_fds - 1)
+
 from app.main import app
 from app.core.database import get_database
+
 
 class MockCursor:
     def __init__(self, docs: List[Dict[str, Any]]):

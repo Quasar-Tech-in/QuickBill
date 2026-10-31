@@ -50,11 +50,24 @@ def auth_headers_cashier_a():
     token = create_access_token(payload)
     return {"Authorization": f"Bearer {token}"}
 
+@pytest.fixture
+def auth_headers_superadmin():
+    payload = TokenPayload(
+        sub="usr_superadmin",
+        email="superadmin@quickbill.local",
+        name="Super Admin",
+        roles=["SUPER_ADMIN"],
+        permissions=["all"],
+        default_business_id=TENANT_A,
+        authorized_business_ids=[TENANT_A, TENANT_B]
+    )
+    token = create_access_token(payload)
+    return {"Authorization": f"Bearer {token}"}
+
 @pytest.mark.asyncio
-async def test_tenant_persona_configuration(auth_headers_tenant_a):
+async def test_tenant_persona_configuration(auth_headers_tenant_a, auth_headers_superadmin):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Update tenant settings to CAFE persona
         update_payload = {
             "businessPersona": "CAFE",
             "cafeConfig": {
@@ -64,7 +77,13 @@ async def test_tenant_persona_configuration(auth_headers_tenant_a):
                 "sections": ["Indoor AC", "Outdoor Patio"]
             }
         }
-        res = await client.put(f"/api/v1/tenants/{TENANT_A}", json=update_payload, headers=auth_headers_tenant_a)
+        # 1. Non-superadmin (TENANT_ADMIN) receives 403 Forbidden
+        res_forbidden = await client.put(f"/api/v1/tenants/{TENANT_A}", json=update_payload, headers=auth_headers_tenant_a)
+        assert res_forbidden.status_code == 403
+        assert "Only Super Administrators are authorized to configure business persona." in res_forbidden.json()["detail"]
+
+        # 2. Super Admin configures businessPersona = "CAFE"
+        res = await client.put(f"/api/v1/tenants/{TENANT_A}", json=update_payload, headers=auth_headers_superadmin)
         assert res.status_code == 200
         data = res.json()
         assert data["success"] is True
@@ -94,6 +113,8 @@ async def test_table_crud_and_tenant_isolation(auth_headers_tenant_a, auth_heade
         assert created_table["tableNumber"] == "T-01"
         assert created_table["currentStatus"] == "AVAILABLE"
         assert "qrCodeUrl" in created_table
+        assert "qrCodeToken" in created_table
+        assert created_table["qrCodeToken"] is not None
         table_id = created_table["_id"]
 
         # 2. Duplicate table creation in same branch should fail with 409 Conflict
@@ -104,7 +125,7 @@ async def test_table_crud_and_tenant_isolation(auth_headers_tenant_a, auth_heade
         res_list_a = await client.get("/api/v1/cafe/tables", headers=auth_headers_tenant_a)
         assert res_list_a.status_code == 200
         tables_a = res_list_a.json()
-        assert any(t["_id"] == table_id for t in tables_a)
+        assert any(t["_id"] == table_id and t.get("qrCodeToken") for t in tables_a)
 
         # 4. Tenant B cannot see Tenant A's table (strict multi-tenant isolation)
         res_list_b = await client.get("/api/v1/cafe/tables", headers=auth_headers_tenant_b)

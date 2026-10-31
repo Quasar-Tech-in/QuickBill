@@ -149,9 +149,7 @@ export const SettingsView: React.FC = () => {
   const [profileLogoUrl, setProfileLogoUrl] = useState(activeTenant?.logoUrl || '');
   const [profileTagline, setProfileTagline] = useState(activeTenant?.tagline || '');
   const [profileReceiptFooter, setProfileReceiptFooter] = useState(activeTenant?.receiptFooterNote || '');
-  const [businessPersona, setBusinessPersona] = useState<BusinessPersona>(
-    activeTenant?.settings?.businessPersona || 'RETAIL'
-  );
+  const tenantPersona: BusinessPersona = activeTenant?.settings?.businessPersona || 'RETAIL';
   const [cafeConfig, setCafeConfig] = useState<CafeConfig>(
     activeTenant?.settings?.cafeConfig || {
       enableKOT: true,
@@ -179,6 +177,7 @@ export const SettingsView: React.FC = () => {
     logoUrl: (activeTenant?.logoUrl || '').trim(),
     tagline: (activeTenant?.tagline || '').trim(),
     receiptFooterNote: (activeTenant?.receiptFooterNote || '').trim(),
+    cafeConfig: activeTenant?.settings?.cafeConfig,
   }));
   const [initialEditUserSnapshot, setInitialEditUserSnapshot] = useState<string>('');
   const [initialEditLocSnapshot, setInitialEditLocSnapshot] = useState<string>('');
@@ -245,6 +244,9 @@ export const SettingsView: React.FC = () => {
         setProfileLogoUrl(liveTenant.logoUrl || '');
         setProfileTagline(liveTenant.tagline || '');
         if (liveTenant.address) setProfileAddress(liveTenant.address);
+        if (liveTenant.settings?.cafeConfig) {
+          setCafeConfig(prev => ({ ...prev, ...liveTenant.settings?.cafeConfig }));
+        }
         setInitialProfileSnapshot(JSON.stringify({
           name: (liveTenant.name || '').trim(),
           gstin: (liveTenant.gstin || '').trim(),
@@ -254,6 +256,7 @@ export const SettingsView: React.FC = () => {
           logoUrl: (liveTenant.logoUrl || '').trim(),
           tagline: (liveTenant.tagline || '').trim(),
           receiptFooterNote: (liveTenant.receiptFooterNote || '').trim(),
+          cafeConfig: liveTenant.settings?.cafeConfig,
         }));
       }
     } catch (e) {
@@ -615,7 +618,6 @@ export const SettingsView: React.FC = () => {
         tagline: profileTagline.trim(),
         receiptFooterNote: profileReceiptFooter.trim(),
         settings: {
-          businessPersona,
           cafeConfig,
         },
       });
@@ -628,10 +630,7 @@ export const SettingsView: React.FC = () => {
         logoUrl: profileLogoUrl.trim(),
         tagline: profileTagline.trim(),
         receiptFooterNote: profileReceiptFooter.trim(),
-        settings: {
-          businessPersona,
-          cafeConfig,
-        },
+        cafeConfig,
       }));
       setProfileSavedMsg(true);
       setTimeout(() => setProfileSavedMsg(false), 3500);
@@ -653,9 +652,10 @@ export const SettingsView: React.FC = () => {
       logoUrl: profileLogoUrl.trim(),
       tagline: profileTagline.trim(),
       receiptFooterNote: profileReceiptFooter.trim(),
+      cafeConfig,
     });
     return current !== initialProfileSnapshot;
-  }, [initialProfileSnapshot, profileName, profileGstin, profilePhone, profileEmail, profileAddress, profileLogoUrl, profileTagline, profileReceiptFooter]);
+  }, [initialProfileSnapshot, profileName, profileGstin, profilePhone, profileEmail, profileAddress, profileLogoUrl, profileTagline, profileReceiptFooter, cafeConfig]);
 
   const isEditUserDirty = useMemo(() => {
     if (!initialEditUserSnapshot) return false;
@@ -1214,107 +1214,37 @@ export const SettingsView: React.FC = () => {
 
             <form onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* Business Persona & Operating Mode */}
-              <div style={{
-                padding: '16px 20px',
-                borderRadius: '12px',
-                border: '1.5px solid var(--primary-200, #bfdbfe)',
-                backgroundColor: 'var(--primary-50, #eff6ff)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Store size={20} color="var(--primary-600)" />
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
-                      Operating Persona & Business Mode
-                    </h4>
-                    <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--neutral-600)' }}>
-                      Tailors your QuickBill POS layout, floor management, self-ordering, and kitchen workflows.
-                    </p>
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-                  {/* Retail Mode Card */}
-                  <div
-                    onClick={() => setBusinessPersona('RETAIL')}
-                    style={{
-                      padding: '14px 16px',
-                      borderRadius: '10px',
-                      border: `2px solid ${businessPersona === 'RETAIL' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
-                      backgroundColor: '#ffffff',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 12,
-                      boxShadow: businessPersona === 'RETAIL' ? '0 2px 8px rgba(37, 99, 235, 0.15)' : 'none',
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="businessPersona"
-                      checked={businessPersona === 'RETAIL'}
-                      onChange={() => setBusinessPersona('RETAIL')}
-                      style={{ marginTop: 3 }}
-                    />
+              {/* Café Operations Preferences (Only visible if assigned CAFE or HYBRID by Super Admin) */}
+              {(tenantPersona === 'CAFE' || tenantPersona === 'HYBRID') && (
+                <div style={{
+                  padding: '16px 20px',
+                  borderRadius: '12px',
+                  border: '1.5px solid var(--primary-200, #bfdbfe)',
+                  backgroundColor: 'var(--primary-50, #eff6ff)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Coffee size={20} color="var(--primary-600)" />
                     <div>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
-                        Retail & Supermarket POS
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', marginTop: 2, lineHeight: 1.4 }}>
-                        Fast barcode scanning, multi-register counters, wholesale MRP billing, and inventory tracking.
-                      </div>
+                      <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                        Café Operations Preferences
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--neutral-600)' }}>
+                        Configure floor operations, kitchen ticket dispatch, and digital ordering for your store.
+                      </p>
                     </div>
                   </div>
 
-                  {/* Cafe Mode Card */}
-                  <div
-                    onClick={() => setBusinessPersona('CAFE')}
-                    style={{
-                      padding: '14px 16px',
-                      borderRadius: '10px',
-                      border: `2px solid ${businessPersona === 'CAFE' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
-                      backgroundColor: '#ffffff',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 12,
-                      boxShadow: businessPersona === 'CAFE' ? '0 2px 8px rgba(37, 99, 235, 0.15)' : 'none',
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="businessPersona"
-                      checked={businessPersona === 'CAFE'}
-                      onChange={() => setBusinessPersona('CAFE')}
-                      style={{ marginTop: 3 }}
-                    />
-                    <div>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--neutral-900)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span>Café & Dine-In Bistro</span>
-                        <span style={{ fontSize: '0.68rem', backgroundColor: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: '4px', fontWeight: 800 }}>
-                          NEW
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--neutral-500)', marginTop: 2, lineHeight: 1.4 }}>
-                        Table floor plan, diner QR code self-ordering, cashier review queues, and Kitchen Order Tickets (KOT).
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Cafe Specific Toggles */}
-                {businessPersona === 'CAFE' && (
                   <div style={{
-                    marginTop: 8,
-                    paddingTop: 12,
-                    borderTop: '1px dashed var(--neutral-300)',
                     display: 'flex',
                     flexWrap: 'wrap',
                     gap: 16,
                     fontSize: '0.8rem',
-                    color: 'var(--neutral-700)'
+                    color: 'var(--neutral-700)',
+                    paddingTop: 8,
+                    borderTop: '1px dashed var(--neutral-300)'
                   }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                       <input
@@ -1348,8 +1278,8 @@ export const SettingsView: React.FC = () => {
                       />
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Store Branding Section: Logo, Name & Tagline */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
