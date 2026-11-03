@@ -17,6 +17,7 @@ import { store } from '../services/store';
 import { TableSession, TableSessionOrder, CafeTable } from '../types';
 import { IncomingOrderCard } from '../components/cafe/IncomingOrderCard';
 import { KOTPrintModal } from '../components/cafe/KOTPrintModal';
+import { EditOrderModal } from '../components/cafe/EditOrderModal';
 
 export const IncomingOrdersView: React.FC = () => {
   const [sessions, setSessions] = useState<TableSession[]>(store.getActiveTableSessions());
@@ -28,6 +29,13 @@ export const IncomingOrdersView: React.FC = () => {
   // KOT Modal
   const [kotModalOpen, setKotModalOpen] = useState(false);
   const [kotData, setKotData] = useState<any>(null);
+
+  // Edit Order Modal
+  const [editingOrder, setEditingOrder] = useState<{
+    order: TableSessionOrder;
+    sessionId: string;
+    tableName: string;
+  } | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -82,10 +90,11 @@ export const IncomingOrdersView: React.FC = () => {
     }> = [];
 
     sessions.forEach(s => {
+      const sessId = String(s.id || (s as any)._id || '');
       const tName = tableNameMap.get(s.tableId) || `Table ${s.tableId}`;
       s.orders?.forEach(o => {
         list.push({
-          sessionId: s.id,
+          sessionId: sessId,
           tableId: s.tableId,
           tableName: tName,
           order: o,
@@ -288,9 +297,38 @@ export const IncomingOrdersView: React.FC = () => {
               order={item.order}
               onAccept={handleAcceptOrder}
               onReject={handleRejectOrder}
+              onEdit={(sessionId, order) => {
+                setEditingOrder({
+                  order,
+                  sessionId,
+                  tableName: item.tableName,
+                });
+              }}
             />
           ))}
         </div>
+      )}
+
+      {/* Edit Order Modal */}
+      {editingOrder && (
+        <EditOrderModal
+          isOpen={Boolean(editingOrder)}
+          onClose={() => setEditingOrder(null)}
+          order={editingOrder.order}
+          sessionId={editingOrder.sessionId}
+          tableName={editingOrder.tableName}
+          onOrderAccepted={(kot) => {
+            setKotData({
+              kotNumber: kot.kotNumber || 'KOT-001',
+              tableName: editingOrder.tableName || 'Table',
+              createdAt: kot.createdAt || new Date().toISOString(),
+              serverName: kot.serverName || 'QR Order',
+              specialInstructions: kot.specialInstructions,
+              items: kot.items || [],
+            });
+            setKotModalOpen(true);
+          }}
+        />
       )}
 
       {/* KOT Print Chit Modal */}

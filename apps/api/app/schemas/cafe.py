@@ -1,13 +1,17 @@
 from enum import Enum
 from typing import List, Optional, Any, Dict
 from datetime import datetime
-from pydantic import Field, BaseModel, model_validator
+from pydantic import Field, BaseModel, model_validator, field_validator
 from app.schemas.common import BaseSchema
 
 class BusinessPersona(str, Enum):
     RETAIL = "RETAIL"
     CAFE = "CAFE"
     HYBRID = "HYBRID"
+
+class SessionRole(str, Enum):
+    HOST = "HOST"
+    GUEST = "GUEST"
 
 class CafeConfig(BaseSchema):
     enable_qr_ordering: bool = Field(default=True, alias="enableQrOrdering")
@@ -73,6 +77,7 @@ class PublicOrderItem(BaseSchema):
 class PublicOrderSubmitRequest(BaseSchema):
     table_id: str = Field(..., alias="tableId")
     qr_token: str = Field(..., alias="qrToken")
+    member_token: Optional[str] = Field(None, alias="memberToken")  # Session member identity token
     customer_name: Optional[str] = Field(None, alias="customerName")
     customer_phone: Optional[str] = Field(None, alias="customerPhone")
     items: List[PublicOrderItem] = Field(..., min_length=1)
@@ -88,6 +93,64 @@ class PublicOrderSubmitRequest(BaseSchema):
                 data["qr_token"] = token_val
         return data
 
+
+# ---------------------------------------------------------------------------
+# Session member / host-join model
+# ---------------------------------------------------------------------------
+
+class SessionMember(BaseSchema):
+    member_id: str = Field(..., alias="memberId")
+    phone: str
+    name: Optional[str] = None
+    role: SessionRole = SessionRole.GUEST
+    joined_at: Any = Field(..., alias="joinedAt")
+    member_token: str = Field(..., alias="memberToken")
+
+
+class TableSessionStartRequest(BaseSchema):
+    """Request body for the first scanner (HOST) to start a table session."""
+    phone: str = Field(..., min_length=6, max_length=20)
+    name: Optional[str] = Field(None, max_length=100)
+
+
+class TableSessionJoinRequest(BaseSchema):
+    """Request body for subsequent scanners (GUEST) to join an existing session."""
+    phone: str = Field(..., min_length=6, max_length=20)
+    name: Optional[str] = Field(None, max_length=100)
+    join_code: str = Field(..., alias="joinCode", min_length=4, max_length=8)
+
+
+class TableSessionStartResponse(BaseSchema):
+    session_id: str = Field(..., alias="sessionId")
+    member_id: str = Field(..., alias="memberId")
+    member_token: str = Field(..., alias="memberToken")
+    role: str = "HOST"
+    join_code: str = Field(..., alias="joinCode")
+    table_id: str = Field(..., alias="tableId")
+    table_number: str = Field(..., alias="tableNumber")
+    table_label: str = Field(..., alias="tableLabel")
+    store_name: str = Field(..., alias="storeName")
+
+
+class TableSessionJoinResponse(BaseSchema):
+    session_id: str = Field(..., alias="sessionId")
+    member_id: str = Field(..., alias="memberId")
+    member_token: str = Field(..., alias="memberToken")
+    role: str = "GUEST"
+    table_id: str = Field(..., alias="tableId")
+    table_number: str = Field(..., alias="tableNumber")
+    table_label: str = Field(..., alias="tableLabel")
+    store_name: str = Field(..., alias="storeName")
+
+
+class TableSessionCheckResponse(BaseSchema):
+    table_id: str = Field(..., alias="tableId")
+    table_number: str = Field(..., alias="tableNumber")
+    table_label: Optional[str] = Field(None, alias="tableLabel")
+    has_active_session: bool = Field(..., alias="hasActiveSession")
+    session_id: Optional[str] = Field(None, alias="sessionId")
+    store_name: str = Field(..., alias="storeName")
+    qr_valid: bool = Field(True, alias="qrValid")
 class KOTItem(BaseSchema):
     item_id: str = Field(..., alias="itemId")
     name: str
@@ -116,13 +179,19 @@ class TableSessionOrder(BaseSchema):
     source: str = Field(default="QR_CUSTOMER", alias="source")
     placed_at: Any = Field(..., alias="placedAt")
     approval_status: str = Field(default="SUBMITTED", alias="approvalStatus")
-    kot_id: Optional[str] = Field(None, alias="kotId")
+    kot_id: Optional[Any] = Field(None, alias="kotId")
     kot_number: Optional[str] = Field(None, alias="kotNumber")
     rejection_reason: Optional[str] = Field(None, alias="rejectionReason")
     items: List[Dict[str, Any]] = []
 
+    @field_validator("kot_id", mode="before")
+    @classmethod
+    def coerce_kot_id(cls, v: Any) -> Optional[str]:
+        return str(v) if v is not None else None
+
 class TableSessionResponse(BaseSchema):
-    id: str = Field(..., alias="_id")
+    id: str = Field(...)
+    mongo_id: Optional[str] = Field(None, alias="_id")
     business_id: str = Field(..., alias="businessId")
     location_id: Optional[str] = Field(None, alias="locationId")
     table_id: str = Field(..., alias="tableId")
@@ -137,6 +206,33 @@ class TableSessionResponse(BaseSchema):
     grand_total: float = Field(default=0.0, alias="grandTotal")
     opened_at: Any = Field(..., alias="openedAt")
     closed_at: Optional[Any] = Field(None, alias="closedAt")
+
+class OrderItemUpdate(BaseModel):
+    itemId: Optional[str] = None
+    name: str
+    quantity: float
+    variantId: Optional[str] = None
+    variantName: Optional[str] = None
+    unitPrice: float
+    notes: Optional[str] = None
+
+class UpdateSessionOrderRequest(BaseModel):
+    items: List[OrderItemUpdate]
+    notes: Optional[str] = None
+
+class CustomerTableOrdersResponse(BaseSchema):
+    sessionId: str
+    tableId: str
+    tableNumber: str
+    tableLabel: Optional[str] = None
+    sessionStatus: str
+    subtotal: float = 0.0
+    taxTotal: float = 0.0
+    grandTotal: float = 0.0
+    pendingOrders: List[Dict[str, Any]] = []
+    acceptedOrders: List[Dict[str, Any]] = []
+    rejectedOrders: List[Dict[str, Any]] = []
+    allOrders: List[Dict[str, Any]] = []
 
 class TableSettleRequest(BaseSchema):
     payment_mode: str = Field(default="CASH", alias="paymentMode")

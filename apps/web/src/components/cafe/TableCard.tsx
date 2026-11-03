@@ -213,14 +213,37 @@ export const TableCard: React.FC<TableCardProps> = ({
         )}
 
         {(table.currentStatus === 'OCCUPIED' || table.currentStatus === 'ORDERING') && (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            style={{ flex: 1, padding: '6px 10px', fontSize: '0.78rem', justifyContent: 'center' }}
-            onClick={() => onSelectTable(table)}
-          >
-            View / Add Items
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ flex: 1, padding: '6px 10px', fontSize: '0.78rem', justifyContent: 'center' }}
+              onClick={() => onSelectTable(table)}
+            >
+              View / Add Items
+            </button>
+            {(!session || session.grandTotal === 0) && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{
+                  padding: '6px 10px',
+                  fontSize: '0.78rem',
+                  justifyContent: 'center',
+                  color: 'var(--neutral-600, #4b5563)',
+                  backgroundColor: 'var(--neutral-50, #f9fafb)',
+                  border: '1px solid var(--neutral-300, #d1d5db)',
+                }}
+                title="Mark table as available / free"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onStatusChange) onStatusChange(table.id, 'AVAILABLE');
+                }}
+              >
+                Free Table
+              </button>
+            )}
+          </>
         )}
 
         {session && session.sessionStatus === 'ACTIVE' && session.grandTotal > 0 && onSettleTable && (

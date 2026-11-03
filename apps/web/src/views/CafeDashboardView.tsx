@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Users, 
   Clock, 
@@ -26,6 +26,7 @@ import { store } from '../services/store';
 import { CafeTable, TableSession, TableStatus, Invoice } from '../types';
 import { TableCard } from '../components/cafe/TableCard';
 import { KOTPrintModal } from '../components/cafe/KOTPrintModal';
+import { EditOrderModal } from '../components/cafe/EditOrderModal';
 
 interface CafeDashboardViewProps {
   onNavigate?: (tab: string) => void;
@@ -60,6 +61,9 @@ export const CafeDashboardView: React.FC<CafeDashboardViewProps> = ({
   // KOT Modal state
   const [kotModalOpen, setKotModalOpen] = useState(false);
   const [printingKotData, setPrintingKotData] = useState<any>(null);
+
+  // Edit Order state
+  const [editingOrder, setEditingOrder] = useState<{ order: any; sessionId: string; tableName: string } | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -223,12 +227,32 @@ export const CafeDashboardView: React.FC<CafeDashboardViewProps> = ({
     }
   };
 
+  const handleForceCloseSession = async (table: CafeTable) => {
+    const targetSession = sessionMap.get(table.id);
+    if (!targetSession) return;
+    const tableName = table.tableName || table.label || `Table ${table.tableNumber}`;
+    if (!window.confirm(`Are you sure you want to close the active session for ${tableName}? Any active QR customer sessions and join codes will be invalidated, and the table will be marked for cleaning.`)) {
+      return;
+    }
+    try {
+      await store.forceCloseTableSession(targetSession.id);
+      setActiveTable(null);
+      await loadData();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || err.message || 'Failed to close table session.');
+    }
+  };
+
   const handleStatusChange = async (tableId: string, status: TableStatus) => {
     try {
-      await store.updateTableStatus(tableId, status);
+      const updated = await store.updateTableStatus(tableId, status);
       await loadData();
-    } catch (err) {
+      if (activeTable && activeTable.id === tableId) {
+        setActiveTable(updated);
+      }
+    } catch (err: any) {
       console.warn('Failed to change status:', err);
+      alert(err.response?.data?.detail || err.message || 'Failed to update table status');
     }
   };
 
@@ -764,9 +788,26 @@ export const CafeDashboardView: React.FC<CafeDashboardViewProps> = ({
                                   backgroundColor: '#ffffff'
                                 }}
                               >
-                                <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
-                                  <span>Order #{oIdx + 1}</span>
-                                  <span>{new Date(ord.orderedAt || ord.placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--neutral-400)', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span>Order #{oIdx + 1}</span>
+                                    {ord.kotNumber && <span style={{ backgroundColor: 'var(--neutral-100)', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>{ord.kotNumber}</span>}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span>{new Date(ord.orderedAt || ord.placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
+                                      style={{ padding: '1px 6px', fontSize: '0.7rem', color: 'var(--primary-600)', height: 'auto', minHeight: 'unset' }}
+                                      onClick={() => setEditingOrder({
+                                        order: ord,
+                                        sessionId: sess.id,
+                                        tableName: activeTable.tableName || activeTable.label || `Table ${activeTable.tableNumber}`
+                                      })}
+                                    >
+                                      Edit
+                                    </button>
+                                  </div>
                                 </div>
                                 {ord.items.map((it, iIdx) => (
                                   <div 
@@ -837,22 +878,35 @@ export const CafeDashboardView: React.FC<CafeDashboardViewProps> = ({
                   </p>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 280, margin: '0 auto' }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => {
-                        handleStatusChange(activeTable.id, 'OCCUPIED');
-                      }}
-                    >
-                      Mark Table Occupied
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => handleStatusChange(activeTable.id, 'AVAILABLE')}
-                    >
-                      Mark Available
-                    </button>
+                    {activeTable.currentStatus === 'AVAILABLE' ? (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleStatusChange(activeTable.id, 'OCCUPIED')}
+                      >
+                        <Utensils size={14} style={{ marginRight: 6 }} />
+                        Seat Guests (Mark Occupied)
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleStatusChange(activeTable.id, 'AVAILABLE')}
+                        >
+                          <CheckCircle size={14} style={{ marginRight: 6 }} />
+                          Mark Table Free / Available
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleStatusChange(activeTable.id, 'OCCUPIED')}
+                        >
+                          <Utensils size={14} style={{ marginRight: 6 }} />
+                          Start Dine-in Session (Occupied)
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -867,23 +921,43 @@ export const CafeDashboardView: React.FC<CafeDashboardViewProps> = ({
                 display: 'flex',
                 gap: 12
               }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{
-                    flex: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    fontWeight: 700,
-                    padding: '10px 16px'
-                  }}
-                  onClick={() => handleOpenSettle(activeTable)}
-                >
-                  <CreditCard size={16} />
-                  <span>Settle & Checkout Bill</span>
-                </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      fontWeight: 600,
+                      padding: '10px 14px',
+                      borderColor: '#fca5a5',
+                      color: '#b91c1c',
+                      backgroundColor: '#fef2f2'
+                    }}
+                    onClick={() => handleForceCloseSession(activeTable)}
+                    title="Close table session and invalidate join codes"
+                  >
+                    <X size={15} />
+                    <span>Close Table</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      fontWeight: 700,
+                      padding: '10px 16px'
+                    }}
+                    onClick={() => handleOpenSettle(activeTable)}
+                  >
+                    <CreditCard size={16} />
+                    <span>Settle & Checkout Bill</span>
+                  </button>
               </div>
             )}
           </div>
@@ -1071,6 +1145,22 @@ export const CafeDashboardView: React.FC<CafeDashboardViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Edit Order Modal */}
+      {editingOrder && (
+        <EditOrderModal
+          isOpen={Boolean(editingOrder)}
+          onClose={() => { setEditingOrder(null); loadData(); }}
+          order={editingOrder.order}
+          sessionId={editingOrder.sessionId}
+          tableName={editingOrder.tableName}
+          onOrderAccepted={(kot) => {
+            setPrintingKotData(kot);
+            setKotModalOpen(true);
+            loadData();
+          }}
+        />
       )}
 
       {/* KOT Thermal Print Modal */}

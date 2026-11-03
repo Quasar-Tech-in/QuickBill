@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement, ItemImportResponse, CafeTable, TableStatus, KOT, TableSession, BusinessPersona, TenantSettings } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
@@ -5200,6 +5200,11 @@ class StoreService {
     const updated: CafeTable = res.data;
     const idx = this.cafeTables.findIndex(t => t.id === tableId);
     if (idx !== -1) this.cafeTables[idx] = updated;
+    try {
+      await this.fetchActiveTableSessions();
+    } catch (_) {
+      // ignore
+    }
     this.notifyListeners();
     return updated;
   }
@@ -5222,7 +5227,13 @@ class StoreService {
       const res = await apiClient.get('/cafe/sessions/active', {
         params: { locationId: loc }
       });
-      this.activeTableSessions = res.data || [];
+      const rawList = res.data || [];
+      this.activeTableSessions = rawList.map((s: any) => ({
+        ...s,
+        id: String(s.id || s._id || ''),
+        _id: String(s._id || s.id || ''),
+        tableId: s.tableId ? String(s.tableId) : s.tableId,
+      }));
       this.notifyListeners();
       return this.activeTableSessions;
     } catch (err) {
@@ -5231,7 +5242,20 @@ class StoreService {
     }
   }
 
+  async updateSessionOrder(sessionId: string, orderId: string, payload: { items: any[]; notes?: string }): Promise<any> {
+    if (!sessionId || sessionId === 'undefined') {
+      throw new Error('Cannot update order: Table session ID is invalid or missing.');
+    }
+    const res = await apiClient.patch('/cafe/sessions/' + sessionId + '/orders/' + orderId, payload);
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
+
   async acceptSessionOrder(sessionId: string, orderId: string): Promise<any> {
+    if (!sessionId || sessionId === 'undefined') {
+      throw new Error('Cannot accept order: Table session ID is invalid or missing.');
+    }
     const res = await apiClient.post('/cafe/sessions/' + sessionId + '/orders/' + orderId + '/accept');
     await this.fetchActiveTableSessions();
     await this.fetchTables();
@@ -5239,6 +5263,9 @@ class StoreService {
   }
 
   async rejectSessionOrder(sessionId: string, orderId: string, reason?: string): Promise<any> {
+    if (!sessionId || sessionId === 'undefined') {
+      throw new Error('Cannot reject order: Table session ID is invalid or missing.');
+    }
     const res = await apiClient.post('/cafe/sessions/' + sessionId + '/orders/' + orderId + '/reject', {
       reason: reason || 'Item unavailable'
     });
@@ -5272,6 +5299,13 @@ class StoreService {
 
   async settleTableSession(sessionId: string, payload: any): Promise<any> {
     const res = await apiClient.post('/cafe/sessions/' + sessionId + '/settle', payload);
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
+
+  async forceCloseTableSession(sessionId: string): Promise<any> {
+    const res = await apiClient.post('/cafe/sessions/' + sessionId + '/force-close');
     await this.fetchActiveTableSessions();
     await this.fetchTables();
     return res.data;

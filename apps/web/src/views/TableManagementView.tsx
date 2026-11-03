@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import QRCode from 'qrcode';
 import { 
   Utensils, 
@@ -156,13 +156,16 @@ export const TableManagementView: React.FC = () => {
   // Generate QR Data URL when previewing standee
   const handleOpenStandee = async (table: CafeTable) => {
     setPreviewTable(table);
-    const tenantSlug = activeTenant?.id || 'demo';
+    const tenantSlug = activeTenant?.slug || activeTenant?.id || 'store';
     const baseUrl = window.location.origin;
-    const token = table.qrCodeToken || (table.qrCodeUrl ? new URL(table.qrCodeUrl, window.location.origin).searchParams.get('token') : '');
-    const url = table.qrCodeUrl 
-      ? (table.qrCodeUrl.startsWith('http') ? table.qrCodeUrl : `${baseUrl}${table.qrCodeUrl}`)
-      : `${baseUrl}/order/${tenantSlug}/${table.id}?token=${encodeURIComponent(token || '')}`;
-    
+    // Build clean QR URL: /menu/{slug}/{tableNum}?t={hmacToken}
+    const rawQrUrl = table.qrCodeUrl || '';
+    const qrUrlObj = rawQrUrl ? new URL(rawQrUrl.startsWith('http') ? rawQrUrl : baseUrl + rawQrUrl) : null;
+    const qrToken = table.qrCodeToken || (qrUrlObj ? (qrUrlObj.searchParams.get('t') || qrUrlObj.searchParams.get('token') || '') : '');
+    const tableNum = table.tableNumber || table.id;
+    const url = (rawQrUrl && rawQrUrl.includes('/menu/'))
+      ? (rawQrUrl.startsWith('http') ? rawQrUrl : `${baseUrl}${rawQrUrl}`)
+      : `${baseUrl}/menu/${tenantSlug}/${encodeURIComponent(tableNum)}?t=${encodeURIComponent(qrToken)}`;
     try {
       const dataUrl = await QRCode.toDataURL(url, {
         width: 320,

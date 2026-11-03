@@ -559,6 +559,9 @@ export const App: React.FC = () => {
         />
 
         {/* Public Customer Self-Ordering Digital Menu Route */}
+        {/* New clean URL: /menu/{slug}/{tableNum}?t={token} */}
+        <Route path="/menu/:slug/:tableNum" element={<DigitalMenuPage />} />
+        {/* Legacy URL — kept for backward compat with old printed QR codes */}
         <Route path="/order/:businessId/:tableId" element={<DigitalMenuPage />} />
 
         {/* Protected Authenticated Routes */}

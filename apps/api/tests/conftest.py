@@ -225,6 +225,23 @@ class MockCollection:
             return MockUpdateResult(1)
         return MockUpdateResult(0)
 
+    async def update_many(self, filter_query: Dict[str, Any], update: Dict[str, Any], session=None) -> MockUpdateResult:
+        modified_count = 0
+        for d in self.data:
+            if self._matches(d, filter_query):
+                if "$set" in update:
+                    _apply_set(d, update["$set"])
+                if "$inc" in update:
+                    for field, inc_val in update["$inc"].items():
+                        d[field] = d.get(field, 0) + inc_val
+                if "$push" in update:
+                    for field, push_val in update["$push"].items():
+                        if field not in d or not isinstance(d[field], list):
+                            d[field] = []
+                        d[field].append(copy.deepcopy(push_val))
+                modified_count += 1
+        return MockUpdateResult(modified_count)
+
     async def find_one_and_update(self, filter_query: Dict[str, Any], update: Dict[str, Any], return_document=True) -> Optional[Dict[str, Any]]:
         for d in self.data:
             if self._matches(d, filter_query):

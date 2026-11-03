@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from app.core.database import get_tenant_db
 from app.core.security import get_current_business_id, get_current_user, TokenPayload, enforce_active_store_operations, resolve_user_name
-from app.schemas.cafe import TableSessionResponse, KOTResponse, TableSettleRequest
+from app.schemas.cafe import TableSessionResponse, KOTResponse, TableSettleRequest, UpdateSessionOrderRequest
 from app.services.cafe_session_service import CafeSessionService
 
 router = APIRouter(prefix="/cafe/sessions", tags=["Café Sessions & Kitchen Tickets"])
@@ -12,7 +12,7 @@ class RejectOrderRequest(BaseModel):
     reason: str = "Out of stock / dish unavailable"
 
 class UpdateKOTStatusRequest(BaseModel):
-    status: str # QUEUED | PREPARING | READY | SERVED
+    status: str  # QUEUED | PREPARING | READY | SERVED
 
 @router.get("/active", response_model=List[TableSessionResponse], response_model_by_alias=True)
 async def list_active_sessions(
@@ -55,6 +55,43 @@ async def reject_order(
     db = await get_tenant_db(business_id)
     service = CafeSessionService(db)
     return await service.reject_session_order(business_id, session_id, order_id, req.reason)
+
+@router.patch("/{session_id}/orders/{order_id}")
+async def update_order(
+    session_id: str,
+    order_id: str,
+    req: UpdateSessionOrderRequest,
+    user: TokenPayload = Depends(get_current_user),
+    business_id: str = Depends(enforce_active_store_operations),
+):
+    """
+    Staff edits an order within an active session (modify quantities, items, notes).
+    Recalculates item line totals, order subtotal, and table running totals.
+    """
+    db = await get_tenant_db(business_id)
+    service = CafeSessionService(db)
+    items_raw = [it.model_dump(by_alias=True) for it in req.items]
+    return await service.update_session_order(
+        business_id=business_id,
+        session_id=session_id,
+        order_id=order_id,
+        items=items_raw,
+        notes=req.notes,
+    )
+
+@router.post("/{session_id}/force-close")
+async def force_close_session(
+    session_id: str,
+    user: TokenPayload = Depends(get_current_user),
+    business_id: str = Depends(enforce_active_store_operations),
+):
+    """
+    Admin/cashier force-closes a table session, invalidating the joinCode
+    and releasing the table to CLEANING status.
+    """
+    db = await get_tenant_db(business_id)
+    service = CafeSessionService(db)
+    return await service.force_close_session(business_id, session_id, user.sub)
 
 @router.get("/kots", response_model=List[KOTResponse], response_model_by_alias=True)
 async def list_kots(

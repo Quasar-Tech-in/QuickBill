@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, X, Clock, User, Phone, AlertCircle, ChefHat } from 'lucide-react';
+import { Check, X, Clock, User, Phone, AlertCircle, ChefHat, Edit3 } from 'lucide-react';
 import { TableSessionOrder } from '../../types';
 
 interface IncomingOrderCardProps {
@@ -8,6 +8,7 @@ interface IncomingOrderCardProps {
   order: TableSessionOrder;
   onAccept: (sessionId: string, orderId: string) => Promise<void>;
   onReject: (sessionId: string, orderId: string, reason: string) => Promise<void>;
+  onEdit?: (sessionId: string, order: TableSessionOrder) => void;
 }
 
 export const IncomingOrderCard: React.FC<IncomingOrderCardProps> = ({
@@ -16,6 +17,7 @@ export const IncomingOrderCard: React.FC<IncomingOrderCardProps> = ({
   order,
   onAccept,
   onReject,
+  onEdit,
 }) => {
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState('Out of stock / dish unavailable');
@@ -184,11 +186,24 @@ export const IncomingOrderCard: React.FC<IncomingOrderCardProps> = ({
         </div>
       ) : (
         /* Action Buttons */
-        <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+          {onEdit && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ padding: '6px 12px', justifyContent: 'center', fontSize: '0.82rem' }}
+              onClick={() => onEdit(sessionId, order)}
+              disabled={loading}
+              title="Edit items or instructions before accepting"
+            >
+              <Edit3 size={14} style={{ marginRight: '4px' }} />
+              Edit
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-secondary"
-            style={{ flex: 1, color: 'var(--danger-600, #dc2626)', justifyContent: 'center', fontSize: '0.82rem' }}
+            style={{ padding: '6px 12px', color: 'var(--danger-600, #dc2626)', justifyContent: 'center', fontSize: '0.82rem' }}
             onClick={() => setIsRejecting(true)}
             disabled={loading}
           >
@@ -198,7 +213,7 @@ export const IncomingOrderCard: React.FC<IncomingOrderCardProps> = ({
           <button
             type="button"
             className="btn btn-primary"
-            style={{ flex: 2, justifyContent: 'center', fontSize: '0.82rem' }}
+            style={{ flex: 1, justifyContent: 'center', fontSize: '0.82rem' }}
             onClick={handleAccept}
             disabled={loading}
           >
