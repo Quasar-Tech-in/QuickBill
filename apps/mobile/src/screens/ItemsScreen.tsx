@@ -57,7 +57,7 @@ export const ItemsScreen: React.FC = () => {
   const [itemPurchasePrice, setItemPurchasePrice] = useState('');
   const [itemStock, setItemStock] = useState('');
   const [itemMinStock, setItemMinStock] = useState('5');
-  const [itemTaxRate, setItemTaxRate] = useState('5');
+  const [itemTaxRate, setItemTaxRate] = useState('0');
   const [itemUnit, setItemUnit] = useState('pcs');
   const [itemAllowParts, setItemAllowParts] = useState(false);
 
@@ -83,7 +83,7 @@ export const ItemsScreen: React.FC = () => {
     setItemPurchasePrice('');
     setItemStock('');
     setItemMinStock('5');
-    setItemTaxRate('5');
+    setItemTaxRate('0');
     setItemUnit('pcs');
     setItemAllowParts(false);
     setIsCreateModalOpen(true);
@@ -99,7 +99,7 @@ export const ItemsScreen: React.FC = () => {
     setItemPurchasePrice(String(item.purchasePrice));
     setItemStock(String(item.currentStock));
     setItemMinStock(String(item.minStockAlert ?? 5));
-    setItemTaxRate(String(item.taxRate));
+    setItemTaxRate(String(item.taxRate ?? 0));
     setItemUnit(item.unit);
     setItemAllowParts(!!item.allowParts);
   };

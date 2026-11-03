@@ -264,7 +264,7 @@ export const InventoryView: React.FC = () => {
   const [formSku, setFormSku] = useState('');
   const [formBarcode, setFormBarcode] = useState('');
   const [formCategory, setFormCategory] = useState('Grocery');
-  const [formTaxRate, setFormTaxRate] = useState<number>(5);
+  const [formTaxRate, setFormTaxRate] = useState<number>(0);
   const [formUnit, setFormUnit] = useState('pcs');
   const [formAllowParts, setFormAllowParts] = useState(false);
   const [formDescription, setFormDescription] = useState('');
@@ -688,7 +688,7 @@ export const InventoryView: React.FC = () => {
     setFormSku('');
     setFormBarcode('');
     setFormCategory(categoriesList[0]?.name || 'Grocery');
-    setFormTaxRate(5);
+    setFormTaxRate(0);
     setFormUnit('pcs');
     setFormAllowParts(false);
     setFormDescription('');
@@ -727,7 +727,7 @@ export const InventoryView: React.FC = () => {
     setFormSku(raw.sku || '');
     setFormBarcode(raw.barcode || '');
     setFormCategory(raw.category || categoriesList[0]?.name || 'Grocery');
-    setFormTaxRate(Number(raw.taxRate ?? 5));
+    setFormTaxRate(Number(raw.taxRate ?? 0));
     setFormUnit(raw.unit || 'pcs');
     setFormAllowParts(!!raw.allowParts);
     setFormDescription(raw.description || '');
@@ -790,7 +790,7 @@ export const InventoryView: React.FC = () => {
       sku: (raw.sku || '').trim(),
       barcode: (raw.barcode || '').trim(),
       category: (raw.category || categoriesList[0]?.name || 'Grocery').trim(),
-      taxRate: Number(raw.taxRate ?? 5),
+      taxRate: Number(raw.taxRate ?? 0),
       unit: raw.unit || 'pcs',
       allowParts: !!raw.allowParts,
       description: (raw.description || '').trim(),
