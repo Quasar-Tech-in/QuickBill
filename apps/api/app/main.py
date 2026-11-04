@@ -1,5 +1,14 @@
 import os
+import hashlib
 import logging
+
+# Compatibility shim for ReportLab on Python <= 3.8 where openssl_md5 does not support usedforsecurity
+try:
+    hashlib.md5(usedforsecurity=False)
+except TypeError:
+    _orig_md5 = hashlib.md5
+    hashlib.md5 = lambda *args, **kwargs: _orig_md5(*args, **{k: v for k, v in kwargs.items() if k != "usedforsecurity"})
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

@@ -35,7 +35,10 @@ async def generate_custom_label_pdf(
     """
     store_name = await _resolve_store_name(business_id, config.store_name)
     
-    if config.paper_size == PaperSize.DUMBBELL_70x12 or config.style == LabelStyle.JEWELRY_STRING_TAG:
+    if config.paper_size == PaperSize.RAT_TAIL_76x12 or config.style == LabelStyle.JEWELRY_RAT_TAIL:
+        pdf_bytes = LabelService.generate_jewelry_rattail_tag(config=config, store_name=store_name)
+        filename = f"Jewelry_RatTail_Tag_{config.sku or 'Item'}.pdf"
+    elif config.paper_size == PaperSize.DUMBBELL_70x12 or config.style == LabelStyle.JEWELRY_STRING_TAG:
         pdf_bytes = LabelService.generate_jewelry_dumbbell_tag(config=config, store_name=store_name)
         filename = f"Jewelry_Tag_{config.sku or 'Item'}.pdf"
     elif config.paper_size in (PaperSize.A4_GRID_24, PaperSize.A4_GRID_40, PaperSize.A4_GRID_65):

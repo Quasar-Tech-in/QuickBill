@@ -2218,6 +2218,7 @@ export const InventoryView: React.FC = () => {
         itemMrp={codeStudioTarget?.mrp}
         publicItemId={codeStudioTarget?.publicItemId}
         defaultStockCount={codeStudioTarget?.currentStock}
+        initialCodeType="QR"
         storeName={store.getActiveTenant()?.name || currentUser?.tenantName || store.getActiveLocation()?.name}
       />
 

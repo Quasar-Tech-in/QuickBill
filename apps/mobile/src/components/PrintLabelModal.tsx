@@ -34,10 +34,9 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 }) => {
   const [symbology, setSymbology] = useState<'BARCODE' | 'QR'>('QR');
   const [qrSizePreset, setQrSizePreset] = useState<'COMPACT' | 'STANDARD' | 'LARGE'>('STANDARD');
-  const [paperSize, setPaperSize] = useState<'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40'>('THERMAL_40x40');
+  const [paperSize, setPaperSize] = useState<'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'RAT_TAIL_76x12' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40'>('RAT_TAIL_76x12');
   const [quantity, setQuantity] = useState(defaultStockCount || 10);
   const [showPrice, setShowPrice] = useState(true);
-  const [showMrp, setShowMrp] = useState(true);
   const [showSku, setShowSku] = useState(true);
   const [showStoreName, setShowStoreName] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
@@ -56,8 +55,6 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       [{ text: 'OK', onPress: onClose }]
     );
   };
-
-  const hasDiscount = Boolean(itemMrp && itemMrp > itemPrice);
 
   return (
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
@@ -133,6 +130,14 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
             {/* 3. Paper Format */}
             <Text style={styles.sectionTitle}>2. Paper Size & Label Format</Text>
             <View style={styles.paperOptionsGrid}>
+              <TouchableOpacity
+                style={[styles.paperChip, paperSize === 'RAT_TAIL_76x12' && styles.paperChipActive]}
+                onPress={() => setPaperSize('RAT_TAIL_76x12')}
+              >
+                <Text style={styles.paperChipTitle}>76x12 mm</Text>
+                <Text style={styles.paperChipDesc}>Rat-Tail Tag</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={[styles.paperChip, paperSize === 'THERMAL_40x40' && styles.paperChipActive]}
                 onPress={() => setPaperSize('THERMAL_40x40')}
@@ -210,14 +215,9 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 {/* Price Display */}
                 <View style={styles.previewFooterRow}>
                   {showSku ? <Text style={styles.previewFooterText}>{itemSku}</Text> : null}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    {Boolean(showMrp && hasDiscount) ? (
-                      <Text style={styles.previewFooterMrp}>₹{itemMrp}</Text>
-                    ) : null}
-                    {showPrice ? (
-                      <Text style={styles.previewFooterPrice}>₹{itemPrice}.00</Text>
-                    ) : null}
-                  </View>
+                  {showPrice ? (
+                    <Text style={styles.previewFooterPrice}>₹{itemPrice}.00</Text>
+                  ) : null}
                 </View>
               </View>
 
@@ -278,13 +278,6 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <Text style={styles.toggleLabel}>Show Selling Price</Text>
               <Switch value={showPrice} onValueChange={setShowPrice} trackColor={{ false: '#cbd5e1', true: colors.primary[500] }} />
             </View>
-
-            {hasDiscount ? (
-              <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Show MRP Strikethrough</Text>
-                <Switch value={showMrp} onValueChange={setShowMrp} trackColor={{ false: '#cbd5e1', true: colors.primary[500] }} />
-              </View>
-            ) : null}
 
             <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>Show SKU / Code</Text>

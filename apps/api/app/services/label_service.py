@@ -1,3 +1,12 @@
+import hashlib
+
+# Compatibility shim for ReportLab on Python <= 3.8 where openssl_md5 does not support usedforsecurity
+try:
+    hashlib.md5(usedforsecurity=False)
+except TypeError:
+    _orig_md5 = hashlib.md5
+    hashlib.md5 = lambda *args, **kwargs: _orig_md5(*args, **{k: v for k, v in kwargs.items() if k != "usedforsecurity"})
+
 from io import BytesIO
 from decimal import Decimal
 from typing import Optional, List
@@ -25,12 +34,19 @@ class LabelService:
         config: LabelPrintConfig, store_name: str
     ) -> bytes:
         """
-        Generates a 50mm x 30mm standard product thermal sticker PDF.
+        Generates standard product thermal sticker PDF (50x30mm, 40x40mm, or 38x25mm).
         Supports both 1D Code128 Barcode and 2D QR Code based on config.code_type.
         """
         buffer = BytesIO()
-        width, height = 50 * mm, 30 * mm
+        if config.paper_size == PaperSize.THERMAL_40x40:
+            width, height = 40 * mm, 40 * mm
+        elif config.paper_size == PaperSize.THERMAL_38x25:
+            width, height = 38 * mm, 25 * mm
+        else:
+            width, height = 50 * mm, 30 * mm
+
         c = canvas.Canvas(buffer, pagesize=(width, height))
+        cx = width / 2
 
         display_store = config.store_name or store_name or "QuickBill Store"
         is_qr = config.code_type == CodeType.QR
@@ -43,50 +59,297 @@ class LabelService:
             code_payload = (config.barcode or config.sku or config.public_item_id or "ITM-1001").replace("ITEM:", "").strip()
             display_code = code_payload
 
+        cp = config.custom_positions or {}
+        use_custom = bool(cp)
+        scale = getattr(config, 'code_scale', 1.0) or 1.0
+        try:
+            scale = max(0.3, min(2.5, float(scale)))
+        except (ValueError, TypeError):
+            scale = 1.0
+
         for _ in range(config.quantity):
             # Outer boundary line guide
             c.setLineWidth(0.3)
             c.setStrokeColorRGB(0.85, 0.85, 0.85)
-            c.rect(1 * mm, 1 * mm, 48 * mm, 28 * mm)
+            c.rect(1 * mm, 1 * mm, width - (2 * mm), height - (2 * mm))
 
-            # 1. Header - Store Name
-            if config.show_store_name:
-                c.setFont("Helvetica-Bold", 7)
-                c.drawCentredString(25 * mm, 25.5 * mm, display_store[:28])
+            if use_custom:
+                # 1. Custom Store Name
+                if config.show_store_name and "storeName" in cp:
+                    c.setFont("Helvetica-Bold", 7 if height >= 30 * mm else 6)
+                    sx = (cp["storeName"]["x"] / 100.0) * width
+                    sy = ((100.0 - cp["storeName"]["y"]) / 100.0) * height
+                    if abs(cp["storeName"]["x"] - 50) < 15:
+                        c.drawCentredString(sx, sy - 1.5 * mm, display_store[:28])
+                    else:
+                        c.drawString(sx, sy - 1.5 * mm, display_store[:28])
 
-            # 2. Item Name
-            c.setFont("Helvetica-Bold", 8)
-            c.drawCentredString(25 * mm, 21.5 * mm, config.item_name[:26])
+                # 2. Custom Item Name
+                if "productName" in cp:
+                    c.setFont("Helvetica-Bold", 7.5 if height >= 30 * mm else 6.5)
+                    px = (cp["productName"]["x"] / 100.0) * width
+                    py = ((100.0 - cp["productName"]["y"]) / 100.0) * height
+                    if abs(cp["productName"]["x"] - 50) < 15:
+                        c.drawCentredString(px, py - 1.5 * mm, config.item_name[:26])
+                    else:
+                        c.drawString(px, py - 1.5 * mm, config.item_name[:26])
 
-            # 3. Code Generation (QR vs 1D Barcode)
-            if is_qr:
-                qr_size = 11.5 * mm
-                LabelService._draw_qr(c, code_payload, (25 * mm) - (qr_size / 2), 8.5 * mm, qr_size)
-                c.setFont("Helvetica", 5.5)
-                c.drawCentredString(25 * mm, 7 * mm, display_code)
+                # 3. Custom Code Generation
+                if is_qr:
+                    qr_size = min(16 * mm, max(6 * mm, 14 * mm * scale))
+                    if "code" in cp:
+                        cx_pos = (cp["code"]["x"] / 100.0) * width - (qr_size / 2)
+                        cy_pos = ((100.0 - cp["code"]["y"]) / 100.0) * height - (qr_size / 2)
+                        LabelService._draw_qr(c, code_payload, cx_pos, cy_pos, qr_size)
+                    else:
+                        LabelService._draw_qr(c, code_payload, cx - (qr_size / 2), 7 * mm, qr_size)
+
+                    if "barcodeText" in cp:
+                        bx = (cp["barcodeText"]["x"] / 100.0) * width
+                        by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
+                        c.setFont("Helvetica", 5.5)
+                        c.drawCentredString(bx, by - 1.5 * mm, display_code)
+                else:
+                    bc_h = (7 * mm if height >= 30 * mm else 5.5 * mm) * scale
+                    bw = max(0.20, 0.42 * scale)
+                    if "code" in cp:
+                        cx_pos = (cp["code"]["x"] / 100.0) * width - (14 * mm * scale)
+                        cy_pos = ((100.0 - cp["code"]["y"]) / 100.0) * height - (bc_h / 2)
+                    else:
+                        cx_pos, cy_pos = cx - (14 * mm * scale), 9 * mm
+                    try:
+                        bc = code128.Code128(code_payload, barHeight=bc_h, barWidth=bw)
+                        bc.drawOn(c, cx_pos, cy_pos)
+                    except Exception:
+                        pass
+                    if "barcodeText" in cp:
+                        bx = (cp["barcodeText"]["x"] / 100.0) * width
+                        by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
+                        c.setFont("Helvetica", 5.5)
+                        c.drawCentredString(bx, by - 1.5 * mm, display_code)
+
+                # 4. Custom SKU & Price
+                if config.show_sku and config.sku:
+                    c.setFont("Helvetica", 5.5)
+                    if "sku" in cp:
+                        skx = (cp["sku"]["x"] / 100.0) * width
+                        sky = ((100.0 - cp["sku"]["y"]) / 100.0) * height
+                        c.drawString(skx, sky - 1.5 * mm, f"SKU: {config.sku[:12]}")
+                    else:
+                        c.drawString(2.5 * mm, 2.5 * mm, f"SKU: {config.sku[:12]}")
+
+                if config.show_price and config.sale_price:
+                    c.setFont("Helvetica-Bold", 8)
+                    if "price" in cp:
+                        prx = (cp["price"]["x"] / 100.0) * width
+                        pry = ((100.0 - cp["price"]["y"]) / 100.0) * height
+                        c.drawString(prx, pry - 1.5 * mm, f"Rs. {config.sale_price:,.2f}")
+                    else:
+                        c.drawRightString(width - (2.5 * mm), 2.5 * mm, f"Rs. {config.sale_price:,.2f}")
             else:
-                try:
-                    bc = code128.Code128(code_payload, barHeight=7.5 * mm, barWidth=0.45)
-                    bc.drawOn(c, 11 * mm, 11 * mm)
-                    c.setFont("Helvetica", 5.5)
-                    c.drawCentredString(25 * mm, 8 * mm, display_code)
-                except Exception:
-                    c.setFont("Helvetica", 5.5)
-                    c.drawCentredString(25 * mm, 11 * mm, display_code)
+                # Standard Default Layout
+                if config.show_store_name:
+                    c.setFont("Helvetica-Bold", 7 if height >= 30 * mm else 6)
+                    c.drawCentredString(cx, height - (4.5 * mm), display_store[:28])
 
-            # 4. Footer Layout (Clean 2-column alignment)
-            c.setFont("Helvetica", 5.5)
-            if config.show_sku and config.sku:
-                c.drawString(3 * mm, 3.5 * mm, f"SKU: {config.sku[:12]}")
+                c.setFont("Helvetica-Bold", 7.5 if height >= 30 * mm else 6.5)
+                c.drawCentredString(cx, height - (8.5 * mm), config.item_name[:26])
 
-            # Draw MRP right-aligned above sale price
-            if config.show_mrp and config.mrp:
+                if is_qr:
+                    qr_size = min(14 * mm, height - (16 * mm))
+                    LabelService._draw_qr(c, code_payload, cx - (qr_size / 2), 7 * mm, qr_size)
+                    c.setFont("Helvetica", 5.5)
+                    c.drawCentredString(cx, 5.5 * mm, display_code)
+                else:
+                    try:
+                        bc_h = 7 * mm if height >= 30 * mm else 5.5 * mm
+                        bc = code128.Code128(code_payload, barHeight=bc_h, barWidth=0.42)
+                        bc.drawOn(c, cx - (14 * mm), 9 * mm)
+                        c.setFont("Helvetica", 5.5)
+                        c.drawCentredString(cx, 6.5 * mm, display_code)
+                    except Exception:
+                        c.setFont("Helvetica", 5.5)
+                        c.drawCentredString(cx, 9 * mm, display_code)
+
                 c.setFont("Helvetica", 5.5)
-                c.drawRightString(47 * mm, 7.5 * mm, f"MRP: Rs. {config.mrp:,.2f}")
+                if config.show_sku and config.sku:
+                    c.drawString(2.5 * mm, 2.5 * mm, f"SKU: {config.sku[:12]}")
 
-            if config.show_price and config.sale_price:
-                c.setFont("Helvetica-Bold", 8)
-                c.drawRightString(47 * mm, 3.5 * mm, f"Rs. {config.sale_price:,.2f}")
+                if config.show_price and config.sale_price:
+                    c.setFont("Helvetica-Bold", 8)
+                    c.drawRightString(width - (2.5 * mm), 2.5 * mm, f"Rs. {config.sale_price:,.2f}")
+
+            c.showPage()
+
+        c.save()
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    @staticmethod
+    def generate_jewelry_rattail_tag(
+        config: LabelPrintConfig, store_name: str
+    ) -> bytes:
+        """
+        Generates 76mm x 12mm Jewelry Rat-Tail Tag PDF (Dual Foldable Flaps + Right Tail).
+        Matches physical jewelry roll stickers:
+        - Flap 1 (0mm to 26mm): Store Header, Item Name, Sale Price, MRP
+        - Fold Crease (26mm): Dashed fold boundary
+        - Flap 2 (26mm to 52mm): 2D QR Code or 1D Barcode, Public Code, SKU
+        - Tail (52mm to 76mm): Narrow looping strap
+        """
+        buffer = BytesIO()
+        width, height = 76 * mm, 12 * mm
+        c = canvas.Canvas(buffer, pagesize=(width, height))
+
+        display_store = config.store_name or store_name or "QuickBill Jewelers"
+        is_qr = config.code_type == CodeType.QR
+
+        if is_qr:
+            code_payload = f"ITEM:{config.public_item_id}" if config.public_item_id else (config.barcode or config.sku or "ITM-01")
+            raw_code = (config.public_item_id or config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+        else:
+            code_payload = (config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+            raw_code = code_payload
+
+        cp = config.custom_positions or {}
+        use_custom = bool(cp)
+        scale = getattr(config, 'code_scale', 1.0) or 1.0
+        try:
+            scale = max(0.3, min(2.5, float(scale)))
+        except (ValueError, TypeError):
+            scale = 1.0
+
+        for _ in range(config.quantity):
+            # --- FLAP 1 (Left Wing: 0mm to 26mm) ---
+            c.setLineWidth(0.2)
+            c.setStrokeColorRGB(0.85, 0.85, 0.85)
+            c.rect(0.5 * mm, 0.5 * mm, 25 * mm, 11 * mm)
+
+            if use_custom:
+                if config.show_store_name and "storeName" in cp:
+                    c.setFont("Helvetica-Bold", 5)
+                    sx = (cp["storeName"]["x"] / 100.0) * width
+                    sy = ((100.0 - cp["storeName"]["y"]) / 100.0) * height
+                    c.drawString(sx, sy - 1.2 * mm, display_store[:16])
+                elif config.show_store_name:
+                    c.setFont("Helvetica-Bold", 5)
+                    c.drawString(1.5 * mm, 8.8 * mm, display_store[:16])
+
+                if "productName" in cp:
+                    c.setFont("Helvetica", 5)
+                    px = (cp["productName"]["x"] / 100.0) * width
+                    py = ((100.0 - cp["productName"]["y"]) / 100.0) * height
+                    c.drawString(px, py - 1.2 * mm, config.item_name[:18])
+                else:
+                    c.setFont("Helvetica", 5)
+                    c.drawString(1.5 * mm, 5.8 * mm, config.item_name[:18])
+
+                if config.show_price and config.sale_price:
+                    c.setFont("Helvetica-Bold", 7)
+                    if "price" in cp:
+                        prx = (cp["price"]["x"] / 100.0) * width
+                        pry = ((100.0 - cp["price"]["y"]) / 100.0) * height
+                        c.drawString(prx, pry - 1.2 * mm, f"Rs. {config.sale_price:,.2f}")
+                    else:
+                        c.drawString(1.5 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
+            else:
+                if config.show_store_name:
+                    c.setFont("Helvetica-Bold", 5)
+                    c.drawString(1.5 * mm, 8.8 * mm, display_store[:16])
+
+                c.setFont("Helvetica", 5)
+                c.drawString(1.5 * mm, 5.8 * mm, config.item_name[:18])
+
+                if config.show_price and config.sale_price:
+                    c.setFont("Helvetica-Bold", 7)
+                    c.drawString(1.5 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
+
+            # --- FOLD CREASE / SEAM (26mm) ---
+            c.setLineWidth(0.3)
+            c.setStrokeColorRGB(0.65, 0.65, 0.65)
+            c.setDash(1, 1)
+            c.line(26 * mm, 0.5 * mm, 26 * mm, 11.5 * mm)
+            c.setDash()
+
+            # --- FLAP 2 (Middle Wing: 26mm to 52mm) ---
+            c.setLineWidth(0.2)
+            c.setStrokeColorRGB(0.85, 0.85, 0.85)
+            c.rect(26.5 * mm, 0.5 * mm, 25 * mm, 11 * mm)
+
+            if use_custom:
+                if is_qr:
+                    qr_size = min(10 * mm, max(4 * mm, 8.5 * mm * scale))
+                    if "code" in cp:
+                        cx = (cp["code"]["x"] / 100.0) * width - (qr_size / 2)
+                        cy = ((100.0 - cp["code"]["y"]) / 100.0) * height - (qr_size / 2)
+                        LabelService._draw_qr(c, code_payload, cx, cy, qr_size)
+                    else:
+                        LabelService._draw_qr(c, code_payload, 28 * mm, 1.8 * mm, qr_size)
+
+                    if "barcodeText" in cp:
+                        bx = (cp["barcodeText"]["x"] / 100.0) * width
+                        by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
+                        c.setFont("Helvetica-Bold", 4.8)
+                        c.drawString(bx, by - 1.2 * mm, raw_code[:12])
+                    else:
+                        c.setFont("Helvetica-Bold", 4.8)
+                        c.drawString(38 * mm, 7.5 * mm, raw_code[:12])
+
+                    if config.show_sku and config.sku:
+                        c.setFont("Helvetica", 4.2)
+                        if "sku" in cp:
+                            skx = (cp["sku"]["x"] / 100.0) * width
+                            sky = ((100.0 - cp["sku"]["y"]) / 100.0) * height
+                            c.drawString(skx, sky - 1.2 * mm, f"SKU:{config.sku[:10]}")
+                        else:
+                            c.drawString(38 * mm, 3.8 * mm, f"SKU:{config.sku[:10]}")
+                else:
+                    bc_h = min(8 * mm, max(3 * mm, 5.5 * mm * scale))
+                    bw = max(0.16, 0.22 * scale)
+                    if "code" in cp:
+                        cx = (cp["code"]["x"] / 100.0) * width - (12 * mm * scale)
+                        cy = ((100.0 - cp["code"]["y"]) / 100.0) * height - (bc_h / 2)
+                    else:
+                        cx, cy = 27.5 * mm, 4.5 * mm
+                    try:
+                        bc = code128.Code128(raw_code, barHeight=bc_h, barWidth=bw)
+                        bc.drawOn(c, cx, cy)
+                    except Exception:
+                        c.setFont("Helvetica", 5)
+                        c.drawString(cx, cy, raw_code)
+
+                    if "barcodeText" in cp:
+                        bx = (cp["barcodeText"]["x"] / 100.0) * width
+                        by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
+                        c.setFont("Helvetica", 4.5)
+                        c.drawString(bx, by - 1.2 * mm, raw_code[:14])
+                    else:
+                        c.setFont("Helvetica", 4.5)
+                        c.drawString(27.5 * mm, 1.5 * mm, raw_code[:14])
+            else:
+                if is_qr:
+                    qr_size = 8.5 * mm
+                    LabelService._draw_qr(c, code_payload, 28 * mm, 1.8 * mm, qr_size)
+                    c.setFont("Helvetica-Bold", 4.8)
+                    c.drawString(38 * mm, 7.5 * mm, raw_code[:12])
+                    if config.show_sku and config.sku:
+                        c.setFont("Helvetica", 4.2)
+                        c.drawString(38 * mm, 3.8 * mm, f"SKU:{config.sku[:10]}")
+                else:
+                    try:
+                        bc = code128.Code128(raw_code, barHeight=5.5 * mm, barWidth=0.22)
+                        bc.drawOn(c, 27.5 * mm, 4.5 * mm)
+                        c.setFont("Helvetica", 4.5)
+                        c.drawString(27.5 * mm, 1.5 * mm, raw_code[:14])
+                    except Exception:
+                        c.setFont("Helvetica", 5)
+                        c.drawString(27.5 * mm, 4.5 * mm, raw_code)
+
+            # --- TAIL (Right Wing: 52mm to 76mm) ---
+            tail_y = (12 * mm - 2.5 * mm) / 2
+            c.setLineWidth(0.3)
+            c.setStrokeColorRGB(0.7, 0.7, 0.7)
+            c.rect(52 * mm, tail_y, 23.5 * mm, 2.5 * mm)
 
             c.showPage()
 
@@ -116,18 +379,54 @@ class LabelService:
             code_payload = (config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
             raw_code = code_payload
 
+        cp = config.custom_positions or {}
+        use_custom = bool(cp)
+        scale = getattr(config, 'code_scale', 1.0) or 1.0
+        try:
+            scale = max(0.3, min(2.5, float(scale)))
+        except (ValueError, TypeError):
+            scale = 1.0
+
         for _ in range(config.quantity):
             # --- LEFT WING (0mm to 28mm) ---
-            if config.show_store_name:
-                c.setFont("Helvetica-Bold", 5.5)
-                c.drawString(2 * mm, 8.5 * mm, display_store[:18])
+            if use_custom:
+                if config.show_store_name and "storeName" in cp:
+                    c.setFont("Helvetica-Bold", 5.5)
+                    sx = (cp["storeName"]["x"] / 100.0) * width
+                    sy = ((100.0 - cp["storeName"]["y"]) / 100.0) * height
+                    c.drawString(sx, sy - 1.2 * mm, display_store[:18])
+                elif config.show_store_name:
+                    c.setFont("Helvetica-Bold", 5.5)
+                    c.drawString(2 * mm, 8.5 * mm, display_store[:18])
 
-            c.setFont("Helvetica", 5.5)
-            c.drawString(2 * mm, 5.5 * mm, config.item_name[:20])
+                if "productName" in cp:
+                    c.setFont("Helvetica", 5.5)
+                    px = (cp["productName"]["x"] / 100.0) * width
+                    py = ((100.0 - cp["productName"]["y"]) / 100.0) * height
+                    c.drawString(px, py - 1.2 * mm, config.item_name[:20])
+                else:
+                    c.setFont("Helvetica", 5.5)
+                    c.drawString(2 * mm, 5.5 * mm, config.item_name[:20])
 
-            if config.show_price and config.sale_price:
-                c.setFont("Helvetica-Bold", 7)
-                c.drawString(2 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
+                if config.show_price and config.sale_price:
+                    c.setFont("Helvetica-Bold", 7)
+                    if "price" in cp:
+                        prx = (cp["price"]["x"] / 100.0) * width
+                        pry = ((100.0 - cp["price"]["y"]) / 100.0) * height
+                        c.drawString(prx, pry - 1.2 * mm, f"Rs. {config.sale_price:,.2f}")
+                    else:
+                        c.drawString(2 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
+            else:
+                if config.show_store_name:
+                    c.setFont("Helvetica-Bold", 5.5)
+                    c.drawString(2 * mm, 8.5 * mm, display_store[:18])
+
+                c.setFont("Helvetica", 5.5)
+                c.drawString(2 * mm, 5.5 * mm, config.item_name[:20])
+
+                if config.show_price and config.sale_price:
+                    c.setFont("Helvetica-Bold", 7)
+                    c.drawString(2 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
 
             # --- MIDDLE BRIDGE MARKER (28mm to 42mm) ---
             c.setLineWidth(0.3)
@@ -135,25 +434,82 @@ class LabelService:
             c.rect(28 * mm, 3.5 * mm, 14 * mm, 5 * mm) # Bridge cutout guide
 
             # --- RIGHT WING (42mm to 70mm) ---
-            if is_qr:
-                qr_size = 8 * mm
-                LabelService._draw_qr(c, code_payload, 60 * mm, 2 * mm, qr_size)
-                c.setFont("Helvetica-Bold", 5)
-                c.drawString(44 * mm, 6.5 * mm, raw_code[:12])
-                if config.show_sku and config.sku:
-                    c.setFont("Helvetica", 4.5)
-                    c.drawString(44 * mm, 2.5 * mm, f"SKU:{config.sku[:10]}")
-            else:
-                try:
-                    bc = code128.Code128(raw_code, barHeight=5.5 * mm, barWidth=0.23)
-                    bc.drawOn(c, 44 * mm, 4.5 * mm)
-                except Exception:
-                    c.setFont("Helvetica", 5)
-                    c.drawString(44 * mm, 5 * mm, raw_code)
+            if use_custom:
+                if is_qr:
+                    qr_size = min(10 * mm, max(4 * mm, 8 * mm * scale))
+                    if "code" in cp:
+                        cx = (cp["code"]["x"] / 100.0) * width - (qr_size / 2)
+                        cy = ((100.0 - cp["code"]["y"]) / 100.0) * height - (qr_size / 2)
+                        LabelService._draw_qr(c, code_payload, cx, cy, qr_size)
+                    else:
+                        LabelService._draw_qr(c, code_payload, 58 * mm, 2 * mm, qr_size)
 
-                if config.show_sku and config.sku:
+                    if "barcodeText" in cp:
+                        bx = (cp["barcodeText"]["x"] / 100.0) * width
+                        by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
+                        c.setFont("Helvetica-Bold", 5)
+                        c.drawString(bx, by - 1.2 * mm, raw_code[:12])
+                    else:
+                        c.setFont("Helvetica-Bold", 5)
+                        c.drawString(44 * mm, 6.5 * mm, raw_code[:12])
+
+                    if config.show_sku and config.sku:
+                        c.setFont("Helvetica", 4.5)
+                        if "sku" in cp:
+                            skx = (cp["sku"]["x"] / 100.0) * width
+                            sky = ((100.0 - cp["sku"]["y"]) / 100.0) * height
+                            c.drawString(skx, sky - 1.2 * mm, f"SKU:{config.sku[:10]}")
+                        else:
+                            c.drawString(44 * mm, 2.5 * mm, f"SKU:{config.sku[:10]}")
+                else:
+                    bc_h = min(8 * mm, max(3 * mm, 5.5 * mm * scale))
+                    bw = max(0.16, 0.23 * scale)
+                    if "code" in cp:
+                        cx = (cp["code"]["x"] / 100.0) * width - (12 * mm * scale)
+                        cy = ((100.0 - cp["code"]["y"]) / 100.0) * height - (bc_h / 2)
+                    else:
+                        cx, cy = 44 * mm, 4.5 * mm
+                    try:
+                        bc = code128.Code128(raw_code, barHeight=bc_h, barWidth=bw)
+                        bc.drawOn(c, cx, cy)
+                    except Exception:
+                        c.setFont("Helvetica", 5)
+                        c.drawString(cx, cy, raw_code)
+
+                    if "barcodeText" in cp:
+                        bx = (cp["barcodeText"]["x"] / 100.0) * width
+                        by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
+                        c.setFont("Helvetica-Bold", 5)
+                        c.drawString(bx, by - 1.2 * mm, raw_code[:12])
+
+                    if config.show_sku and config.sku:
+                        c.setFont("Helvetica-Bold", 5)
+                        if "sku" in cp:
+                            skx = (cp["sku"]["x"] / 100.0) * width
+                            sky = ((100.0 - cp["sku"]["y"]) / 100.0) * height
+                            c.drawString(skx, sky - 1.2 * mm, f"SKU: {config.sku[:14]}")
+                        else:
+                            c.drawString(44 * mm, 1.5 * mm, f"SKU: {config.sku[:14]}")
+            else:
+                if is_qr:
+                    qr_size = 8 * mm
+                    LabelService._draw_qr(c, code_payload, 60 * mm, 2 * mm, qr_size)
                     c.setFont("Helvetica-Bold", 5)
-                    c.drawString(44 * mm, 1.5 * mm, f"SKU: {config.sku[:14]}")
+                    c.drawString(44 * mm, 6.5 * mm, raw_code[:12])
+                    if config.show_sku and config.sku:
+                        c.setFont("Helvetica", 4.5)
+                        c.drawString(44 * mm, 2.5 * mm, f"SKU:{config.sku[:10]}")
+                else:
+                    try:
+                        bc = code128.Code128(raw_code, barHeight=5.5 * mm, barWidth=0.23)
+                        bc.drawOn(c, 44 * mm, 4.5 * mm)
+                    except Exception:
+                        c.setFont("Helvetica", 5)
+                        c.drawString(44 * mm, 5 * mm, raw_code)
+
+                    if config.show_sku and config.sku:
+                        c.setFont("Helvetica-Bold", 5)
+                        c.drawString(44 * mm, 1.5 * mm, f"SKU: {config.sku[:14]}")
 
             c.showPage()
 
