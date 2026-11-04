@@ -157,29 +157,73 @@ export const BarcodeRenderer = forwardRef<BarcodeRendererRef, BarcodeRendererPro
   }
 
   if (codeType === 'QR') {
+    const qrDisplaySize = typeof height === 'number' && height > 0 ? height : (typeof width === 'number' && width > 4 ? width : 60);
     return (
-      <div className={className} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', ...style }}>
+      <div 
+        className={className} 
+        style={{ 
+          display: 'inline-flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          width: qrDisplaySize,
+          height: qrDisplaySize,
+          minWidth: qrDisplaySize,
+          minHeight: qrDisplaySize,
+          flexShrink: 0,
+          ...style 
+        }}
+      >
         {qrDataUrl ? (
           <img 
             src={qrDataUrl} 
             alt={`QR: ${cleanValue}`} 
             style={{ 
-              maxWidth: '100%', 
-              height: 'auto', 
+              width: qrDisplaySize, 
+              height: qrDisplaySize, 
+              minWidth: qrDisplaySize,
+              minHeight: qrDisplaySize,
+              maxWidth: 'none',
+              maxHeight: 'none',
               display: 'block',
               borderRadius: 4,
+              objectFit: 'contain',
+              flexShrink: 0,
             }} 
           />
         ) : (
-          <div style={{ padding: 20, fontSize: '0.8rem', color: 'var(--neutral-400)' }}>Generating QR...</div>
+          <div style={{ padding: 10, fontSize: '0.75rem', color: 'var(--neutral-400)' }}>Generating QR...</div>
         )}
       </div>
     );
   }
 
+  const barcodeHeight = typeof height === 'number' ? height : 50;
   return (
-    <div className={className} style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center', maxWidth: '100%', overflow: 'hidden', ...style }}>
-      <svg ref={svgRef} style={{ display: 'block', maxWidth: '100%', height: 'auto' }} />
+    <div 
+      className={className} 
+      style={{ 
+        display: 'inline-flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        width: 'max-content',
+        height: barcodeHeight,
+        minHeight: barcodeHeight,
+        flexShrink: 0, 
+        overflow: 'visible', 
+        ...style 
+      }}
+    >
+      <svg 
+        ref={svgRef} 
+        style={{ 
+          display: 'block', 
+          height: barcodeHeight,
+          maxWidth: 'none',
+          maxHeight: 'none',
+          flexShrink: 0,
+        }} 
+      />
     </div>
   );
 });

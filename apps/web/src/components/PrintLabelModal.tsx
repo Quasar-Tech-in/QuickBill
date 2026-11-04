@@ -1,5 +1,28 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Printer, X, Tag, Gem, Download, Eye, QrCode, FileText, Copy, Check, Sparkles } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { 
+  Printer, 
+  X, 
+  Tag, 
+  Gem, 
+  Download, 
+  Eye, 
+  QrCode, 
+  FileText, 
+  Copy, 
+  Check, 
+  Sparkles, 
+  Image as ImageIcon,
+  Sliders,
+  Maximize2,
+  Minimize2,
+  Layers,
+  Columns,
+  AlignLeft,
+  AlignCenter,
+  Move,
+  RotateCcw,
+  Grid
+} from 'lucide-react';
 import { apiClient, store } from '../services/store';
 import { BarcodeRenderer, BarcodeRendererRef } from './BarcodeRenderer';
 
@@ -17,6 +40,52 @@ interface PrintLabelModalProps {
   storeName?: string;
 }
 
+export interface ElementPos {
+  x: number; // percentage (0 to 100%) from container left
+  y: number; // percentage (0 to 100%) from container top
+}
+
+export type LayoutPositions = Record<string, ElementPos>;
+
+const CACHE_KEY = 'qb_label_studio_design_v2';
+
+// Default coordinate templates for each physical layout
+const DEFAULT_DUMBBELL_POSITIONS: LayoutPositions = {
+  storeName: { x: 5, y: 14 },
+  productName: { x: 5, y: 44 },
+  price: { x: 5, y: 76 },
+  code: { x: 82, y: 48 },
+  barcodeText: { x: 64, y: 36 },
+  sku: { x: 64, y: 72 },
+};
+
+const DEFAULT_RATTAIL_POSITIONS: LayoutPositions = {
+  storeName: { x: 4, y: 14 },
+  productName: { x: 4, y: 44 },
+  price: { x: 4, y: 76 },
+  barcodeText: { x: 38, y: 36 },
+  sku: { x: 38, y: 72 },
+  code: { x: 55, y: 48 },
+};
+
+const DEFAULT_STACKED_POSITIONS: LayoutPositions = {
+  storeName: { x: 50, y: 9 },
+  productName: { x: 50, y: 22 },
+  code: { x: 50, y: 52 },
+  barcodeText: { x: 50, y: 74 },
+  sku: { x: 15, y: 91 },
+  price: { x: 85, y: 91 },
+};
+
+const DEFAULT_SIDEBYSIDE_POSITIONS: LayoutPositions = {
+  code: { x: 24, y: 42 },
+  barcodeText: { x: 24, y: 82 },
+  storeName: { x: 56, y: 14 },
+  productName: { x: 56, y: 36 },
+  sku: { x: 56, y: 62 },
+  price: { x: 56, y: 86 },
+};
+
 export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   isOpen,
   onClose,
@@ -24,57 +93,267 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   itemSku = 'SKU-001',
   itemBarcode = '',
   itemPrice = 0,
-  itemMrp = 0,
   publicItemId = 'ITM-1001',
   defaultStockCount = 10,
-  initialCodeType = 'BARCODE',
+  initialCodeType = 'QR',
   storeName: propStoreName,
 }) => {
   const resolveInitialStoreName = () => {
     return (propStoreName || store.getActiveTenant()?.name || store.getCurrentUser()?.tenantName || store.getActiveLocation()?.name || 'QuickBill Store').trim();
   };
 
-  const [codeType, setCodeType] = useState<'BARCODE' | 'QR'>(initialCodeType);
-  const [qrSizePreset, setQrSizePreset] = useState<'COMPACT' | 'STANDARD' | 'LARGE'>('STANDARD');
-  const [style, setStyle] = useState<'STANDARD' | 'JEWELRY_STRING_TAG' | 'SHELF' | 'SHIPPING'>('STANDARD');
-  const [paperSize, setPaperSize] = useState<'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40' | 'SHIPPING_4x6'>('THERMAL_50x30');
-  const [quantity, setQuantity] = useState(defaultStockCount || 10);
+  // Label Data States
+  const [productName, setProductName] = useState<string>(itemName || 'Product Item');
+  const [showProductName, setShowProductName] = useState(true);
+  const [price, setPrice] = useState<number>(itemPrice || 0);
   const [showPrice, setShowPrice] = useState(true);
-  const [showMrp, setShowMrp] = useState(true);
+  const [sku, setSku] = useState<string>(itemSku || '');
   const [showSku, setShowSku] = useState(true);
-  const [showStoreName, setShowStoreName] = useState(true);
   const [storeName, setStoreName] = useState<string>(resolveInitialStoreName);
+  const [showStoreName, setShowStoreName] = useState(true);
+
+  // Formatting & Arrangement States
+  const [codeType, setCodeType] = useState<'BARCODE' | 'QR'>(initialCodeType);
+  const [style, setStyle] = useState<'JEWELRY_RAT_TAIL' | 'STANDARD' | 'JEWELRY_STRING_TAG' | 'A4_SHEET'>('JEWELRY_RAT_TAIL');
+  const [paperSize, setPaperSize] = useState<
+    'RAT_TAIL_76x12' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40'
+  >('RAT_TAIL_76x12');
+  const [arrangement, setArrangement] = useState<'DUAL_FLAP' | 'STACKED' | 'SIDE_BY_SIDE'>('DUAL_FLAP');
+  const [codeScale, setCodeScale] = useState<number>(1.0); // 0.8, 1.0, 1.2, 1.4
+  const [quantity, setQuantity] = useState(defaultStockCount || 10);
+
+  // Cached positions dictionary for every template
+  const [positionsByTemplate, setPositionsByTemplate] = useState<Record<string, LayoutPositions>>({});
+
+  // Active element positions
+  const [elementPositions, setElementPositions] = useState<LayoutPositions>(DEFAULT_RATTAIL_POSITIONS);
+  const [isCustomLayout, setIsCustomLayout] = useState(false);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [dragSnapToGrid, setDragSnapToGrid] = useState<boolean>(true);
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  const dragStartRef = useRef<{
+    startX: number;
+    startY: number;
+    startElemX: number;
+    startElemY: number;
+    containerW: number;
+    containerH: number;
+  } | null>(null);
+
+  // Action / UI feedback states
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDownloadingImage, setIsDownloadingImage] = useState(false);
   const [copiedPayload, setCopiedPayload] = useState(false);
+  const [cacheNotification, setCacheNotification] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      setStoreName(resolveInitialStoreName());
+  // Helper flags
+  const isDumbbell = style === 'JEWELRY_STRING_TAG' || paperSize === 'DUMBBELL_70x12';
+  const isRatTail = (style === 'JEWELRY_RAT_TAIL' || paperSize === 'RAT_TAIL_76x12') && !isDumbbell;
+
+  // Resolve default positions based on layout
+  const resolveDefaultPositions = useCallback((curArr: string, curStyle: string, curPaper: string): LayoutPositions => {
+    if (curStyle === 'JEWELRY_STRING_TAG' || curPaper === 'DUMBBELL_70x12') {
+      return { ...DEFAULT_DUMBBELL_POSITIONS };
     }
-  }, [isOpen, propStoreName]);
+    if (curStyle === 'JEWELRY_RAT_TAIL' || curPaper === 'RAT_TAIL_76x12') {
+      return { ...DEFAULT_RATTAIL_POSITIONS };
+    }
+    if (curArr === 'SIDE_BY_SIDE') {
+      return { ...DEFAULT_SIDEBYSIDE_POSITIONS };
+    }
+    return { ...DEFAULT_STACKED_POSITIONS };
+  }, []);
+
+  // Save current design state to localStorage cache
+  const saveDesignToCache = useCallback((
+    newPositions: LayoutPositions,
+    curPaper = paperSize,
+    curStyle = style,
+    curArr = arrangement,
+    curCodeType = codeType,
+    curCodeScale = codeScale,
+    curSnap = dragSnapToGrid
+  ) => {
+    try {
+      const templateKey = curPaper;
+      const updatedPositionsByTemplate = {
+        ...positionsByTemplate,
+        [templateKey]: newPositions,
+      };
+      setPositionsByTemplate(updatedPositionsByTemplate);
+
+      const cacheObj = {
+        version: 2,
+        lastUpdated: Date.now(),
+        style: curStyle,
+        paperSize: curPaper,
+        arrangement: curArr,
+        codeType: curCodeType,
+        codeScale: curCodeScale,
+        dragSnapToGrid: curSnap,
+        showProductName,
+        showPrice,
+        showSku,
+        showStoreName,
+        positionsByTemplate: updatedPositionsByTemplate,
+      };
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cacheObj));
+    } catch (err) {
+      console.warn('Failed to cache label design:', err);
+    }
+  }, [positionsByTemplate, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, showProductName, showPrice, showSku, showStoreName]);
+
+  // Update code scale with live cache persistence
+  const handleUpdateCodeScale = (newScale: number) => {
+    const clamped = Math.round(Math.max(0.3, Math.min(2.5, newScale)) * 100) / 100;
+    setCodeScale(clamped);
+    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, clamped);
+  };
+
+  // Load cached template & design on open
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setProductName(itemName || 'Product Item');
+    setPrice(itemPrice || 0);
+    setSku(itemSku || '');
+    setStoreName(resolveInitialStoreName());
+    setCodeType(initialCodeType || 'QR');
+
+    try {
+      const cachedStr = localStorage.getItem(CACHE_KEY);
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr);
+        if (cached && typeof cached === 'object') {
+          if (cached.style) setStyle(cached.style);
+          if (cached.paperSize) setPaperSize(cached.paperSize);
+          if (cached.arrangement) setArrangement(cached.arrangement);
+          if (cached.codeType) setCodeType(cached.codeType);
+          if (cached.codeScale) setCodeScale(cached.codeScale);
+          if (typeof cached.dragSnapToGrid === 'boolean') setDragSnapToGrid(cached.dragSnapToGrid);
+          if (typeof cached.showProductName === 'boolean') setShowProductName(cached.showProductName);
+          if (typeof cached.showPrice === 'boolean') setShowPrice(cached.showPrice);
+          if (typeof cached.showSku === 'boolean') setShowSku(cached.showSku);
+          if (typeof cached.showStoreName === 'boolean') setShowStoreName(cached.showStoreName);
+
+          const templateKey = cached.paperSize || paperSize;
+          if (cached.positionsByTemplate && cached.positionsByTemplate[templateKey]) {
+            setPositionsByTemplate(cached.positionsByTemplate);
+            setElementPositions(cached.positionsByTemplate[templateKey]);
+            setIsCustomLayout(true);
+            setCacheNotification('Loaded saved design');
+            setTimeout(() => setCacheNotification(null), 2500);
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse cached label design:', e);
+    }
+
+    // Fallback to default positions if no cache
+    const defaults = resolveDefaultPositions(arrangement, style, paperSize);
+    setElementPositions(defaults);
+    setIsCustomLayout(false);
+  }, [isOpen, itemName, itemPrice, itemSku, propStoreName, initialCodeType, resolveDefaultPositions]);
+
+  // Reset layout to default preset
+  const resetLayout = useCallback((targetArr = arrangement, targetStyle = style, targetPaper = paperSize) => {
+    const defaults = resolveDefaultPositions(targetArr, targetStyle, targetPaper);
+    setElementPositions(defaults);
+    setIsCustomLayout(false);
+    saveDesignToCache(defaults, targetPaper, targetStyle, targetArr);
+    setCacheNotification('Layout reset to default');
+    setTimeout(() => setCacheNotification(null), 2000);
+  }, [arrangement, style, paperSize, resolveDefaultPositions, saveDesignToCache]);
 
   const barcodeRendererRef = useRef<BarcodeRendererRef | null>(null);
 
   // Determine standard payload strings
-  const barcodeValue = (itemBarcode || itemSku || publicItemId || 'ITM-1001').replace(/^ITEM:/, '').trim();
+  const barcodeValue = (itemBarcode || sku || publicItemId || 'ITM-1001').replace(/^ITEM:/, '').trim();
   const qrValue = publicItemId 
     ? (publicItemId.startsWith('ITEM:') ? publicItemId : `ITEM:${publicItemId}`) 
-    : (itemBarcode || itemSku || 'ITM-1001');
+    : (itemBarcode || sku || 'ITM-1001');
 
   const activePayload = codeType === 'QR' ? qrValue : barcodeValue;
 
   if (!isOpen) return null;
 
-  const handleStyleSelect = (newStyle: 'STANDARD' | 'JEWELRY_STRING_TAG' | 'SHELF' | 'SHIPPING') => {
+  const handleStyleSelect = (newStyle: 'JEWELRY_RAT_TAIL' | 'STANDARD' | 'JEWELRY_STRING_TAG' | 'A4_SHEET') => {
     setStyle(newStyle);
-    if (newStyle === 'JEWELRY_STRING_TAG') {
-      setPaperSize('DUMBBELL_70x12');
-    } else if (newStyle === 'SHIPPING') {
-      setPaperSize('SHIPPING_4x6');
+    let newPaper: 'RAT_TAIL_76x12' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40' = paperSize;
+    let newArr: 'DUAL_FLAP' | 'STACKED' | 'SIDE_BY_SIDE' = arrangement;
+
+    if (newStyle === 'JEWELRY_RAT_TAIL') {
+      newPaper = 'RAT_TAIL_76x12';
+      newArr = 'DUAL_FLAP';
+    } else if (newStyle === 'JEWELRY_STRING_TAG') {
+      newPaper = 'DUMBBELL_70x12';
+      newArr = 'DUAL_FLAP';
+    } else if (newStyle === 'A4_SHEET') {
+      newPaper = 'A4_GRID_24';
+      newArr = 'STACKED';
     } else if (newStyle === 'STANDARD') {
-      setPaperSize('THERMAL_50x30');
+      newPaper = 'THERMAL_50x30';
+      newArr = 'STACKED';
     }
+
+    setPaperSize(newPaper);
+    setArrangement(newArr);
+
+    // Check if custom positions exist for this paper in cache
+    const cachedPositions = positionsByTemplate[newPaper];
+    if (cachedPositions) {
+      setElementPositions(cachedPositions);
+      setIsCustomLayout(true);
+    } else {
+      const defaults = resolveDefaultPositions(newArr, newStyle, newPaper);
+      setElementPositions(defaults);
+      setIsCustomLayout(false);
+      saveDesignToCache(defaults, newPaper, newStyle, newArr);
+    }
+  };
+
+  const handlePaperSelect = (newPaper: 'RAT_TAIL_76x12' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40') => {
+    setPaperSize(newPaper);
+    let newStyle = style;
+    let newArr = arrangement;
+
+    if (newPaper === 'DUMBBELL_70x12') {
+      newStyle = 'JEWELRY_STRING_TAG';
+      newArr = 'DUAL_FLAP';
+      setStyle(newStyle);
+      setArrangement(newArr);
+    } else if (newPaper === 'RAT_TAIL_76x12') {
+      newStyle = 'JEWELRY_RAT_TAIL';
+      newArr = 'DUAL_FLAP';
+      setStyle(newStyle);
+      setArrangement(newArr);
+    } else if (newPaper === 'A4_GRID_24' || newPaper === 'A4_GRID_40') {
+      newStyle = 'A4_SHEET';
+      newArr = 'STACKED';
+      setStyle(newStyle);
+      setArrangement(newArr);
+    }
+
+    const cachedPositions = positionsByTemplate[newPaper];
+    if (cachedPositions) {
+      setElementPositions(cachedPositions);
+      setIsCustomLayout(true);
+    } else {
+      const defaults = resolveDefaultPositions(newArr, newStyle, newPaper);
+      setElementPositions(defaults);
+      setIsCustomLayout(false);
+      saveDesignToCache(defaults, newPaper, newStyle, newArr);
+    }
+  };
+
+  const handleArrangementSelect = (newArr: 'DUAL_FLAP' | 'STACKED' | 'SIDE_BY_SIDE') => {
+    setArrangement(newArr);
+    const defaults = resolveDefaultPositions(newArr, style, paperSize);
+    setElementPositions(defaults);
+    setIsCustomLayout(false);
+    saveDesignToCache(defaults, paperSize, style, newArr);
   };
 
   const handleCopyPayload = async () => {
@@ -87,6 +366,78 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     }
   };
 
+  const escapeHtml = (str: string) => {
+    return (str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  // Drag & drop pointer handler with auto-save to cache on release
+  const handlePointerDown = (id: string, e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setActiveDragId(id);
+
+    if (!canvasContainerRef.current) return;
+    const rect = canvasContainerRef.current.getBoundingClientRect();
+    const currentPos = elementPositions[id] || { x: 50, y: 50 };
+
+    dragStartRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startElemX: currentPos.x,
+      startElemY: currentPos.y,
+      containerW: rect.width,
+      containerH: rect.height,
+    };
+
+    let latestPositions = { ...elementPositions };
+
+    const handlePointerMove = (ev: PointerEvent) => {
+      if (!dragStartRef.current) return;
+      const { startX, startY, startElemX, startElemY, containerW, containerH } = dragStartRef.current;
+      const deltaX = ev.clientX - startX;
+      const deltaY = ev.clientY - startY;
+
+      let newX = startElemX + (deltaX / containerW) * 100;
+      let newY = startElemY + (deltaY / containerH) * 100;
+
+      // Clamping inside canvas bounds
+      newX = Math.max(2, Math.min(94, newX));
+      newY = Math.max(5, Math.min(95, newY));
+
+      // 2% grid snap (~1-1.5mm)
+      if (dragSnapToGrid) {
+        newX = Math.round(newX / 2) * 2;
+        newY = Math.round(newY / 2) * 2;
+      }
+
+      latestPositions = {
+        ...latestPositions,
+        [id]: { x: newX, y: newY },
+      };
+
+      setElementPositions(latestPositions);
+      setIsCustomLayout(true);
+    };
+
+    const handlePointerUp = () => {
+      setActiveDragId(null);
+      dragStartRef.current = null;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      // Persist the custom dragged position to cache immediately
+      saveDesignToCache(latestPositions);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
+  // Download raw QR code / Barcode graphic
   const handleDownloadCodeImage = async () => {
     if (!barcodeRendererRef.current) return;
     setIsDownloadingImage(true);
@@ -95,8 +446,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       if (dataUrl) {
         const link = document.createElement('a');
         link.href = dataUrl;
-        const safeName = (itemName || 'Product').replace(/[^a-zA-Z0-9_-]/g, '_');
-        link.download = `${codeType}_${barcodeValue}_${safeName}.png`;
+        const safeName = (productName || 'Product').replace(/[^a-zA-Z0-9_-]/g, '_');
+        link.download = `RawCode_${codeType}_${barcodeValue}_${safeName}.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -108,25 +459,565 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     }
   };
 
+  // High-Resolution 300 DPI Full Sticker Label PNG Export
+  // Accurately renders the exact user-dragged coordinates for all templates
+  const handleDownloadFullStickerImage = async () => {
+    setIsDownloadingImage(true);
+    try {
+      const rawDataUrl = barcodeRendererRef.current ? await barcodeRendererRef.current.getDataUrl() : null;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const safeName = (productName || 'Product').replace(/[^a-zA-Z0-9_-]/g, '_');
+      // Merge with default positions to guarantee every element has valid coordinates
+      const defaultPos = resolveDefaultPositions(arrangement, style, paperSize);
+      const pos: LayoutPositions = { ...defaultPos, ...elementPositions };
+
+      // Ensure vertical text baseline aligns with CSS translateY(-50%)
+      ctx.textBaseline = 'middle';
+
+      if (isDumbbell) {
+        // High-res Dumbbell Sticker: 700px x 120px (Symmetrical 28mm Left Wing, 14mm Bridge, 28mm Right Wing)
+        canvas.width = 700;
+        canvas.height = 120;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Die-cut background cutouts for central neck
+        ctx.fillStyle = '#f1f5f9';
+        ctx.fillRect(280, 0, 140, 44);
+        ctx.fillRect(280, 76, 140, 44);
+
+        // Left Wing (0 to 280px)
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(6, 6, 274, 108);
+
+        // Center Neck Strip (280 to 420px)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(280, 44, 140, 32);
+        ctx.strokeStyle = '#64748b';
+        ctx.strokeRect(280, 44, 140, 32);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('STRING LOOP', 350, 60);
+
+        // Right Wing (420 to 700px)
+        ctx.strokeStyle = '#94a3b8';
+        ctx.strokeRect(420, 6, 274, 108);
+
+        // Render Left Wing elements at user coordinates
+        ctx.textAlign = 'left';
+        if (showStoreName) {
+          const sX = (pos.storeName.x / 100) * canvas.width;
+          const sY = (pos.storeName.y / 100) * canvas.height;
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 13px sans-serif';
+          ctx.fillText((storeName || 'Store').substring(0, 18), sX, sY);
+        }
+        if (showProductName) {
+          const pX = (pos.productName.x / 100) * canvas.width;
+          const pY = (pos.productName.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e293b';
+          ctx.font = '600 13px sans-serif';
+          ctx.fillText((productName || 'Item').substring(0, 20), pX, pY);
+        }
+        if (showPrice) {
+          const prX = (pos.price.x / 100) * canvas.width;
+          const prY = (pos.price.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e1b4b';
+          ctx.font = 'bold 18px sans-serif';
+          ctx.fillText(`₹${(price || 0).toFixed(2)}`, prX, prY);
+        }
+
+        // Render Right Wing elements at user coordinates
+        if (rawDataUrl) {
+          const img = new Image();
+          await new Promise((res) => {
+            img.onload = res;
+            img.src = rawDataUrl;
+          });
+          const codeW = Math.round((codeType === 'QR' ? 84 : 110) * codeScale);
+          const codeH = Math.round((codeType === 'QR' ? 84 : 50) * codeScale);
+          const cX = (pos.code.x / 100) * canvas.width;
+          const cY = (pos.code.y / 100) * canvas.height;
+          ctx.drawImage(img, cX - codeW / 2, cY - codeH / 2, codeW, codeH);
+        }
+
+        ctx.textAlign = 'left';
+        const bX = (pos.barcodeText.x / 100) * canvas.width;
+        const bY = (pos.barcodeText.y / 100) * canvas.height;
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 12px monospace';
+        ctx.fillText(barcodeValue.substring(0, 12), bX, bY);
+
+        if (showSku && sku) {
+          const skX = (pos.sku.x / 100) * canvas.width;
+          const skY = (pos.sku.y / 100) * canvas.height;
+          ctx.fillStyle = '#64748b';
+          ctx.font = '11px sans-serif';
+          ctx.fillText(`SKU:${sku.substring(0, 10)}`, skX, skY);
+        }
+
+      } else if (isRatTail || arrangement === 'DUAL_FLAP') {
+        // High-res Rat-Tail Sticker: 760px x 120px (Flap 1: 260px, Flap 2: 260px, Tail: 240px)
+        canvas.width = 760;
+        canvas.height = 120;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Flap 1 border (0 to 260px)
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(6, 6, 252, 108);
+
+        ctx.textAlign = 'left';
+        if (showStoreName) {
+          const sX = (pos.storeName.x / 100) * canvas.width;
+          const sY = (pos.storeName.y / 100) * canvas.height;
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 13px sans-serif';
+          ctx.fillText((storeName || 'Store').substring(0, 20), sX, sY);
+        }
+        if (showProductName) {
+          const pX = (pos.productName.x / 100) * canvas.width;
+          const pY = (pos.productName.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e293b';
+          ctx.font = '600 13px sans-serif';
+          ctx.fillText((productName || 'Item').substring(0, 20), pX, pY);
+        }
+        if (showPrice) {
+          const prX = (pos.price.x / 100) * canvas.width;
+          const prY = (pos.price.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e1b4b';
+          ctx.font = 'bold 18px sans-serif';
+          ctx.fillText(`₹${(price || 0).toFixed(2)}`, prX, prY);
+        }
+
+        // Dashed Seam / Fold Line at 260px
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = '#64748b';
+        ctx.beginPath();
+        ctx.moveTo(260, 4);
+        ctx.lineTo(260, 116);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Flap 2 border (260 to 520px)
+        ctx.strokeStyle = '#94a3b8';
+        ctx.strokeRect(264, 6, 252, 108);
+
+        if (rawDataUrl) {
+          const img = new Image();
+          await new Promise((res) => {
+            img.onload = res;
+            img.src = rawDataUrl;
+          });
+          const codeW = Math.round((codeType === 'QR' ? 84 : 110) * codeScale);
+          const codeH = Math.round((codeType === 'QR' ? 84 : 50) * codeScale);
+          const cX = (pos.code.x / 100) * canvas.width;
+          const cY = (pos.code.y / 100) * canvas.height;
+          ctx.drawImage(img, cX - codeW / 2, cY - codeH / 2, codeW, codeH);
+        }
+
+        ctx.textAlign = 'left';
+        const bX = (pos.barcodeText.x / 100) * canvas.width;
+        const bY = (pos.barcodeText.y / 100) * canvas.height;
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 12px monospace';
+        ctx.fillText(barcodeValue.substring(0, 12), bX, bY);
+
+        if (showSku && sku) {
+          const skX = (pos.sku.x / 100) * canvas.width;
+          const skY = (pos.sku.y / 100) * canvas.height;
+          ctx.fillStyle = '#64748b';
+          ctx.font = '11px sans-serif';
+          ctx.fillText(`SKU:${sku.substring(0, 10)}`, skX, skY);
+        }
+
+        // Tail strap (520 to 760px)
+        ctx.fillStyle = '#f8fafc';
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.fillRect(524, 44, 230, 32);
+        ctx.strokeRect(524, 44, 230, 32);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('TAIL STRAP', 635, 60);
+
+      } else if (arrangement === 'SIDE_BY_SIDE') {
+        canvas.width = 500;
+        canvas.height = 300;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+
+        if (rawDataUrl) {
+          const img = new Image();
+          await new Promise((res) => {
+            img.onload = res;
+            img.src = rawDataUrl;
+          });
+          const cSize = Math.round(130 * codeScale);
+          const cX = (pos.code.x / 100) * canvas.width;
+          const cY = (pos.code.y / 100) * canvas.height;
+          ctx.drawImage(img, cX - cSize / 2, cY - cSize / 2, cSize, cSize);
+        }
+
+        ctx.textAlign = 'center';
+        const bX = (pos.barcodeText.x / 100) * canvas.width;
+        const bY = (pos.barcodeText.y / 100) * canvas.height;
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 13px monospace';
+        ctx.fillText(barcodeValue, bX, bY);
+
+        ctx.textAlign = 'left';
+        if (showStoreName) {
+          const sX = (pos.storeName.x / 100) * canvas.width;
+          const sY = (pos.storeName.y / 100) * canvas.height;
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 15px sans-serif';
+          ctx.fillText((storeName || 'Store').substring(0, 22), sX, sY);
+        }
+        if (showProductName) {
+          const pX = (pos.productName.x / 100) * canvas.width;
+          const pY = (pos.productName.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e293b';
+          ctx.font = '600 15px sans-serif';
+          ctx.fillText((productName || 'Item').substring(0, 22), pX, pY);
+        }
+        if (showSku && sku) {
+          const skX = (pos.sku.x / 100) * canvas.width;
+          const skY = (pos.sku.y / 100) * canvas.height;
+          ctx.fillStyle = '#64748b';
+          ctx.font = '13px sans-serif';
+          ctx.fillText(`SKU: ${sku}`, skX, skY);
+        }
+        if (showPrice) {
+          const prX = (pos.price.x / 100) * canvas.width;
+          const prY = (pos.price.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e1b4b';
+          ctx.font = 'bold 24px sans-serif';
+          ctx.fillText(`₹${(price || 0).toFixed(2)}`, prX, prY);
+        }
+
+      } else {
+        // Standard Stacked Layout (500 x 300)
+        canvas.width = 500;
+        canvas.height = 300;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+
+        ctx.textAlign = 'center';
+        if (showStoreName) {
+          const sX = (pos.storeName.x / 100) * canvas.width;
+          const sY = (pos.storeName.y / 100) * canvas.height;
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.fillText((storeName || 'Store').substring(0, 28), sX, sY);
+        }
+        if (showProductName) {
+          const pX = (pos.productName.x / 100) * canvas.width;
+          const pY = (pos.productName.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e293b';
+          ctx.font = '600 16px sans-serif';
+          ctx.fillText((productName || 'Item').substring(0, 28), pX, pY);
+        }
+
+        if (rawDataUrl) {
+          const img = new Image();
+          await new Promise((res) => {
+            img.onload = res;
+            img.src = rawDataUrl;
+          });
+          const cW = Math.round((codeType === 'QR' ? 120 : 320) * codeScale);
+          const cH = Math.round((codeType === 'QR' ? 120 : 64) * codeScale);
+          const cX = (pos.code.x / 100) * canvas.width;
+          const cY = (pos.code.y / 100) * canvas.height;
+          ctx.drawImage(img, cX - cW / 2, cY - cH / 2, cW, cH);
+        }
+
+        const bX = (pos.barcodeText.x / 100) * canvas.width;
+        const bY = (pos.barcodeText.y / 100) * canvas.height;
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 14px monospace';
+        ctx.fillText(barcodeValue, bX, bY);
+
+        ctx.textAlign = 'left';
+        if (showSku && sku) {
+          const skX = (pos.sku.x / 100) * canvas.width;
+          const skY = (pos.sku.y / 100) * canvas.height;
+          ctx.fillStyle = '#64748b';
+          ctx.font = '14px sans-serif';
+          ctx.fillText(`SKU: ${sku}`, skX, skY);
+        }
+
+        ctx.textAlign = 'right';
+        if (showPrice) {
+          const prX = (pos.price.x / 100) * canvas.width;
+          const prY = (pos.price.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e1b4b';
+          ctx.font = 'bold 22px sans-serif';
+          ctx.fillText(`₹${(price || 0).toFixed(2)}`, prX, prY);
+        }
+      }
+
+      const dataUrl = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `Sticker_${isDumbbell ? 'Dumbbell' : style}_${codeType}_${safeName}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.warn('Failed to export full sticker image:', err);
+    } finally {
+      setIsDownloadingImage(false);
+    }
+  };
+
+  // Robust Isolated Print Engine
+  // Positions elements with CSS percentage coordinates matching user drag & drop layout
+  const executeIsolatedPrint = async () => {
+    setIsGenerating(true);
+    try {
+      let codeDataUrl = barcodeRendererRef.current ? await barcodeRendererRef.current.getDataUrl() : null;
+
+      if (!codeDataUrl && typeof window !== 'undefined') {
+        const QRCode = (await import('qrcode')).default;
+        if (codeType === 'QR') {
+          codeDataUrl = await QRCode.toDataURL(activePayload, { width: 280, margin: 1 });
+        }
+      }
+
+      let w_mm = '50mm';
+      let h_mm = '30mm';
+      if (isDumbbell) {
+        w_mm = '70mm';
+        h_mm = '12mm';
+      } else if (isRatTail) {
+        w_mm = '76mm';
+        h_mm = '12mm';
+      } else if (paperSize === 'THERMAL_40x40') {
+        w_mm = '40mm';
+        h_mm = '40mm';
+      } else if (paperSize === 'THERMAL_38x25') {
+        w_mm = '38mm';
+        h_mm = '25mm';
+      } else if (paperSize === 'A4_GRID_24' || paperSize === 'A4_GRID_40') {
+        w_mm = '210mm';
+        h_mm = '297mm';
+      }
+
+      const defaultPos = resolveDefaultPositions(arrangement, style, paperSize);
+      const pos: LayoutPositions = { ...defaultPos, ...elementPositions };
+
+      // Construct Unit HTML matching user drag & drop coordinates
+      const buildUnitHtml = () => {
+        if (isDumbbell) {
+          // Authentic Jewelry Dumbbell 70mm x 12mm
+          return `
+            <div style="width:70mm;height:12mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
+              <!-- Background Dumbbell Guides -->
+              <div style="position:absolute;left:0;top:0;width:28mm;height:12mm;border:0.2mm solid #cbd5e1;border-right:0.3mm dashed #64748b;box-sizing:border-box;"></div>
+              <div style="position:absolute;left:28mm;top:4.5mm;width:14mm;height:3mm;border-top:0.3mm solid #64748b;border-bottom:0.3mm solid #64748b;background:#f8fafc;box-sizing:border-box;"></div>
+              <div style="position:absolute;left:42mm;top:0;width:28mm;height:12mm;border:0.2mm solid #cbd5e1;border-left:0.3mm dashed #64748b;box-sizing:border-box;"></div>
+
+              <!-- Draggable / Custom Positioned Elements -->
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);font-size:5pt;font-weight:bold;line-height:1;white-space:nowrap;">${escapeHtml(storeName || 'Store')}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);font-size:5pt;font-weight:600;line-height:1;white-space:nowrap;">${escapeHtml(productName || 'Item')}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);font-size:6.5pt;font-weight:bold;line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              
+              ${codeDataUrl ? `
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
+                  <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${5.5 * codeScale}mm` : `${8.5 * codeScale}mm`};max-width:25mm;object-fit:contain;" />
+                </div>
+              ` : ''}
+              
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);font-size:5pt;font-family:monospace;font-weight:bold;line-height:1;">${escapeHtml(barcodeValue.substring(0, 12))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);font-size:4pt;color:#333;line-height:1;">SKU:${escapeHtml(sku.substring(0, 10))}</div>` : ''}
+            </div>
+          `;
+        } else if (isRatTail || arrangement === 'DUAL_FLAP') {
+          // Jewelry Rat-Tail 76mm x 12mm
+          return `
+            <div style="width:76mm;height:12mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
+              <!-- Background Guides -->
+              <div style="position:absolute;left:0;top:0;width:26mm;height:12mm;border:0.2mm solid #cbd5e1;border-right:0.3mm dashed #64748b;box-sizing:border-box;"></div>
+              <div style="position:absolute;left:26mm;top:0;width:26mm;height:12mm;border:0.2mm solid #cbd5e1;box-sizing:border-box;"></div>
+              <div style="position:absolute;left:52mm;top:4.5mm;width:24mm;height:3mm;border:0.2mm solid #cbd5e1;background:#f8fafc;box-sizing:border-box;"></div>
+
+              <!-- Custom Elements -->
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);font-size:5pt;font-weight:bold;line-height:1;white-space:nowrap;">${escapeHtml(storeName || 'Store')}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);font-size:5pt;font-weight:600;line-height:1;white-space:nowrap;">${escapeHtml(productName || 'Item')}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);font-size:6.5pt;font-weight:bold;line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+
+              ${codeDataUrl ? `
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
+                  <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${6.5 * codeScale}mm` : `${9.5 * codeScale}mm`};max-width:24mm;object-fit:contain;" />
+                </div>
+              ` : ''}
+
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);font-size:5pt;font-family:monospace;font-weight:bold;line-height:1;">${escapeHtml(barcodeValue.substring(0, 12))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);font-size:4pt;color:#333;line-height:1;">SKU:${escapeHtml(sku.substring(0, 10))}</div>` : ''}
+            </div>
+          `;
+        } else if (arrangement === 'SIDE_BY_SIDE') {
+          return `
+            <div style="width:${w_mm};height:${h_mm};position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;border:0.3mm solid #cbd5e1;padding:1mm;font-family:Arial,Helvetica,sans-serif;color:#000000;">
+              ${codeDataUrl ? `
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);">
+                  <img src="${codeDataUrl}" style="max-height:${parseFloat(h_mm) * 0.7 * codeScale}mm;max-width:30mm;object-fit:contain;" />
+                </div>
+              ` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);font-size:5pt;font-family:monospace;">${escapeHtml(barcodeValue)}</div>
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);font-size:6pt;font-weight:bold;">${escapeHtml(storeName || 'Store')}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);font-size:6pt;font-weight:600;">${escapeHtml(productName || 'Item')}</div>` : ''}
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);font-size:5pt;color:#444;">SKU: ${escapeHtml(sku)}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);font-size:7.5pt;font-weight:bold;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+            </div>
+          `;
+        } else {
+          // Standard Stacked Layout
+          return `
+            <div style="width:${w_mm};height:${h_mm};position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;border:0.3mm solid #cbd5e1;padding:1mm;font-family:Arial,Helvetica,sans-serif;color:#000000;">
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%);font-size:6pt;font-weight:bold;white-space:nowrap;">${escapeHtml(storeName || 'Store')}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%);font-size:6.5pt;font-weight:bold;white-space:nowrap;">${escapeHtml(productName || 'Item')}</div>` : ''}
+              ${codeDataUrl ? `
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);">
+                  <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${7 * codeScale}mm` : `${13 * codeScale}mm`};max-width:40mm;object-fit:contain;" />
+                </div>
+              ` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);font-size:5pt;font-family:monospace;">${escapeHtml(barcodeValue)}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);font-size:5.5pt;">SKU:${escapeHtml(sku)}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-100%,-50%);font-size:7pt;font-weight:bold;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+            </div>
+          `;
+        }
+      };
+
+      const singleLabelHtml = buildUnitHtml();
+      let bodyHtml = '';
+
+      if (paperSize === 'A4_GRID_24' || paperSize === 'A4_GRID_40') {
+        const cols = paperSize === 'A4_GRID_40' ? 4 : 3;
+        const rows = paperSize === 'A4_GRID_40' ? 10 : 8;
+        const totalSlots = cols * rows;
+        const pagesCount = Math.ceil(quantity / totalSlots);
+
+        let curIndex = 0;
+        for (let p = 0; p < pagesCount; p++) {
+          bodyHtml += `
+            <div style="width:210mm;height:297mm;padding:10mm;display:grid;grid-template-columns:repeat(${cols}, 1fr);grid-template-rows:repeat(${rows}, 1fr);gap:2mm;box-sizing:border-box;page-break-after:always;">
+          `;
+          for (let slot = 0; slot < totalSlots && curIndex < quantity; slot++, curIndex++) {
+            bodyHtml += `<div style="display:flex;align-items:center;justify-content:center;overflow:hidden;border:0.2mm solid #e2e8f0;">${singleLabelHtml}</div>`;
+          }
+          bodyHtml += `</div>`;
+        }
+      } else {
+        for (let i = 0; i < quantity; i++) {
+          bodyHtml += `
+            <div style="width:${w_mm};height:${h_mm};page-break-after:always;display:flex;align-items:center;justify-content:center;overflow:hidden;box-sizing:border-box;">
+              ${singleLabelHtml}
+            </div>
+          `;
+        }
+      }
+
+      // Create isolated invisible iframe
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow?.document;
+      if (!doc) throw new Error('Cannot access print iframe document');
+
+      doc.open();
+      doc.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>QuickBill Print - ${escapeHtml(productName)}</title>
+          <style>
+            @page {
+              size: auto;
+              margin: 0mm !important;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            html, body {
+              margin: 0;
+              padding: 0;
+              background: #ffffff;
+              color: #000000;
+            }
+          </style>
+        </head>
+        <body>
+          ${bodyHtml}
+        </body>
+        </html>
+      `);
+      doc.close();
+
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 1500);
+      }, 300);
+
+    } catch (err) {
+      console.error('Isolated print engine error, falling back to window.print():', err);
+      window.print();
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // Download PDF with custom coordinates sent to backend ReportLab service
   const handleDownloadPdf = async () => {
     setIsGenerating(true);
     try {
+      const defaultPos = resolveDefaultPositions(arrangement, style, paperSize);
+      const pos: LayoutPositions = { ...defaultPos, ...elementPositions };
+
       const payload = {
-        itemName,
-        sku: itemSku,
+        itemName: productName,
+        sku: sku,
         barcode: itemBarcode || barcodeValue,
-        salePrice: itemPrice,
-        mrp: itemMrp,
+        salePrice: price,
         publicItemId,
         style,
         paperSize,
         codeType,
         quantity,
         showPrice,
-        showMrp,
         showSku,
         showStoreName,
         storeName: storeName || 'Store',
+        customPositions: pos, // Pass custom layout coordinates to backend ReportLab!
+        codeScale,
       };
 
       const response = await apiClient.post('/labels/custom-pdf', payload, {
@@ -137,24 +1028,17 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `Label_${codeType}_${itemSku || barcodeValue}_${paperSize}.pdf`);
+      link.setAttribute('download', `Label_${isDumbbell ? 'Dumbbell' : style}_${codeType}_${sku || barcodeValue}_${quantity}qty.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-
-      onClose();
     } catch (err) {
-      console.warn('PDF generation endpoint error:', err);
-      window.print();
-      onClose();
+      console.warn('Backend PDF endpoint error, falling back to isolated print dialog:', err);
+      executeIsolatedPrint();
     } finally {
       setIsGenerating(false);
     }
-  };
-
-  const handleDirectPrintWindow = () => {
-    window.print();
   };
 
   return (
@@ -164,8 +1048,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         onClick={(e) => e.stopPropagation()} 
         style={{ 
           width: '100%',
-          maxWidth: 750, 
-          maxHeight: '92vh', 
+          maxWidth: 900, 
+          maxHeight: '94vh', 
           display: 'flex', 
           flexDirection: 'column', 
           backgroundColor: '#ffffff',
@@ -174,88 +1058,122 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           overflow: 'hidden',
         }}
       >
-        {/* Modal Header */}
-        <div 
-          className="no-print"
-          style={{ 
-            padding: '16px 24px', 
-            borderBottom: '1px solid var(--neutral-200)', 
-            backgroundColor: '#ffffff',
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'space-between',
-            flexShrink: 0
-          }}
-        >
+        {/* MODAL HEADER */}
+        <div style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid var(--neutral-200)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#ffffff',
+          flexShrink: 0
+        }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
-              width: 40,
-              height: 40,
-              borderRadius: 'var(--radius-md)',
+              width: 42,
+              height: 42,
+              borderRadius: 10,
               backgroundColor: 'var(--primary-50)',
               color: 'var(--primary-600)',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              boxShadow: 'var(--shadow-sm)'
             }}>
-              {codeType === 'QR' ? <QrCode size={22} /> : <Tag size={22} />}
+              <QrCode size={24} />
             </div>
             <div>
-              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--neutral-900)', margin: 0 }}>
-                Item Barcode &amp; QR Studio
-              </h3>
-              <p style={{ fontSize: '0.78rem', color: 'var(--neutral-500)', margin: '2px 0 0 0' }}>
-                Generate crisp labels, QR stickers, and print thermal rolls or A4 sheets
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                  Interactive Barcode &amp; QR Label Studio
+                </h3>
+                {cacheNotification && (
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#16a34a', backgroundColor: '#dcfce7', padding: '2px 8px', borderRadius: 12 }}>
+                    ✓ {cacheNotification}
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: '2px 0 0 0', fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
+                Drag elements directly on canvas • Symmetrical Jewelry Dumbbell &amp; Rat-Tail Rolls • Auto-saved template cache
               </p>
             </div>
           </div>
-          <button className="btn btn-secondary btn-icon" onClick={onClose} style={{ width: 32, height: 32 }}>
-            <X size={16} />
+
+          <button 
+            type="button" 
+            onClick={onClose} 
+            className="btn btn-ghost btn-sm"
+            style={{ borderRadius: '50%', width: 32, height: 32, padding: 0 }}
+          >
+            <X size={18} />
           </button>
         </div>
 
-        {/* Modal Scroll Body */}
-        <div className="no-print" style={{ padding: '20px 24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {/* MODAL SCROLLABLE BODY */}
+        <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* 1. Code Type Format Selector (Barcode vs QR) */}
+          {/* 1. SYMBOLOGY SELECTOR */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                1. Code Representation Type
-              </label>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.73rem', color: 'var(--neutral-600)' }}>
-                <span>Payload:</span>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--neutral-900)', fontWeight: 700, backgroundColor: 'var(--neutral-100)', padding: '1px 6px', borderRadius: 4 }}>
-                  {activePayload}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleCopyPayload}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: copiedPayload ? 'var(--success-700)' : 'var(--primary-600)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    fontSize: '0.70rem',
-                    fontWeight: 700,
-                    padding: '1px 4px'
-                  }}
-                  title="Copy code value to clipboard"
-                >
-                  {copiedPayload ? <Check size={12} /> : <Copy size={12} />}
-                  <span>{copiedPayload ? 'Copied' : 'Copy'}</span>
-                </button>
-              </div>
-            </div>
-
+            <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              1. Code Symbology
+            </label>
             <div className="modal-grid-row-2">
-              <div 
-                onClick={() => setCodeType('BARCODE')}
+              <div
+                onClick={() => {
+                  setCodeType('QR');
+                  saveDesignToCache(elementPositions, paperSize, style, arrangement, 'QR');
+                }}
                 style={{
-                  padding: '12px 14px',
+                  padding: '10px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  border: `2px solid ${codeType === 'QR' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                  backgroundColor: codeType === 'QR' ? 'var(--primary-50)' : '#ffffff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  transition: 'all 0.15s ease',
+                  boxShadow: codeType === 'QR' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 8, 
+                    backgroundColor: codeType === 'QR' ? 'var(--primary-600)' : 'var(--neutral-100)', 
+                    color: codeType === 'QR' ? '#ffffff' : 'var(--neutral-600)', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    flexShrink: 0 
+                  }}>
+                    <QrCode size={20} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.86rem', fontWeight: 800, color: codeType === 'QR' ? 'var(--primary-900)' : 'var(--neutral-900)' }}>
+                      2D QR Code
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                      Universal smartphone camera scan
+                    </div>
+                  </div>
+                </div>
+                {codeType === 'QR' && (
+                  <span style={{ fontSize: '0.66rem', fontWeight: 800, color: 'var(--primary-700)', backgroundColor: '#ffffff', padding: '2px 8px', borderRadius: 10, border: '1px solid var(--primary-300)' }}>
+                    Active
+                  </span>
+                )}
+              </div>
+
+              <div
+                onClick={() => {
+                  setCodeType('BARCODE');
+                  saveDesignToCache(elementPositions, paperSize, style, arrangement, 'BARCODE');
+                }}
+                style={{
+                  padding: '10px 14px',
                   borderRadius: 'var(--radius-md)',
                   border: `2px solid ${codeType === 'BARCODE' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
                   backgroundColor: codeType === 'BARCODE' ? 'var(--primary-50)' : '#ffffff',
@@ -297,244 +1215,1265 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   </span>
                 )}
               </div>
-
-              <div 
-                onClick={() => setCodeType('QR')}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 'var(--radius-md)',
-                  border: `2px solid ${codeType === 'QR' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
-                  backgroundColor: codeType === 'QR' ? 'var(--primary-50)' : '#ffffff',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  transition: 'all 0.15s ease',
-                  boxShadow: codeType === 'QR' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ 
-                    width: 36, 
-                    height: 36, 
-                    borderRadius: 8, 
-                    backgroundColor: codeType === 'QR' ? 'var(--primary-600)' : 'var(--neutral-100)', 
-                    color: codeType === 'QR' ? '#ffffff' : 'var(--neutral-600)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    flexShrink: 0 
-                  }}>
-                    <QrCode size={18} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.86rem', fontWeight: 800, color: codeType === 'QR' ? 'var(--primary-900)' : 'var(--neutral-900)' }}>
-                      2D QR Code
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--neutral-500)', marginTop: 2 }}>
-                      Camera scanner &amp; QuickBill App format
-                    </div>
-                  </div>
-                </div>
-                {codeType === 'QR' && (
-                  <span style={{ fontSize: '0.66rem', fontWeight: 800, color: 'var(--primary-700)', backgroundColor: '#ffffff', padding: '2px 8px', borderRadius: 10, border: '1px solid var(--primary-300)' }}>
-                    Active
-                  </span>
-                )}
-              </div>
             </div>
           </div>
 
-          {/* 2. Interactive Live Vector Code & Sticker Preview */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* 2. INTERACTIVE DRAG & DROP DESIGN CANVAS */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                2. Live Layout Preview
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  2. Interactive Design Canvas
+                </label>
+                <span style={{ fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'var(--primary-100)', color: 'var(--primary-800)', padding: '2px 8px', borderRadius: 10 }}>
+                  {paperSize === 'RAT_TAIL_76x12' ? '76 × 12 mm' : paperSize === 'DUMBBELL_70x12' ? '70 × 12 mm' : paperSize === 'THERMAL_40x40' ? '40 × 40 mm' : paperSize === 'THERMAL_38x25' ? '38 × 25 mm' : paperSize === 'THERMAL_50x30' ? '50 × 30 mm' : 'A4 Sheet'}
+                </span>
+                {isCustomLayout && (
+                  <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#b45309', backgroundColor: '#fef3c7', padding: '2px 6px', borderRadius: 6 }}>
+                    Custom Drag Layout Active
+                  </span>
+                )}
+              </div>
 
-              {/* QR Sizing Switcher (if QR mode active) */}
-              {codeType === 'QR' && (
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, backgroundColor: 'var(--neutral-100)', padding: '2px 4px', borderRadius: 'var(--radius-sm)' }}>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-500)', padding: '0 4px' }}>QR Size:</span>
-                  {(['COMPACT', 'STANDARD', 'LARGE'] as const).map((sz) => (
+              {/* Canvas Controls: Drag tools, Reset, Snap & Scale */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {/* Reset Layout Button */}
+                <button
+                  type="button"
+                  onClick={() => resetLayout()}
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '3px 8px', fontSize: '0.70rem', display: 'flex', alignItems: 'center', gap: 4 }}
+                  title="Reset elements to standard template positions"
+                >
+                  <RotateCcw size={12} />
+                  <span>Reset Layout</span>
+                </button>
+
+                {/* Snap to grid toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextSnap = !dragSnapToGrid;
+                    setDragSnapToGrid(nextSnap);
+                    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, nextSnap);
+                  }}
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: '0.70rem',
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    border: `1px solid ${dragSnapToGrid ? 'var(--primary-400)' : 'var(--neutral-300)'}`,
+                    backgroundColor: dragSnapToGrid ? 'var(--primary-50)' : '#ffffff',
+                    color: dragSnapToGrid ? 'var(--primary-700)' : 'var(--neutral-600)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                  title="Snap dragging to grid"
+                >
+                  <Grid size={12} />
+                  <span>Snap: {dragSnapToGrid ? 'ON' : 'OFF'}</span>
+                </button>
+
+                {/* Layout Switcher */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', backgroundColor: 'var(--neutral-100)', padding: '2px 4px', borderRadius: 'var(--radius-sm)' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-500)', padding: '0 4px' }}>Layout:</span>
+                  {(['DUAL_FLAP', 'STACKED', 'SIDE_BY_SIDE'] as const).map((arr) => (
                     <button
-                      key={sz}
+                      key={arr}
                       type="button"
-                      onClick={() => setQrSizePreset(sz)}
+                      onClick={() => handleArrangementSelect(arr)}
                       style={{
-                        padding: '2px 7px',
+                        padding: '2px 8px',
                         fontSize: '0.68rem',
                         fontWeight: 700,
                         border: 'none',
                         borderRadius: 4,
                         cursor: 'pointer',
-                        backgroundColor: qrSizePreset === sz ? '#ffffff' : 'transparent',
-                        color: qrSizePreset === sz ? 'var(--primary-700)' : 'var(--neutral-600)',
-                        boxShadow: qrSizePreset === sz ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                        backgroundColor: arrangement === arr ? '#ffffff' : 'transparent',
+                        color: arrangement === arr ? 'var(--primary-700)' : 'var(--neutral-600)',
+                        boxShadow: arrangement === arr ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
                       }}
                     >
-                      {sz === 'COMPACT' ? '25mm' : sz === 'STANDARD' ? '35mm' : '50mm'}
+                      {arr === 'DUAL_FLAP' ? (isDumbbell ? 'Dumbbell' : 'Dual-Flap') : arr === 'STACKED' ? 'Stacked' : 'Side-by-Side'}
                     </button>
                   ))}
                 </div>
-              )}
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* Custom Code Scaling (Fine Slider + Stepper + Direct % + Presets) */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, backgroundColor: 'var(--neutral-100)', padding: '2px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-600)', whiteSpace: 'nowrap' }}>Scale:</span>
+
+                  {/* Decrement Stepper */}
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateCodeScale(codeScale - 0.05)}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 3,
+                      border: '1px solid var(--neutral-300)',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      color: 'var(--neutral-700)',
+                      padding: 0,
+                      lineHeight: 1
+                    }}
+                    title="Decrease code size by 5%"
+                  >
+                    -
+                  </button>
+
+                  {/* Smooth Range Slider (40% to 200%) */}
+                  <input
+                    type="range"
+                    min="0.4"
+                    max="2.0"
+                    step="0.05"
+                    value={codeScale}
+                    onChange={(e) => handleUpdateCodeScale(parseFloat(e.target.value))}
+                    style={{
+                      width: 58,
+                      height: 4,
+                      accentColor: 'var(--primary-600)',
+                      cursor: 'pointer'
+                    }}
+                    title={`Code Scale: ${Math.round(codeScale * 100)}%`}
+                  />
+
+                  {/* Increment Stepper */}
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateCodeScale(codeScale + 0.05)}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 3,
+                      border: '1px solid var(--neutral-300)',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      color: 'var(--neutral-700)',
+                      padding: 0,
+                      lineHeight: 1
+                    }}
+                    title="Increase code size by 5%"
+                  >
+                    +
+                  </button>
+
+                  {/* Editable Numeric Percentage */}
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                    <input
+                      type="number"
+                      min={30}
+                      max={250}
+                      step={5}
+                      value={Math.round(codeScale * 100)}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val)) {
+                          handleUpdateCodeScale(val / 100);
+                        }
+                      }}
+                      style={{
+                        width: 38,
+                        padding: '1px 2px',
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        textAlign: 'center',
+                        border: '1px solid var(--neutral-300)',
+                        borderRadius: 3,
+                        backgroundColor: '#ffffff',
+                        color: 'var(--primary-700)'
+                      }}
+                    />
+                    <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--neutral-500)' }}>%</span>
+                  </div>
+
+                  {/* Quick Preset Chips */}
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, borderLeft: '1px solid var(--neutral-300)', paddingLeft: 4 }}>
+                    {([0.5, 0.75, 1.0, 1.25, 1.5] as const).map((sc) => (
+                      <button
+                        key={sc}
+                        type="button"
+                        onClick={() => handleUpdateCodeScale(sc)}
+                        style={{
+                          padding: '1px 4px',
+                          fontSize: '0.64rem',
+                          fontWeight: 700,
+                          border: 'none',
+                          borderRadius: 3,
+                          cursor: 'pointer',
+                          backgroundColor: Math.abs(codeScale - sc) < 0.02 ? '#ffffff' : 'transparent',
+                          color: Math.abs(codeScale - sc) < 0.02 ? 'var(--primary-700)' : 'var(--neutral-600)',
+                          boxShadow: Math.abs(codeScale - sc) < 0.02 ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                        }}
+                      >
+                        {`${Math.round(sc * 100)}%`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Export PNG */}
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={handleDownloadCodeImage}
+                  onClick={handleDownloadFullStickerImage}
                   disabled={isDownloadingImage}
-                  style={{ padding: '3px 9px', fontSize: '0.73rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  style={{ padding: '3px 8px', fontSize: '0.70rem', display: 'flex', alignItems: 'center', gap: 4 }}
+                  title="Download full 300 DPI sticker image"
                 >
-                  <Download size={13} />
-                  <span>{isDownloadingImage ? 'Exporting...' : `Download ${codeType} PNG`}</span>
+                  <ImageIcon size={12} />
+                  <span>PNG</span>
                 </button>
               </div>
             </div>
 
+            {/* LIVE DRAG & DROP WORKBENCH */}
             <div 
-              style={{ 
-                padding: 18, 
-                backgroundColor: 'var(--neutral-50)', 
-                border: '1.5px dashed var(--neutral-300)', 
-                borderRadius: 'var(--radius-md)', 
-                display: 'flex', 
-                alignItems: 'center', 
+              style={{
+                backgroundColor: 'var(--neutral-100)',
+                border: '1.5px dashed var(--neutral-300)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '24px 16px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
                 justifyContent: 'center',
-                minHeight: 140
+                position: 'relative',
+                overflow: 'hidden'
               }}
             >
-              {style === 'JEWELRY_STRING_TAG' ? (
-                /* Dumbbell / Jewelry String Tag Graphic Preview */
-                <div 
-                  style={{ 
-                    width: '100%', 
-                    maxWidth: 520, 
-                    height: 74, 
-                    backgroundColor: '#ffffff', 
-                    border: '1.5px solid var(--neutral-300)', 
-                    borderRadius: 8, 
-                    boxShadow: 'var(--shadow-sm)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    padding: '0 10px',
-                    position: 'relative'
-                  }}
-                >
-                  {/* Left Wing (Store + Price & Title) */}
-                  <div style={{ flex: '2', paddingRight: 8 }}>
-                    {showStoreName && <div style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--neutral-800)' }}>{storeName || 'Store'}</div>}
-                    <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--neutral-700)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{itemName}</div>
-                    {showPrice && <div style={{ fontSize: '0.85rem', fontWeight: 900, color: 'var(--primary-700)' }}>₹{itemPrice.toFixed(2)}</div>}
-                  </div>
+              {/* Drag instruction notice */}
+              <div style={{
+                position: 'absolute',
+                top: 6,
+                left: 12,
+                fontSize: '0.66rem',
+                color: 'var(--neutral-500)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}>
+                <Move size={12} />
+                <span>Click &amp; drag any text or barcode directly to custom position • Auto-saved to cache</span>
+              </div>
 
-                  {/* Middle Non-Adhesive String Bridge */}
+              {/* RENDERED CANVAS WORKBENCH */}
+              {isDumbbell ? (
+                /* AUTHENTIC JEWELRY DUMBBELL CANVAS (70mm x 12mm Symmetrical) */
+                <div style={{ width: '100%', maxWidth: 580, padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div 
-                    style={{ 
-                      width: 52, 
-                      height: 28, 
-                      borderTop: '1.5px solid var(--neutral-300)', 
-                      borderBottom: '1.5px solid var(--neutral-300)', 
-                      backgroundColor: 'var(--neutral-100)', 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'center', 
-                      fontSize: '0.62rem',
-                      color: 'var(--neutral-400)',
-                      fontWeight: 600
+                    ref={canvasContainerRef}
+                    style={{
+                      width: '100%',
+                      height: 104,
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      userSelect: 'none'
                     }}
                   >
-                    Bridge
-                  </div>
-
-                  {/* Right Wing (Dynamic Code) */}
-                  <div style={{ flex: '2', paddingLeft: 8, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '0.68rem', fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#000000' }}>
-                        {barcodeValue}
+                    {/* LEFT WING (0 to 40% = 28mm) */}
+                    <div style={{
+                      width: '40%',
+                      height: '100%',
+                      backgroundColor: '#ffffff',
+                      border: '1.5px solid var(--neutral-400)',
+                      borderRight: '1.5px dashed var(--neutral-400)',
+                      borderTopLeftRadius: 8,
+                      borderBottomLeftRadius: 8,
+                      position: 'relative',
+                      boxShadow: 'var(--shadow-sm)',
+                    }}>
+                      <div style={{ position: 'absolute', right: 4, top: 4, backgroundColor: 'var(--neutral-200)', color: 'var(--neutral-700)', fontSize: '0.52rem', fontWeight: 800, padding: '1px 3px', borderRadius: 3 }}>
+                        FOLD
                       </div>
-                      {showSku && <div style={{ fontSize: '0.62rem', color: 'var(--neutral-500)', fontWeight: 700 }}>SKU: {itemSku}</div>}
                     </div>
 
-                    <BarcodeRenderer
-                      ref={barcodeRendererRef}
-                      value={activePayload}
-                      codeType={codeType}
-                      width={codeType === 'BARCODE' ? 1.0 : undefined}
-                      height={codeType === 'BARCODE' ? 32 : 46}
-                      showText={false}
-                    />
-                  </div>
-                </div>
-              ) : (
-                /* Standard Retail Sticker Preview */
-                <div 
-                  style={{ 
-                    width: paperSize === 'THERMAL_40x40' ? 220 : 250, 
-                    padding: '12px 14px', 
-                    backgroundColor: '#ffffff', 
-                    border: '1.5px solid var(--neutral-300)', 
-                    borderRadius: 8, 
-                    boxShadow: 'var(--shadow-sm)', 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    alignItems: 'center',
-                    textAlign: 'center'
-                  }}
-                >
-                  {showStoreName && <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--neutral-900)' }}>{storeName || 'Store'}</div>}
-                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--neutral-800)', margin: '3px 0', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {itemName}
-                  </div>
-                  
-                  <div style={{ margin: '6px 0', width: '100%', display: 'flex', justifyContent: 'center' }}>
-                    <BarcodeRenderer
-                      ref={barcodeRendererRef}
-                      value={activePayload}
-                      codeType={codeType}
-                      width={codeType === 'BARCODE' ? 1.6 : qrSizePreset === 'COMPACT' ? 1.2 : qrSizePreset === 'LARGE' ? 2.0 : 1.6}
-                      height={codeType === 'BARCODE' ? 44 : qrSizePreset === 'COMPACT' ? 68 : qrSizePreset === 'LARGE' ? 124 : 96}
-                      showText={codeType === 'BARCODE'}
-                    />
-                  </div>
+                    {/* CENTER BRIDGE NECK (40% to 60% = 14mm) with die-cut top/bottom cutouts */}
+                    <div style={{
+                      width: '20%',
+                      height: '100%',
+                      position: 'relative',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      {/* Top die-cut guide */}
+                      <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        width: '100%',
+                        height: 38,
+                        borderBottom: '1px dotted var(--neutral-300)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.50rem',
+                        color: 'var(--neutral-400)'
+                      }}>
+                        Die-Cut Void
+                      </div>
 
-                  {codeType === 'QR' && (
-                    <div style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--neutral-600)', marginBottom: 4 }}>
+                      {/* Narrow Center String Neck Strip */}
+                      <div style={{
+                        width: '100%',
+                        height: 26,
+                        backgroundColor: '#ffffff',
+                        borderTop: '1.5px solid var(--neutral-400)',
+                        borderBottom: '1.5px solid var(--neutral-400)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.54rem',
+                        fontWeight: 800,
+                        color: 'var(--neutral-500)',
+                        letterSpacing: '0.02em',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                        zIndex: 2
+                      }}>
+                        Loop Bridge (14mm)
+                      </div>
+
+                      {/* Bottom die-cut guide */}
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        width: '100%',
+                        height: 38,
+                        borderTop: '1px dotted var(--neutral-300)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.50rem',
+                        color: 'var(--neutral-400)'
+                      }}>
+                        Die-Cut Void
+                      </div>
+                    </div>
+
+                    {/* RIGHT WING (60% to 100% = 28mm) */}
+                    <div style={{
+                      width: '40%',
+                      height: '100%',
+                      backgroundColor: '#ffffff',
+                      border: '1.5px solid var(--neutral-400)',
+                      borderLeft: '1.5px dashed var(--neutral-400)',
+                      borderTopRightRadius: 8,
+                      borderBottomRightRadius: 8,
+                      position: 'relative',
+                      boxShadow: 'var(--shadow-sm)',
+                    }}>
+                      <div style={{ position: 'absolute', left: 4, top: 4, backgroundColor: 'var(--neutral-200)', color: 'var(--neutral-700)', fontSize: '0.52rem', fontWeight: 800, padding: '1px 3px', borderRadius: 3 }}>
+                        FOLD
+                      </div>
+                    </div>
+
+                    {/* DRAGGABLE ELEMENTS LAYER */}
+                    {/* 1. Store Name */}
+                    {showStoreName && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('storeName', e)}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.storeName?.x ?? 5}%`,
+                          top: `${elementPositions.storeName?.y ?? 14}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          fontSize: '0.66rem',
+                          fontWeight: 800,
+                          color: 'var(--neutral-900)',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10
+                        }}
+                      >
+                        {storeName || 'Store'}
+                      </div>
+                    )}
+
+                    {/* 2. Product Name */}
+                    {showProductName && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('productName', e)}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.productName?.x ?? 5}%`,
+                          top: `${elementPositions.productName?.y ?? 44}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          color: 'var(--neutral-800)',
+                          maxWidth: 190,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10
+                        }}
+                      >
+                        {productName}
+                      </div>
+                    )}
+
+                    {/* 3. Selling Price */}
+                    {showPrice && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('price', e)}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.price?.x ?? 5}%`,
+                          top: `${elementPositions.price?.y ?? 76}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          fontSize: '0.94rem',
+                          fontWeight: 900,
+                          color: '#1e1b4b',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10
+                        }}
+                      >
+                        ₹{Number(price || 0).toFixed(2)}
+                      </div>
+                    )}
+
+                    {/* 4. Barcode / QR Code Graphic */}
+                    <div
+                      onPointerDown={(e) => handlePointerDown('code', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.code?.x ?? 82}%`,
+                        top: `${elementPositions.code?.y ?? 48}%`,
+                        transform: `translate(-50%, -50%) scale(${codeScale})`,
+                        transformOrigin: 'center center',
+                        cursor: 'move',
+                        padding: '2px',
+                        borderRadius: 4,
+                        border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 'max-content',
+                        height: 'max-content',
+                        flexShrink: 0,
+                        whiteSpace: 'nowrap',
+                        zIndex: 10
+                      }}
+                    >
+                      <BarcodeRenderer
+                        ref={barcodeRendererRef}
+                        value={activePayload}
+                        codeType={codeType}
+                        width={codeType === 'BARCODE' ? 1.0 : undefined}
+                        height={codeType === 'BARCODE' ? 36 : 58}
+                        showText={false}
+                      />
+                    </div>
+
+                    {/* 5. Barcode Number Text */}
+                    <div
+                      onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.barcodeText?.x ?? 64}%`,
+                        top: `${elementPositions.barcodeText?.y ?? 36}%`,
+                        transform: 'translate(0, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        borderRadius: 4,
+                        border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        fontSize: '0.68rem',
+                        fontFamily: 'var(--font-mono)',
+                        fontWeight: 800,
+                        color: 'var(--neutral-900)',
+                        whiteSpace: 'nowrap',
+                        zIndex: 10
+                      }}
+                    >
                       {barcodeValue}
                     </div>
-                  )}
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', fontSize: '0.72rem', color: 'var(--neutral-600)', paddingTop: 4, borderTop: '1px solid var(--neutral-200)', flexWrap: 'wrap', gap: 4 }}>
-                    {showSku && <span>SKU: {itemSku}</span>}
-                    {showPrice && (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        {showMrp && itemMrp > itemPrice && (
-                          <span style={{ textDecoration: 'line-through', color: '#94a3b8', fontSize: '0.68rem' }}>
-                            ₹{itemMrp.toFixed(2)}
-                          </span>
-                        )}
-                        <span style={{ fontWeight: 800, color: 'var(--primary-700)', fontSize: '0.84rem' }}>
-                          ₹{itemPrice.toFixed(2)}
-                        </span>
+                    {/* 6. SKU Text */}
+                    {showSku && sku && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('sku', e)}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.sku?.x ?? 64}%`,
+                          top: `${elementPositions.sku?.y ?? 72}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          fontSize: '0.62rem',
+                          color: 'var(--neutral-600)',
+                          fontWeight: 700,
+                          whiteSpace: 'nowrap',
+                          zIndex: 10
+                        }}
+                      >
+                        SKU: {sku}
                       </div>
                     )}
                   </div>
+                </div>
+
+              ) : isRatTail || arrangement === 'DUAL_FLAP' ? (
+                /* JEWELRY RAT-TAIL CANVAS (76mm x 12mm Asymmetrical with Right Tail) */
+                <div style={{ width: '100%', maxWidth: 580, padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div 
+                    ref={canvasContainerRef}
+                    style={{
+                      width: '100%',
+                      height: 100,
+                      backgroundColor: '#ffffff',
+                      border: '1.5px solid var(--neutral-400)',
+                      borderRadius: 8,
+                      boxShadow: 'var(--shadow-sm)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      userSelect: 'none'
+                    }}
+                  >
+                    {/* FLAP 1: Left Wing (Front face when folded) */}
+                    <div style={{
+                      flex: '1.1',
+                      height: '100%',
+                      borderRight: '1.5px dashed var(--neutral-400)',
+                      backgroundColor: '#ffffff',
+                      position: 'relative'
+                    }}>
+                      <div style={{ position: 'absolute', right: -12, top: 4, backgroundColor: 'var(--neutral-200)', color: 'var(--neutral-700)', fontSize: '0.54rem', fontWeight: 800, padding: '1px 3px', borderRadius: 3, zIndex: 2 }}>
+                        FOLD
+                      </div>
+                    </div>
+
+                    {/* FLAP 2: Middle Wing (Back face when folded) */}
+                    <div style={{
+                      flex: '1.1',
+                      height: '100%',
+                      backgroundColor: '#ffffff',
+                      position: 'relative'
+                    }}>
+                    </div>
+
+                    {/* TAIL: Right Wing (Extended strap) */}
+                    <div style={{
+                      flex: '0.8',
+                      height: '100%',
+                      backgroundColor: 'var(--neutral-50)',
+                      borderLeft: '1px solid var(--neutral-200)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 8px'
+                    }}>
+                      <div style={{
+                        width: '100%',
+                        height: 20,
+                        borderRadius: 4,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid var(--neutral-300)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.58rem',
+                        color: 'var(--neutral-500)',
+                        fontWeight: 700
+                      }}>
+                        Tail Strap
+                      </div>
+                    </div>
+
+                    {/* DRAGGABLE ELEMENTS LAYER */}
+                    {showStoreName && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('storeName', e)}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.storeName?.x ?? 4}%`,
+                          top: `${elementPositions.storeName?.y ?? 14}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          fontSize: '0.66rem',
+                          fontWeight: 800,
+                          color: 'var(--neutral-900)',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10
+                        }}
+                      >
+                        {storeName || 'Store'}
+                      </div>
+                    )}
+
+                    {showProductName && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('productName', e)}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.productName?.x ?? 4}%`,
+                          top: `${elementPositions.productName?.y ?? 44}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          color: 'var(--neutral-800)',
+                          maxWidth: 180,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10
+                        }}
+                      >
+                        {productName}
+                      </div>
+                    )}
+
+                    {showPrice && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('price', e)}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.price?.x ?? 4}%`,
+                          top: `${elementPositions.price?.y ?? 76}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          fontSize: '0.96rem',
+                          fontWeight: 900,
+                          color: '#1e1b4b',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10
+                        }}
+                      >
+                        ₹{Number(price || 0).toFixed(2)}
+                      </div>
+                    )}
+
+                    <div
+                      onPointerDown={(e) => handlePointerDown('code', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.code?.x ?? 55}%`,
+                        top: `${elementPositions.code?.y ?? 48}%`,
+                        transform: `translate(-50%, -50%) scale(${codeScale})`,
+                        transformOrigin: 'center center',
+                        cursor: 'move',
+                        padding: '2px',
+                        borderRadius: 4,
+                        border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 'max-content',
+                        height: 'max-content',
+                        flexShrink: 0,
+                        whiteSpace: 'nowrap',
+                        zIndex: 10
+                      }}
+                    >
+                      <BarcodeRenderer
+                        ref={barcodeRendererRef}
+                        value={activePayload}
+                        codeType={codeType}
+                        width={codeType === 'BARCODE' ? 1.0 : undefined}
+                        height={codeType === 'BARCODE' ? 36 : 58}
+                        showText={false}
+                      />
+                    </div>
+
+                    <div
+                      onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.barcodeText?.x ?? 38}%`,
+                        top: `${elementPositions.barcodeText?.y ?? 36}%`,
+                        transform: 'translate(0, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        borderRadius: 4,
+                        border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        fontSize: '0.70rem',
+                        fontFamily: 'var(--font-mono)',
+                        fontWeight: 800,
+                        color: 'var(--neutral-900)',
+                        whiteSpace: 'nowrap',
+                        zIndex: 10
+                      }}
+                    >
+                      {barcodeValue}
+                    </div>
+
+                    {showSku && sku && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('sku', e)}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.sku?.x ?? 38}%`,
+                          top: `${elementPositions.sku?.y ?? 72}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          fontSize: '0.62rem',
+                          color: 'var(--neutral-500)',
+                          fontWeight: 700,
+                          whiteSpace: 'nowrap',
+                          zIndex: 10
+                        }}
+                      >
+                        SKU: {sku}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              ) : arrangement === 'SIDE_BY_SIDE' ? (
+                /* HORIZONTAL SIDE-BY-SIDE CANVAS */
+                <div 
+                  ref={canvasContainerRef}
+                  style={{ 
+                    width: 320, 
+                    height: 180,
+                    backgroundColor: '#ffffff', 
+                    border: '1.5px solid var(--neutral-400)', 
+                    borderRadius: 8, 
+                    boxShadow: 'var(--shadow-sm)', 
+                    position: 'relative',
+                    overflow: 'hidden',
+                    userSelect: 'none'
+                  }}
+                >
+                  <div
+                    onPointerDown={(e) => handlePointerDown('code', e)}
+                    style={{
+                      position: 'absolute',
+                      left: `${elementPositions.code?.x ?? 24}%`,
+                      top: `${elementPositions.code?.y ?? 42}%`,
+                      transform: `translate(-50%, -50%) scale(${codeScale})`,
+                      transformOrigin: 'center center',
+                      cursor: 'move',
+                      padding: 2,
+                      border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                      backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 'max-content',
+                      height: 'max-content',
+                      flexShrink: 0,
+                      whiteSpace: 'nowrap',
+                      zIndex: 10
+                    }}
+                  >
+                    <BarcodeRenderer
+                      ref={barcodeRendererRef}
+                      value={activePayload}
+                      codeType={codeType}
+                      width={codeType === 'BARCODE' ? 1.2 : 1.4}
+                      height={codeType === 'BARCODE' ? 40 : 76}
+                      showText={false}
+                    />
+                  </div>
+
+                  <div
+                    onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                    style={{
+                      position: 'absolute',
+                      left: `${elementPositions.barcodeText?.x ?? 24}%`,
+                      top: `${elementPositions.barcodeText?.y ?? 82}%`,
+                      transform: 'translate(-50%, -50%)',
+                      cursor: 'move',
+                      padding: '2px 4px',
+                      fontSize: '0.68rem',
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 700,
+                      color: 'var(--neutral-700)',
+                      border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                      backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                      zIndex: 10
+                    }}
+                  >
+                    {barcodeValue}
+                  </div>
+
+                  {showStoreName && (
+                    <div
+                      onPointerDown={(e) => handlePointerDown('storeName', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.storeName?.x ?? 56}%`,
+                        top: `${elementPositions.storeName?.y ?? 14}%`,
+                        transform: 'translate(0, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        color: 'var(--neutral-900)',
+                        border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        zIndex: 10
+                      }}
+                    >
+                      {storeName || 'Store'}
+                    </div>
+                  )}
+
+                  {showProductName && (
+                    <div
+                      onPointerDown={(e) => handlePointerDown('productName', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.productName?.x ?? 56}%`,
+                        top: `${elementPositions.productName?.y ?? 36}%`,
+                        transform: 'translate(0, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        color: 'var(--neutral-800)',
+                        border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        maxWidth: 130,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        zIndex: 10
+                      }}
+                    >
+                      {productName}
+                    </div>
+                  )}
+
+                  {showSku && sku && (
+                    <div
+                      onPointerDown={(e) => handlePointerDown('sku', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.sku?.x ?? 56}%`,
+                        top: `${elementPositions.sku?.y ?? 62}%`,
+                        transform: 'translate(0, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        fontSize: '0.64rem',
+                        color: 'var(--neutral-500)',
+                        border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        zIndex: 10
+                      }}
+                    >
+                      SKU: {sku}
+                    </div>
+                  )}
+
+                  {showPrice && (
+                    <div
+                      onPointerDown={(e) => handlePointerDown('price', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.price?.x ?? 56}%`,
+                        top: `${elementPositions.price?.y ?? 86}%`,
+                        transform: 'translate(0, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        fontSize: '0.94rem',
+                        fontWeight: 900,
+                        color: '#1e1b4b',
+                        border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        zIndex: 10
+                      }}
+                    >
+                      ₹{Number(price || 0).toFixed(2)}
+                    </div>
+                  )}
+                </div>
+
+              ) : (
+                /* STANDARD VERTICAL STACKED CANVAS */
+                <div 
+                  ref={canvasContainerRef}
+                  style={{ 
+                    width: paperSize === 'THERMAL_40x40' ? 240 : 260, 
+                    height: 220,
+                    backgroundColor: '#ffffff', 
+                    border: '1.5px solid var(--neutral-400)', 
+                    borderRadius: 8, 
+                    boxShadow: 'var(--shadow-sm)', 
+                    position: 'relative',
+                    overflow: 'hidden',
+                    userSelect: 'none'
+                  }}
+                >
+                  {showStoreName && (
+                    <div
+                      onPointerDown={(e) => handlePointerDown('storeName', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.storeName?.x ?? 50}%`,
+                        top: `${elementPositions.storeName?.y ?? 9}%`,
+                        transform: 'translate(-50%, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                        color: 'var(--neutral-900)',
+                        border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        whiteSpace: 'nowrap',
+                        zIndex: 10
+                      }}
+                    >
+                      {storeName || 'Store'}
+                    </div>
+                  )}
+
+                  {showProductName && (
+                    <div
+                      onPointerDown={(e) => handlePointerDown('productName', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.productName?.x ?? 50}%`,
+                        top: `${elementPositions.productName?.y ?? 22}%`,
+                        transform: 'translate(-50%, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        color: 'var(--neutral-800)',
+                        border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        maxWidth: 220,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        zIndex: 10
+                      }}
+                    >
+                      {productName}
+                    </div>
+                  )}
+
+                  <div
+                    onPointerDown={(e) => handlePointerDown('code', e)}
+                    style={{
+                      position: 'absolute',
+                      left: `${elementPositions.code?.x ?? 50}%`,
+                      top: `${elementPositions.code?.y ?? 52}%`,
+                      transform: `translate(-50%, -50%) scale(${codeScale})`,
+                      transformOrigin: 'center center',
+                      cursor: 'move',
+                      padding: 2,
+                      border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                      backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 'max-content',
+                      height: 'max-content',
+                      flexShrink: 0,
+                      whiteSpace: 'nowrap',
+                      zIndex: 10
+                    }}
+                  >
+                    <BarcodeRenderer
+                      ref={barcodeRendererRef}
+                      value={activePayload}
+                      codeType={codeType}
+                      width={codeType === 'BARCODE' ? 1.4 : 1.6}
+                      height={codeType === 'BARCODE' ? 44 : 84}
+                      showText={false}
+                    />
+                  </div>
+
+                  <div
+                    onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                    style={{
+                      position: 'absolute',
+                      left: `${elementPositions.barcodeText?.x ?? 50}%`,
+                      top: `${elementPositions.barcodeText?.y ?? 74}%`,
+                      transform: 'translate(-50%, -50%)',
+                      cursor: 'move',
+                      padding: '2px 4px',
+                      fontSize: '0.72rem',
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 700,
+                      color: 'var(--neutral-700)',
+                      border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                      backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                      zIndex: 10
+                    }}
+                  >
+                    {barcodeValue}
+                  </div>
+
+                  {showSku && sku && (
+                    <div
+                      onPointerDown={(e) => handlePointerDown('sku', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.sku?.x ?? 15}%`,
+                        top: `${elementPositions.sku?.y ?? 91}%`,
+                        transform: 'translate(0, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        fontSize: '0.68rem',
+                        color: 'var(--neutral-600)',
+                        border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        zIndex: 10
+                      }}
+                    >
+                      SKU: {sku}
+                    </div>
+                  )}
+
+                  {showPrice && (
+                    <div
+                      onPointerDown={(e) => handlePointerDown('price', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.price?.x ?? 85}%`,
+                        top: `${elementPositions.price?.y ?? 91}%`,
+                        transform: 'translate(-100%, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        fontSize: '0.90rem',
+                        fontWeight: 900,
+                        color: '#1e1b4b',
+                        border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        zIndex: 10
+                      }}
+                    >
+                      ₹{Number(price || 0).toFixed(2)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
-          {/* 3. Label Style & Paper Layout Format */}
+          {/* 3. EDITABLE ELEMENT VALUES & PRODUCT NAME DRAWER */}
+          <div style={{ backgroundColor: 'var(--neutral-50)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
+            <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-600)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 10 }}>
+              3. Customize Tag Content &amp; Product Details
+            </label>
+
+            <div className="modal-grid-row-2">
+              {/* Product Name Input */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
+                    Product Name on Tag:
+                  </label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showProductName}
+                      onChange={(e) => {
+                        setShowProductName(e.target.checked);
+                        saveDesignToCache(elementPositions);
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span style={{ color: 'var(--neutral-600)' }}>Visible</span>
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  value={productName}
+                  onChange={(e) => setProductName(e.target.value)}
+                  placeholder="Custom Product Name"
+                  className="input input-sm"
+                  style={{ width: '100%', fontSize: '0.82rem' }}
+                />
+              </div>
+
+              {/* Selling Price Input */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
+                    Selling Price (₹):
+                  </label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showPrice}
+                      onChange={(e) => {
+                        setShowPrice(e.target.checked);
+                        saveDesignToCache(elementPositions);
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span style={{ color: 'var(--neutral-600)' }}>Visible</span>
+                  </label>
+                </div>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={price}
+                  onChange={(e) => setPrice(parseFloat(e.target.value) || 0)}
+                  placeholder="Selling Price"
+                  className="input input-sm"
+                  style={{ width: '100%', fontSize: '0.82rem' }}
+                />
+              </div>
+
+              {/* SKU / Code Input */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
+                    SKU Code:
+                  </label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showSku}
+                      onChange={(e) => {
+                        setShowSku(e.target.checked);
+                        saveDesignToCache(elementPositions);
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span style={{ color: 'var(--neutral-600)' }}>Visible</span>
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  value={sku}
+                  onChange={(e) => setSku(e.target.value)}
+                  placeholder="SKU Code"
+                  className="input input-sm"
+                  style={{ width: '100%', fontSize: '0.82rem' }}
+                />
+              </div>
+
+              {/* Store Header Input */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
+                    Store Header:
+                  </label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showStoreName}
+                      onChange={(e) => {
+                        setShowStoreName(e.target.checked);
+                        saveDesignToCache(elementPositions);
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span style={{ color: 'var(--neutral-600)' }}>Visible</span>
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  value={storeName}
+                  onChange={(e) => {
+                    setStoreName(e.target.value);
+                    saveDesignToCache(elementPositions);
+                  }}
+                  placeholder="Store Header"
+                  className="input input-sm"
+                  style={{ width: '100%', fontSize: '0.82rem' }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 4. PRESETS & PAPER FORMAT SELECTION */}
           <div className="modal-grid-row-2">
-            {/* Style Selection */}
+            {/* Tag Style Selection */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                3. Label Template
+                4. Tag Preset
               </label>
-              
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => handleStyleSelect('JEWELRY_STRING_TAG')}
+                  style={{
+                    padding: 10,
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${isDumbbell ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: isDumbbell ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: isDumbbell ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    Jewelry Dumbbell
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Symmetric bridge tag (70x12)</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleStyleSelect('JEWELRY_RAT_TAIL')}
+                  style={{
+                    padding: 10,
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${isRatTail ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: isRatTail ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: isRatTail ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    Jewelry Rat-Tail
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Dual-flap roll tag (76x12)</div>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => handleStyleSelect('STANDARD')}
@@ -547,24 +2486,28 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     textAlign: 'left'
                   }}
                 >
-                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: style === 'STANDARD' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>Standard Sticker</div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Rolls &amp; Box tags</div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: style === 'STANDARD' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    Standard Sticker
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Rolls &amp; box tags (50x30)</div>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleStyleSelect('JEWELRY_STRING_TAG')}
+                  onClick={() => handleStyleSelect('A4_SHEET')}
                   style={{
                     padding: 10,
                     borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${style === 'JEWELRY_STRING_TAG' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: style === 'JEWELRY_STRING_TAG' ? 'var(--primary-50)' : '#ffffff',
+                    border: `1.5px solid ${style === 'A4_SHEET' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: style === 'A4_SHEET' ? 'var(--primary-50)' : '#ffffff',
                     cursor: 'pointer',
                     textAlign: 'left'
                   }}
                 >
-                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: style === 'JEWELRY_STRING_TAG' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>Jewelry String</div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Dumbbell tag</div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: style === 'A4_SHEET' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    A4 Sticker Sheet
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>24-Up / 40-Up Grid</div>
                 </button>
               </div>
             </div>
@@ -578,41 +2521,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
                 <button
                   type="button"
-                  onClick={() => setPaperSize('THERMAL_50x30')}
-                  style={{
-                    padding: '8px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'THERMAL_50x30' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: paperSize === 'THERMAL_50x30' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'THERMAL_50x30' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
-                >
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800 }}>50 x 30 mm</div>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>Thermal Standard</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPaperSize('THERMAL_40x40')}
-                  style={{
-                    padding: '8px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'THERMAL_40x40' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: paperSize === 'THERMAL_40x40' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'THERMAL_40x40' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
-                >
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800 }}>40 x 40 mm</div>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>Thermal Square QR</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPaperSize('DUMBBELL_70x12')}
+                  onClick={() => handlePaperSelect('DUMBBELL_70x12')}
                   style={{
                     padding: '8px 6px',
                     borderRadius: 'var(--radius-md)',
@@ -623,13 +2532,64 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     textAlign: 'center'
                   }}
                 >
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800 }}>70 x 12 mm</div>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>Dumbbell String</div>
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>70 x 12 mm</div>
+                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Dumbbell</div>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setPaperSize('THERMAL_38x25')}
+                  onClick={() => handlePaperSelect('RAT_TAIL_76x12')}
+                  style={{
+                    padding: '8px 6px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${paperSize === 'RAT_TAIL_76x12' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'RAT_TAIL_76x12' ? 'var(--primary-50)' : '#ffffff',
+                    color: paperSize === 'RAT_TAIL_76x12' ? 'var(--primary-700)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>76 x 12 mm</div>
+                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Rat-Tail Roll</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handlePaperSelect('THERMAL_50x30')}
+                  style={{
+                    padding: '8px 6px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${paperSize === 'THERMAL_50x30' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'THERMAL_50x30' ? 'var(--primary-50)' : '#ffffff',
+                    color: paperSize === 'THERMAL_50x30' ? 'var(--primary-700)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>50 x 30 mm</div>
+                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Thermal Roll</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handlePaperSelect('THERMAL_40x40')}
+                  style={{
+                    padding: '8px 6px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${paperSize === 'THERMAL_40x40' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'THERMAL_40x40' ? 'var(--primary-50)' : '#ffffff',
+                    color: paperSize === 'THERMAL_40x40' ? 'var(--primary-700)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>40 x 40 mm</div>
+                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Square QR</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handlePaperSelect('THERMAL_38x25')}
                   style={{
                     padding: '8px 6px',
                     borderRadius: 'var(--radius-md)',
@@ -640,13 +2600,13 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     textAlign: 'center'
                   }}
                 >
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800 }}>38 x 25 mm</div>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>Compact Roll</div>
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>38 x 25 mm</div>
+                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Compact Roll</div>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setPaperSize('A4_GRID_24')}
+                  onClick={() => handlePaperSelect('A4_GRID_24')}
                   style={{
                     padding: '8px 6px',
                     borderRadius: 'var(--radius-md)',
@@ -657,227 +2617,168 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     textAlign: 'center'
                   }}
                 >
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800 }}>A4 (24-Up)</div>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>3x8 Grid Sheet</div>
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>A4 (24-Up)</div>
+                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>3x8 Grid</div>
                 </button>
+              </div>
+            </div>
+          </div>
 
+          {/* 5. PRINT QUANTITY */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              5. Print Quantity Copies
+            </label>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid var(--neutral-300)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
                 <button
                   type="button"
-                  onClick={() => setPaperSize('A4_GRID_40')}
-                  style={{
-                    padding: '8px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'A4_GRID_40' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: paperSize === 'A4_GRID_40' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'A4_GRID_40' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
+                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 14px', borderRadius: 0, border: 'none', borderRight: '1px solid var(--neutral-300)' }}
                 >
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800 }}>A4 (40-Up)</div>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>4x10 Grid Sheet</div>
+                  -
+                </button>
+                <input
+                  type="number"
+                  min="1"
+                  max="5000"
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                  style={{
+                    width: 64,
+                    textAlign: 'center',
+                    border: 'none',
+                    fontWeight: 800,
+                    fontSize: '0.94rem',
+                    color: 'var(--neutral-900)',
+                    outline: 'none',
+                    padding: '6px 0'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setQuantity(quantity + 1)}
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 14px', borderRadius: 0, border: 'none', borderLeft: '1px solid var(--neutral-300)' }}
+                >
+                  +
                 </button>
               </div>
+
+              {[1, 5, 10, 25, 50, 100].map((cnt) => (
+                <button
+                  key={cnt}
+                  type="button"
+                  onClick={() => setQuantity(cnt)}
+                  className={`btn btn-sm ${quantity === cnt ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ minWidth: 38, padding: '4px 10px' }}
+                >
+                  {cnt}
+                </button>
+              ))}
+
+              {defaultStockCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setQuantity(defaultStockCount)}
+                  className={`btn btn-sm ${quantity === defaultStockCount ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Sparkles size={14} />
+                  <span>Sync Stock ({defaultStockCount})</span>
+                </button>
+              )}
             </div>
-          </div>
-
-          {/* 4. Print Quantity & Element Toggles */}
-          <div className="modal-grid-row-2">
-            {/* Quantity Stepper & Quick Chips */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                4. Print Quantity Copies
-              </label>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid var(--neutral-300)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="btn btn-secondary"
-                    style={{ width: 34, height: 34, padding: 0, justifyContent: 'center', fontWeight: 800, fontSize: '1.1rem', border: 'none', borderRadius: 0 }}
-                  >
-                    -
-                  </button>
-                  <span style={{ fontSize: '1rem', fontWeight: 800, width: 42, textAlign: 'center', color: 'var(--neutral-900)' }}>
-                    {quantity}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(quantity + 1)}
-                    className="btn btn-secondary"
-                    style={{ width: 34, height: 34, padding: 0, justifyContent: 'center', fontWeight: 800, fontSize: '1.1rem', border: 'none', borderRadius: 0 }}
-                  >
-                    +
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  {[1, 5, 10, 25, 50].map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setQuantity(n)}
-                      style={{
-                        padding: '3px 7px',
-                        borderRadius: 4,
-                        border: `1px solid ${quantity === n ? 'var(--primary-400)' : 'var(--neutral-300)'}`,
-                        backgroundColor: quantity === n ? 'var(--primary-50)' : '#ffffff',
-                        color: quantity === n ? 'var(--primary-700)' : 'var(--neutral-700)',
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(defaultStockCount || 1)}
-                    style={{
-                      padding: '3px 8px',
-                      borderRadius: 4,
-                      backgroundColor: 'var(--primary-50)',
-                      color: 'var(--primary-700)',
-                      border: '1px solid var(--primary-200)',
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Stock ({defaultStockCount || 0})
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Element Toggles */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Label Element Options
-              </label>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.8rem', color: 'var(--neutral-700)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={showPrice}
-                      onChange={(e) => setShowPrice(e.target.checked)}
-                      style={{ width: 15, height: 15, accentColor: 'var(--primary-600)' }}
-                    />
-                    <span>Show Price</span>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={showMrp}
-                      onChange={(e) => setShowMrp(e.target.checked)}
-                      style={{ width: 15, height: 15, accentColor: 'var(--primary-600)' }}
-                    />
-                    <span>Show MRP</span>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={showSku}
-                      onChange={(e) => setShowSku(e.target.checked)}
-                      style={{ width: 15, height: 15, accentColor: 'var(--primary-600)' }}
-                    />
-                    <span>Show SKU/Code</span>
-                  </label>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                    <input
-                      type="checkbox"
-                      checked={showStoreName}
-                      onChange={(e) => setShowStoreName(e.target.checked)}
-                      style={{ width: 15, height: 15, accentColor: 'var(--primary-600)' }}
-                    />
-                    <span>Store Header:</span>
-                  </label>
-                  {showStoreName && (
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={storeName}
-                      onChange={(e) => setStoreName(e.target.value)}
-                      placeholder="Store / Business Name"
-                      style={{
-                        fontSize: '0.74rem',
-                        height: 26,
-                        padding: '2px 8px',
-                        flex: 1,
-                        maxWidth: 220
-                      }}
-                      title="Edit store header printed on labels"
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-
-        {/* Printable Printable Container for Direct Browser Window Printing */}
-        <div className="only-print" style={{ display: 'none', padding: 20 }}>
-          <div style={{ textAlign: 'center', border: '1px solid #000', padding: 10, width: 220, margin: '0 auto' }}>
-            {showStoreName && <div style={{ fontSize: 10, fontWeight: 'bold' }}>{storeName || 'Store'}</div>}
-            <div style={{ fontSize: 12, fontWeight: 'bold', margin: '4px 0' }}>{itemName}</div>
-            <div style={{ margin: '6px 0', display: 'flex', justifyContent: 'center' }}>
-              <BarcodeRenderer value={activePayload} codeType={codeType} height={codeType === 'BARCODE' ? 35 : 70} />
-            </div>
-            {codeType === 'QR' && <div style={{ fontFamily: 'monospace', fontSize: 10 }}>{barcodeValue}</div>}
-            {showPrice && <div style={{ fontSize: 12, fontWeight: 'bold', marginTop: 4 }}>₹{itemPrice.toFixed(2)}</div>}
           </div>
         </div>
 
-        {/* Modal Action Footer */}
-        <div 
-          className="no-print"
-          style={{ 
-            padding: '14px 24px', 
-            borderTop: '1px solid var(--neutral-200)', 
-            backgroundColor: 'var(--neutral-50)',
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'flex-end',
-            gap: 10,
-            flexShrink: 0
-          }}
-        >
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={handleDirectPrintWindow}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <Printer size={16} />
-            <span>Print Window</span>
-          </button>
+        {/* MODAL FOOTER ACTION BAR */}
+        <div style={{
+          padding: '14px 20px',
+          borderTop: '1px solid var(--neutral-200)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: 'var(--neutral-50)',
+          flexShrink: 0,
+          flexWrap: 'wrap',
+          gap: 12
+        }}>
+          {/* Payload Display & Copy */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '50%' }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: '#ffffff',
+              border: '1px solid var(--neutral-300)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '4px 8px',
+              maxWidth: 320,
+              overflow: 'hidden'
+            }}>
+              <span style={{ fontSize: '0.64rem', fontWeight: 800, color: 'var(--neutral-500)', textTransform: 'uppercase' }}>
+                PAYLOAD:
+              </span>
+              <span style={{ fontSize: '0.74rem', fontFamily: 'var(--font-mono)', color: 'var(--neutral-800)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                {activePayload}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyPayload}
+                className="btn btn-ghost btn-sm"
+                style={{ padding: 2, height: 'auto', minHeight: 0 }}
+                title="Copy Scannable String"
+              >
+                {copiedPayload ? <Check size={14} color="#16a34a" /> : <Copy size={14} />}
+              </button>
+            </div>
+            {copiedPayload && (
+              <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 700 }}>
+                Copied!
+              </span>
+            )}
+          </div>
 
-          <button 
-            type="button" 
-            className="btn btn-primary" 
-            onClick={handleDownloadPdf} 
-            disabled={isGenerating}
-            style={{ padding: '8px 18px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <Download size={16} />
-            <span>{isGenerating ? 'Generating PDF...' : `Download ${quantity} Labels PDF (${codeType})`}</span>
-          </button>
+          {/* Action Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleDownloadCodeImage}
+              disabled={isDownloadingImage}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+              title="Export raw QR/Barcode graphic only"
+            >
+              <Download size={15} />
+              <span>Raw Code</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleDownloadPdf}
+              disabled={isGenerating}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <FileText size={16} />
+              <span>Download PDF</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={executeIsolatedPrint}
+              disabled={isGenerating}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 18px' }}
+            >
+              <Printer size={16} />
+              <span>{isGenerating ? 'Printing...' : `Print ${quantity} Labels`}</span>
+            </button>
+          </div>
         </div>
-
       </div>
     </div>
   );

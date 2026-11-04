@@ -26,6 +26,11 @@ import { WorkspacePreviewView } from './views/WorkspacePreviewView';
 import { TenantLoginView } from './views/TenantLoginView';
 import { SuperAdminLoginView } from './views/SuperAdminLoginView';
 import { InvoicePrintModal } from './components/InvoicePrintModal';
+import { CafeDashboardView } from './views/CafeDashboardView';
+import { TableManagementView } from './views/TableManagementView';
+import { IncomingOrdersView } from './views/IncomingOrdersView';
+import { KitchenOrdersView } from './views/KitchenOrdersView';
+import { DigitalMenuPage } from './customer/DigitalMenuPage';
 import { store } from './services/store';
 import { Invoice, Tenant, User } from './types';
 
@@ -35,6 +40,7 @@ import { AlertTriangle, RefreshCw, LogOut, Lock, ShieldCheck, Clock, ArrowRight 
 const getDefaultPathForRole = (user: User | null): string => {
   if (!user) return '/login';
   if (user.role === 'SUPER_ADMIN') return '/superadmin';
+  if (store.isCafePersona()) return '/cafe/dashboard';
   if (user.role === 'CASHIER') return '/pos';
   return '/dashboard';
 };
@@ -161,7 +167,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
 
     // Enforce store suspension / expiration lockout guard for tenant users
     if (!isSuperAdmin && store.isStoreLocked()) {
-      const lockedPaths = ['/pos', '/inventory', '/purchase-orders', '/parties', '/ledger'];
+      const lockedPaths = ['/pos', '/inventory', '/purchase-orders', '/parties', '/ledger', '/cafe'];
       if (lockedPaths.some(p => path === p || path.startsWith(p + '/'))) {
         navigate('/dashboard', { replace: true });
         return;
@@ -169,7 +175,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     }
 
     if (role === 'CASHIER') {
-      const allowedCashierPaths = ['/pos', '/invoices', '/transactions', '/parties', '/ledger'];
+      const allowedCashierPaths = ['/pos', '/invoices', '/transactions', '/parties', '/ledger', '/cafe'];
       const isAllowed = allowedCashierPaths.some(p => path === p || path.startsWith(p + '/'));
       if (!isAllowed) {
         navigate('/pos', { replace: true });
@@ -482,6 +488,20 @@ const DashboardRoute: React.FC<{ role: string; setViewingInvoice: (inv: Invoice 
   );
 };
 
+const CafeDashboardRoute: React.FC<{ setViewingInvoice: (inv: Invoice) => void }> = ({ setViewingInvoice }) => {
+  const navigate = useNavigate();
+  return (
+    <CafeDashboardView 
+      onNavigate={(tab) => {
+        if (tab === 'cafe-incoming') navigate('/cafe/orders/incoming');
+        else if (tab === 'cafe-kitchen') navigate('/cafe/kitchen');
+        else if (tab === 'cafe-tables') navigate('/cafe/tables');
+      }}
+      onViewInvoice={(inv) => setViewingInvoice(inv)} 
+    />
+  );
+};
+
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(store.getCurrentUser());
   const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
@@ -527,7 +547,8 @@ export const App: React.FC = () => {
         />
         
         <Route 
-          path="/superadmin/login" 
+          path="/superadmin/login"
+
           element={
             currentUser && currentUser.role === 'SUPER_ADMIN' ? (
               <Navigate to="/superadmin" replace />
@@ -536,6 +557,12 @@ export const App: React.FC = () => {
             )
           } 
         />
+
+        {/* Public Customer Self-Ordering Digital Menu Route */}
+        {/* New clean URL: /menu/{slug}/{tableNum}?t={token} */}
+        <Route path="/menu/:slug/:tableNum" element={<DigitalMenuPage />} />
+        {/* Legacy URL ó kept for backward compat with old printed QR codes */}
+        <Route path="/order/:businessId/:tableId" element={<DigitalMenuPage />} />
 
         {/* Protected Authenticated Routes */}
         {currentUser ? (
@@ -568,6 +595,16 @@ export const App: React.FC = () => {
                 />
               } 
             />
+            {/* Dedicated Caf√© Persona Routes */}
+            <Route 
+              path="/cafe/dashboard" 
+              element={<CafeDashboardRoute setViewingInvoice={setViewingInvoice} />} 
+            />
+            <Route path="/cafe" element={<Navigate to="/cafe/dashboard" replace />} />
+            <Route path="/cafe/tables" element={<TableManagementView />} />
+            <Route path="/cafe/orders/incoming" element={<IncomingOrdersView />} />
+            <Route path="/cafe/kitchen" element={<KitchenOrdersView />} />
+
             <Route path="/inventory" element={<InventoryView />} />
             <Route path="/purchase-orders" element={<PurchaseOrdersView />} />
             <Route path="/parties" element={<PartiesView />} />

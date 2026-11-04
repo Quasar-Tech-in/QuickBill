@@ -17,7 +17,11 @@ import {
   Building,
   PanelLeftClose,
   PanelLeftOpen,
-  X
+  X,
+  Coffee,
+  Inbox,
+  ChefHat,
+  QrCode
 } from 'lucide-react';
 import { store } from '../services/store';
 
@@ -129,6 +133,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   // Tenant operations navigation items
+  const cafeNavItems: NavItem[] = [
+    {
+      id: 'cafe-dashboard',
+      path: '/cafe/dashboard',
+      label: 'Floor & Tables',
+      icon: Coffee,
+      badge: 'Live',
+      roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
+      isLockedWhenStoreSuspended: true
+    },
+    {
+      id: 'cafe-incoming',
+      path: '/cafe/orders/incoming',
+      label: 'Incoming Orders',
+      icon: Inbox,
+      roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
+      isLockedWhenStoreSuspended: true
+    },
+    {
+      id: 'cafe-kitchen',
+      path: '/cafe/kitchen',
+      label: 'Kitchen KDS',
+      icon: ChefHat,
+      roles: ['TENANT_ADMIN', 'MANAGER', 'CASHIER'],
+      isLockedWhenStoreSuspended: true
+    },
+    {
+      id: 'cafe-tables',
+      path: '/cafe/tables',
+      label: 'Table Management',
+      icon: QrCode,
+      roles: ['TENANT_ADMIN', 'MANAGER'],
+      isLockedWhenStoreSuspended: true
+    },
+  ];
   const tenantNavItems: NavItem[] = [
     { 
       id: 'dashboard', 
@@ -203,7 +242,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navItems: NavItem[] = isSuperAdmin 
     ? superAdminNavItems 
-    : tenantNavItems.filter(item => item.roles?.includes(userRole));
+    : [
+        ...(store.isCafePersona() ? cafeNavItems.filter(item => item.roles?.includes(userRole)) : []),
+        ...tenantNavItems.filter(item => item.roles?.includes(userRole))
+      ];
 
   return (
     <>

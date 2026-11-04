@@ -1,3 +1,4 @@
+
 /* =========================================================
    QuickBill Design System & Style Guide (Vanilla CSS)
    ========================================================= */
@@ -905,6 +906,7 @@ button:disabled:hover,
     box-shadow: none !important;
   }
 }
+
 
 /* =========================================================
    Modern SaaS Split-Pane & Cyber Command Auth Styling
@@ -2056,6 +2058,7 @@ button:disabled:hover,
   }
 }
 
+
 /* =========================================================
    Enhanced Header Store Switcher & Account Dropdown UI
    ========================================================= */
@@ -2741,6 +2744,7 @@ button:disabled:hover,
   }
 }
 
+
 /* =========================================================
    Invoices Page Compact Table & Layout Styles
    ========================================================= */
@@ -2925,6 +2929,7 @@ button:disabled:hover,
   margin-top: 3px;
 }
 
+
 /* =========================================================
    Print Media Styles (Fit in One Page & Clean Thermal/A4)
    ========================================================= */
@@ -2993,11 +2998,45 @@ button:disabled:hover,
     background: transparent !important;
   }
 
+  /* Label & Barcode / QR Printable Units */
+  .label-printable-container {
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+  }
+
+  .label-print-unit {
+    display: flex !important;
+    box-sizing: border-box !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .label-print-unit:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  .label-print-grid {
+    display: grid !important;
+    width: 100% !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   table {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
 }
+
 
 /* =========================================================
    QuickBill Scanner HUD & Hardware Gun Design System
@@ -3174,6 +3213,7 @@ button:disabled:hover,
     display: inline-flex !important;
   }
 }
+
 
 /* =========================================================
    Mobile & Tablet Responsive System
@@ -3579,5 +3619,6 @@ button:disabled:hover,
   }
 }
 
-
-
+.label-printable-container {
+  display: none;
+}

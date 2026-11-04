@@ -1,5 +1,5 @@
-import axios from 'axios';
-import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement, ItemImportResponse } from '../types';
+﻿import axios from 'axios';
+import { Item, Party, Invoice, Payment, DashboardStats, Tenant, PlatformStats, TenantDatabaseConfig, User, UserRole, StoreLocation, ItemCategory, CartItem, StagedOrder, Expense, ExpenseCategory, LedgerEntry, PaginatedApiResponse, PurchaseOrder, PurchaseOrderStatus, PurchasesSummaryReport, PurchasesBySupplierItem, InventoryMovement, ItemImportResponse, CafeTable, TableStatus, KOT, TableSession, BusinessPersona, TenantSettings } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -1120,51 +1120,64 @@ class StoreService {
     try {
       const res = await apiClient.get('/tenants');
       if (Array.isArray(res.data)) {
-        this.tenants = res.data.map((t: any) => ({
-          id: t.id || t._id,
-          name: t.name,
-          slug: t.slug,
-          plan: t.plan || t.subscription?.planId || 'PROFESSIONAL',
-          status: t.status || 'ACTIVE',
-          adminEmail: t.admin_email || t.adminEmail || '',
-          phone: t.phone,
-          gstin: t.gstin,
-          address: t.address,
-          logoUrl: t.logo_url || t.logoUrl,
-          tagline: t.tagline,
-          receiptFooterNote: t.receipt_footer || t.receiptFooterNote || t.receiptFooter,
-          createdAt: t.created_at || t.createdAt || new Date().toISOString(),
-          databaseConfig: {
-            isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
-            mongodbUri: t.database_config?.mongodb_uri || t.databaseConfig?.mongodbUri,
-            databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_main_db',
-          },
-          subscription: {
-            planId: t.subscription?.plan_id || t.subscription?.planId || 'PROFESSIONAL',
-            planName: t.subscription?.plan_name || t.subscription?.planName || 'Professional Tier',
-            status: t.subscription?.status || 'ACTIVE',
-            maxUsers: t.subscription?.max_users || t.subscription?.maxUsers || 5,
-            maxLocations: t.subscription?.max_locations || t.subscription?.maxLocations || 3,
-            billingCycle: t.subscription?.billing_cycle || t.subscription?.billingCycle || 'ANNUAL',
-            startDate: t.subscription?.start_date || t.subscription?.startDate || t.created_at,
-            endDate: t.subscription?.end_date || t.subscription?.endDate || new Date(Date.now() + 365*24*3600*1000).toISOString(),
-            daysRemaining: t.subscription?.days_remaining ?? 365,
-            gracePeriodDays: t.subscription?.grace_period_days || 7,
-            pricePerCycle: t.subscription?.price_per_cycle || 1999,
-            currency: '₹',
-            autoRenew: t.subscription?.auto_renew || false,
-            features: t.subscription?.features || ['pos', 'inventory', 'ledger'],
-            renewalHistory: t.subscription?.renewal_history || [],
-            notes: t.subscription?.notes,
-          },
-          stats: t.stats || {
-            productsCount: 0,
-            invoicesCount: 0,
-            monthlyGmv: 0,
-            usersCount: 0,
-            locationsCount: 0,
+        this.tenants = res.data.map((t: any) => {
+          const tenantSettings = t.settings || {
+            businessPersona: t.business_persona || t.businessPersona || 'RETAIL',
+            cafeConfig: t.cafe_config || t.cafeConfig,
+          };
+          if (!tenantSettings.businessPersona) {
+            tenantSettings.businessPersona = t.business_persona || t.businessPersona || 'RETAIL';
           }
-        }));
+          if (!tenantSettings.cafeConfig && (t.cafe_config || t.cafeConfig)) {
+            tenantSettings.cafeConfig = t.cafe_config || t.cafeConfig;
+          }
+          return {
+            id: t.id || t._id,
+            name: t.name,
+            slug: t.slug,
+            plan: t.plan || t.subscription?.planId || 'PROFESSIONAL',
+            status: t.status || 'ACTIVE',
+            adminEmail: t.admin_email || t.adminEmail || '',
+            phone: t.phone,
+            gstin: t.gstin,
+            address: t.address,
+            logoUrl: t.logo_url || t.logoUrl,
+            tagline: t.tagline,
+            receiptFooterNote: t.receipt_footer || t.receiptFooterNote || t.receiptFooter,
+            createdAt: t.created_at || t.createdAt || new Date().toISOString(),
+            databaseConfig: {
+              isolationMode: t.database_config?.isolation_mode || t.databaseConfig?.isolationMode || 'SHARED',
+              mongodbUri: t.database_config?.mongodb_uri || t.databaseConfig?.mongodbUri,
+              databaseName: t.database_config?.database_name || t.databaseConfig?.databaseName || 'quickbill_main_db',
+            },
+            subscription: {
+              planId: t.subscription?.plan_id || t.subscription?.planId || 'PROFESSIONAL',
+              planName: t.subscription?.plan_name || t.subscription?.planName || 'Professional Tier',
+              status: t.subscription?.status || 'ACTIVE',
+              maxUsers: t.subscription?.max_users || t.subscription?.maxUsers || 5,
+              maxLocations: t.subscription?.max_locations || t.subscription?.maxLocations || 3,
+              billingCycle: t.subscription?.billing_cycle || t.subscription?.billingCycle || 'ANNUAL',
+              startDate: t.subscription?.start_date || t.subscription?.startDate || t.created_at,
+              endDate: t.subscription?.end_date || t.subscription?.endDate || new Date(Date.now() + 365*24*3600*1000).toISOString(),
+              daysRemaining: t.subscription?.days_remaining ?? 365,
+              gracePeriodDays: t.subscription?.grace_period_days || 7,
+              pricePerCycle: t.subscription?.price_per_cycle || 1999,
+              currency: '₹',
+              autoRenew: t.subscription?.auto_renew || false,
+              features: t.subscription?.features || ['pos', 'inventory', 'ledger'],
+              renewalHistory: t.subscription?.renewal_history || [],
+              notes: t.subscription?.notes,
+            },
+            stats: t.stats || {
+              productsCount: 0,
+              invoicesCount: 0,
+              monthlyGmv: 0,
+              usersCount: 0,
+              locationsCount: 0,
+            },
+            settings: tenantSettings,
+          };
+        });
 
         if (this.tenants.length === 0) {
           this.currentTenant = null;
@@ -1186,6 +1199,16 @@ class StoreService {
       const res = await apiClient.get('/tenants/current');
       if (res.data && (res.data.id || res.data._id)) {
         const t = res.data;
+        const tenantSettings = t.settings || {
+          businessPersona: t.business_persona || t.businessPersona || 'RETAIL',
+          cafeConfig: t.cafe_config || t.cafeConfig,
+        };
+        if (!tenantSettings.businessPersona) {
+          tenantSettings.businessPersona = t.business_persona || t.businessPersona || 'RETAIL';
+        }
+        if (!tenantSettings.cafeConfig && (t.cafe_config || t.cafeConfig)) {
+          tenantSettings.cafeConfig = t.cafe_config || t.cafeConfig;
+        }
         const normalizedTenant: Tenant = {
           id: t.id || t._id,
           name: t.name,
@@ -1229,7 +1252,8 @@ class StoreService {
             monthlyGmv: 0,
             usersCount: 0,
             locationsCount: 0,
-          }
+          },
+          settings: tenantSettings,
         };
 
         this.currentTenant = normalizedTenant;
@@ -1321,6 +1345,7 @@ class StoreService {
     status?: 'ACTIVE' | 'SUSPENDED';
     plan?: any;
     databaseConfig?: TenantDatabaseConfig;
+    settings?: any;
   }): Promise<Tenant> {
     const targetId = updates.tenantId || this.getActiveTenant().id;
     const current = this.tenants.find(t => t.id === targetId) || this.getActiveTenant();
@@ -1337,6 +1362,10 @@ class StoreService {
       status: updates.status || current.status,
       plan: updates.plan || current.plan,
       databaseConfig: updates.databaseConfig || current.databaseConfig,
+      settings: updates.settings !== undefined ? {
+        ...(current.settings || {}),
+        ...updates.settings,
+      } : current.settings,
     };
 
     // Update in local array
@@ -1356,7 +1385,7 @@ class StoreService {
     // Sync to backend if online
     if (targetId) {
       try {
-        await apiClient.put(`/tenants/${targetId}`, {
+        const payload: any = {
           name: updates.name,
           gstin: updates.gstin,
           phone: updates.phone,
@@ -1372,7 +1401,17 @@ class StoreService {
             mongodb_uri: updates.databaseConfig.mongodbUri,
             database_name: updates.databaseConfig.databaseName
           } : undefined
-        });
+        };
+        if (updates.settings !== undefined) {
+          payload.settings = updates.settings;
+          if (updates.settings.businessPersona !== undefined) {
+            payload.business_persona = updates.settings.businessPersona;
+          }
+          if (updates.settings.cafeConfig !== undefined) {
+            payload.cafe_config = updates.settings.cafeConfig;
+          }
+        }
+        await apiClient.put(`/tenants/${targetId}`, payload);
       } catch (e) {
         console.warn('Backend tenant profile update error:', e);
       }
@@ -1651,6 +1690,7 @@ class StoreService {
     maxLocations?: number;
     durationDays?: number;
     billingCycle?: any;
+    settings?: TenantSettings;
   }): Tenant {
     const now = new Date();
     const durationDays = tenantData.durationDays || 365;
@@ -1659,12 +1699,16 @@ class StoreService {
     const planTier = tenantData.plan || 'PROFESSIONAL';
     const defaultMaxUsers = planTier === 'STARTER' ? 2 : (planTier === 'ENTERPRISE' ? 25 : 5);
     const defaultMaxLocations = planTier === 'STARTER' ? 1 : (planTier === 'ENTERPRISE' ? 10 : 3);
+    const persona: BusinessPersona = tenantData.settings?.businessPersona || 'RETAIL';
 
     const newTenant: Tenant = {
       ...tenantData,
       id: `tenant_${Date.now()}`,
       status: 'ACTIVE',
       createdAt: now.toISOString(),
+      settings: tenantData.settings || {
+        businessPersona: persona,
+      },
       subscription: {
         planId: planTier,
         planName: `${planTier} Tier`,
@@ -1715,7 +1759,9 @@ class StoreService {
         isolation_mode: tenantData.databaseConfig.isolationMode,
         mongodb_uri: tenantData.databaseConfig.mongodbUri,
         database_name: tenantData.databaseConfig.databaseName,
-      }
+      },
+      settings: tenantData.settings,
+      business_persona: persona,
     }).catch(err => console.warn('Backend tenant create failed:', err));
 
     return newTenant;
@@ -2133,8 +2179,30 @@ class StoreService {
         this.saveToStorage();
         return created;
       }
-    } catch (e) {
+    } catch (e: any) {
+      // Re-throw 4xx validation errors (e.g. duplicate SKU or Barcode rejection) so callers can notify user
+      if (e?.response?.status === 400 || e?.response?.status === 409 || e?.response?.status === 422) {
+        throw e;
+      }
       console.warn('Backend /items creation failed, fallback local:', e);
+    }
+
+    // In local fallback mode, validate cross-field SKU and Barcode uniqueness across existing items
+    if (item.sku && item.sku.trim()) {
+      const cleanSku = item.sku.trim().toLowerCase();
+      const dupSku = storeItems.find(i => (i.sku && i.sku.trim().toLowerCase() === cleanSku) || (i.barcode && i.barcode.trim().toLowerCase() === cleanSku));
+      if (dupSku) {
+        const matchType = dupSku.barcode && dupSku.barcode.trim().toLowerCase() === cleanSku ? 'Barcode' : 'SKU';
+        throw new Error(`SKU '${item.sku.trim()}' is already assigned as a ${matchType} to product '${dupSku.name}'. Codes must be unique across all products.`);
+      }
+    }
+    if (item.barcode && item.barcode.trim()) {
+      const cleanBar = item.barcode.trim().toLowerCase();
+      const dupBar = storeItems.find(i => (i.barcode && i.barcode.trim().toLowerCase() === cleanBar) || (i.sku && i.sku.trim().toLowerCase() === cleanBar));
+      if (dupBar) {
+        const matchType = dupBar.sku && dupBar.sku.trim().toLowerCase() === cleanBar ? 'SKU' : 'Barcode';
+        throw new Error(`Barcode '${item.barcode.trim()}' is already assigned as a ${matchType} to product '${dupBar.name}'. Codes must be unique across all products.`);
+      }
     }
 
     const newItem: Item = {
@@ -2149,7 +2217,7 @@ class StoreService {
     return newItem;
   }
 
-  async updateItem(id: string, updates: Partial<Item>): Promise<Item | null> {
+  async updateItem(id: string, updates: Partial<Omit<Item, 'sku' | 'barcode' | 'description'>> & { sku?: string | null; barcode?: string | null; description?: string | null }): Promise<Item | null> {
     const activeId = this.currentTenant?.id || '';
     const idx = this.items.findIndex(
       i => (i.businessId || activeId) === activeId && i.id === id
@@ -2198,11 +2266,32 @@ class StoreService {
         this.saveToStorage();
         return updated;
       }
-    } catch (e) {
+    } catch (e: any) {
+      // Re-throw 4xx validation errors (e.g. duplicate SKU or Barcode rejection)
+      if (e?.response?.status === 400 || e?.response?.status === 409 || e?.response?.status === 422) {
+        throw e;
+      }
       console.warn(`Backend /items/${id} update failed, fallback local:`, e);
     }
 
     if (idx === -1) return null;
+
+    if (updates.sku && updates.sku.trim()) {
+      const cleanSku = updates.sku.trim().toLowerCase();
+      const dupSku = this.items.find(i => i.id !== id && (i.businessId || activeId) === activeId && ((i.sku && i.sku.trim().toLowerCase() === cleanSku) || (i.barcode && i.barcode.trim().toLowerCase() === cleanSku)));
+      if (dupSku) {
+        const matchType = dupSku.barcode && dupSku.barcode.trim().toLowerCase() === cleanSku ? 'Barcode' : 'SKU';
+        throw new Error(`SKU '${updates.sku.trim()}' is already assigned as a ${matchType} to product '${dupSku.name}'. Codes must be unique across all products.`);
+      }
+    }
+    if (updates.barcode && updates.barcode.trim()) {
+      const cleanBar = updates.barcode.trim().toLowerCase();
+      const dupBar = this.items.find(i => i.id !== id && (i.businessId || activeId) === activeId && ((i.barcode && i.barcode.trim().toLowerCase() === cleanBar) || (i.sku && i.sku.trim().toLowerCase() === cleanBar)));
+      if (dupBar) {
+        const matchType = dupBar.sku && dupBar.sku.trim().toLowerCase() === cleanBar ? 'SKU' : 'Barcode';
+        throw new Error(`Barcode '${updates.barcode.trim()}' is already assigned as a ${matchType} to product '${dupBar.name}'. Codes must be unique across all products.`);
+      }
+    }
     const { currentStock: _ignoreStock, ...safeUpdates } = updates as any;
     this.items[idx] = { ...this.items[idx], ...safeUpdates, businessId: activeId };
     this.saveToStorage();
@@ -5035,8 +5124,192 @@ class StoreService {
       return true;
     }
   }
+
+  // --- Cafe Persona Store Methods ---
+  private cafeTables: CafeTable[] = [];
+  private activeTableSessions: TableSession[] = [];
+  private kots: KOT[] = [];
+
+  getBusinessPersona(): BusinessPersona {
+    return this.currentTenant?.settings?.businessPersona || 'RETAIL';
+  }
+
+  isCafePersona(): boolean {
+    const p = this.getBusinessPersona();
+    return p === 'CAFE' || p === 'HYBRID';
+  }
+
+  async updateBusinessPersona(persona: BusinessPersona, cafeConfig?: any): Promise<void> {
+    const active = this.getActiveTenant();
+    const newSettings = {
+      ...active.settings,
+      businessPersona: persona,
+      cafeConfig: cafeConfig || active.settings?.cafeConfig,
+    };
+    await this.updateTenantProfile({
+      settings: newSettings,
+    });
+  }
+
+  getCafeTables(): CafeTable[] {
+    return this.cafeTables;
+  }
+
+  getActiveTableSessions(): TableSession[] {
+    return this.activeTableSessions;
+  }
+
+  async fetchTables(locationId?: string): Promise<CafeTable[]> {
+    try {
+      const loc = locationId || this.activeLocation?.id;
+      const res = await apiClient.get('/cafe/tables', {
+        params: { locationId: loc }
+      });
+      this.cafeTables = res.data || [];
+      this.notifyListeners();
+      return this.cafeTables;
+    } catch (err) {
+      console.warn('Failed to fetch cafe tables:', err);
+      return this.cafeTables;
+    }
+  }
+
+  async createTable(payload: Partial<CafeTable>): Promise<CafeTable> {
+    const loc = payload.locationId || this.activeLocation?.id;
+    const res = await apiClient.post('/cafe/tables', {
+      ...payload,
+      locationId: loc
+    });
+    const created: CafeTable = res.data;
+    this.cafeTables.push(created);
+    this.notifyListeners();
+    return created;
+  }
+
+  async updateTable(tableId: string, payload: Partial<CafeTable>): Promise<CafeTable> {
+    const res = await apiClient.put('/cafe/tables/' + tableId, payload);
+    const updated: CafeTable = res.data;
+    const idx = this.cafeTables.findIndex(t => t.id === tableId);
+    if (idx !== -1) this.cafeTables[idx] = updated;
+    this.notifyListeners();
+    return updated;
+  }
+
+  async updateTableStatus(tableId: string, status: TableStatus): Promise<CafeTable> {
+    const res = await apiClient.patch('/cafe/tables/' + tableId + '/status', { status });
+    const updated: CafeTable = res.data;
+    const idx = this.cafeTables.findIndex(t => t.id === tableId);
+    if (idx !== -1) this.cafeTables[idx] = updated;
+    try {
+      await this.fetchActiveTableSessions();
+    } catch (_) {
+      // ignore
+    }
+    this.notifyListeners();
+    return updated;
+  }
+
+  async deleteTable(tableId: string): Promise<boolean> {
+    try {
+      await apiClient.delete('/cafe/tables/' + tableId);
+      this.cafeTables = this.cafeTables.filter(t => t.id !== tableId);
+      this.notifyListeners();
+      return true;
+    } catch (err) {
+      console.warn('Failed to delete table:', err);
+      return false;
+    }
+  }
+
+  async fetchActiveTableSessions(locationId?: string): Promise<TableSession[]> {
+    try {
+      const loc = locationId || this.activeLocation?.id;
+      const res = await apiClient.get('/cafe/sessions/active', {
+        params: { locationId: loc }
+      });
+      const rawList = res.data || [];
+      this.activeTableSessions = rawList.map((s: any) => ({
+        ...s,
+        id: String(s.id || s._id || ''),
+        _id: String(s._id || s.id || ''),
+        tableId: s.tableId ? String(s.tableId) : s.tableId,
+      }));
+      this.notifyListeners();
+      return this.activeTableSessions;
+    } catch (err) {
+      console.warn('Failed to fetch active table sessions:', err);
+      return this.activeTableSessions;
+    }
+  }
+
+  async updateSessionOrder(sessionId: string, orderId: string, payload: { items: any[]; notes?: string }): Promise<any> {
+    if (!sessionId || sessionId === 'undefined') {
+      throw new Error('Cannot update order: Table session ID is invalid or missing.');
+    }
+    const res = await apiClient.patch('/cafe/sessions/' + sessionId + '/orders/' + orderId, payload);
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
+
+  async acceptSessionOrder(sessionId: string, orderId: string): Promise<any> {
+    if (!sessionId || sessionId === 'undefined') {
+      throw new Error('Cannot accept order: Table session ID is invalid or missing.');
+    }
+    const res = await apiClient.post('/cafe/sessions/' + sessionId + '/orders/' + orderId + '/accept');
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
+
+  async rejectSessionOrder(sessionId: string, orderId: string, reason?: string): Promise<any> {
+    if (!sessionId || sessionId === 'undefined') {
+      throw new Error('Cannot reject order: Table session ID is invalid or missing.');
+    }
+    const res = await apiClient.post('/cafe/sessions/' + sessionId + '/orders/' + orderId + '/reject', {
+      reason: reason || 'Item unavailable'
+    });
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
+
+  async fetchKOTs(locationId?: string, status?: string): Promise<KOT[]> {
+    try {
+      const loc = locationId || this.activeLocation?.id;
+      const res = await apiClient.get('/cafe/sessions/kots', {
+        params: { locationId: loc, status }
+      });
+      this.kots = res.data || [];
+      this.notifyListeners();
+      return this.kots;
+    } catch (err) {
+      console.warn('Failed to fetch KOTs:', err);
+      return this.kots;
+    }
+  }
+
+  async updateKOTStatus(kotId: string, status: string): Promise<any> {
+    const res = await apiClient.patch('/cafe/sessions/kots/' + kotId + '/status', { status });
+    const idx = this.kots.findIndex(k => k.id === kotId);
+    if (idx !== -1) this.kots[idx].kitchenStatus = status as any;
+    this.notifyListeners();
+    return res.data;
+  }
+
+  async settleTableSession(sessionId: string, payload: any): Promise<any> {
+    const res = await apiClient.post('/cafe/sessions/' + sessionId + '/settle', payload);
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
+
+  async forceCloseTableSession(sessionId: string): Promise<any> {
+    const res = await apiClient.post('/cafe/sessions/' + sessionId + '/force-close');
+    await this.fetchActiveTableSessions();
+    await this.fetchTables();
+    return res.data;
+  }
 }
 
-
 export const store = new StoreService();
-

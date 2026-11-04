@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { 
+import {
+  AlertCircle,
   Package, 
   Plus, 
   Search, 
@@ -263,46 +264,76 @@ export const InventoryView: React.FC = () => {
   const [formSku, setFormSku] = useState('');
   const [formBarcode, setFormBarcode] = useState('');
   const [formCategory, setFormCategory] = useState('Grocery');
-  const [formTaxRate, setFormTaxRate] = useState<number>(5);
+  const [formTaxRate, setFormTaxRate] = useState<number>(0);
   const [formUnit, setFormUnit] = useState('pcs');
   const [formAllowParts, setFormAllowParts] = useState(false);
   const [formDescription, setFormDescription] = useState('');
 
-  // Auto-generate standard retail SKU with internal prefix (e.g. INT-SKU-GRO-8421)
+  // Auto-generate standard retail SKU guaranteed to be unique across all store SKUs and Barcodes
   const handleAutoGenerateSku = () => {
     const rawCat = (formCategory || 'GEN').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     const prefix = rawCat.length >= 3 ? rawCat.substring(0, 3) : 'GEN';
-    const randSuffix = Math.floor(1000 + Math.random() * 9000);
-    setFormSku(`INT-SKU-${prefix}-${randSuffix}`);
+    let candidate = '';
+    let attempts = 0;
+    do {
+      const randSuffix = Math.floor(1000 + Math.random() * 9000);
+      candidate = `INT-SKU-${prefix}-${randSuffix}`;
+      attempts++;
+    } while (
+      rawItems.some(i => i.id !== editingItem?.id && (
+        (i.sku && i.sku.trim().toLowerCase() === candidate.toLowerCase()) ||
+        (i.barcode && i.barcode.trim().toLowerCase() === candidate.toLowerCase())
+      )) &&
+      attempts < 100
+    );
+    setFormSku(candidate);
   };
 
-  // Auto-generate internal Barcode (e.g. INT-208491024)
+  // Auto-generate internal Barcode / QR code guaranteed to be unique across all store Barcodes and SKUs
   const handleAutoGenerateBarcode = () => {
-    const middleDigits = String(Math.floor(100000000 + Math.random() * 900000000));
-    setFormBarcode(`INT-${middleDigits}`);
+    let candidate = '';
+    let attempts = 0;
+    do {
+      const middleDigits = String(Math.floor(100000000 + Math.random() * 900000000));
+      candidate = `INT-${middleDigits}`;
+      attempts++;
+    } while (
+      rawItems.some(i => i.id !== editingItem?.id && (
+        (i.barcode && i.barcode.trim().toLowerCase() === candidate.toLowerCase()) ||
+        (i.sku && i.sku.trim().toLowerCase() === candidate.toLowerCase())
+      )) &&
+      attempts < 100
+    );
+    setFormBarcode(candidate);
   };
 
-  // Check for duplicate barcode or SKU in existing catalog
+  // Check for duplicate barcode or SKU in existing catalog (cross-field matching)
   const duplicateBarcodeItem = useMemo(() => {
     const clean = formBarcode.trim().toLowerCase();
     if (!clean) return null;
-    return rawItems.find(i => 
-      i.barcode && 
-      i.barcode.trim().toLowerCase() === clean && 
+    const match = rawItems.find(i => 
       i.id !== editingItem?.id && 
-      (i as any)._id !== editingItem?.id
+      (i as any)._id !== editingItem?.id && 
+      ((i.barcode && i.barcode.trim().toLowerCase() === clean) ||
+       (i.sku && i.sku.trim().toLowerCase() === clean))
     );
+    if (!match) return null;
+    const matchedField: 'Barcode' | 'SKU' = match.sku && match.sku.trim().toLowerCase() === clean ? 'SKU' : 'Barcode';
+    return { ...match, matchedField, matchedName: match.name };
   }, [formBarcode, rawItems, editingItem]);
 
   const duplicateSkuItem = useMemo(() => {
     const clean = formSku.trim().toLowerCase();
     if (!clean) return null;
-    return rawItems.find(i => 
-      i.sku && 
-      i.sku.trim().toLowerCase() === clean && 
+    const match = rawItems.find(i => 
       i.id !== editingItem?.id && 
-      (i as any)._id !== editingItem?.id
+      (i as any)._id !== editingItem?.id && 
+      ((i.sku && i.sku.trim().toLowerCase() === clean) ||
+       (i.barcode && i.barcode.trim().toLowerCase() === clean))
     );
+    if (!match) return null;
+    const matchedField: 'Barcode' | 'SKU' = match.barcode && match.barcode.trim().toLowerCase() === clean ? 'Barcode' : 'SKU';
+    return { ...match, matchedField, matchedName: match.name };
   }, [formSku, rawItems, editingItem]);
 
   // Location-specific overrides state in form
@@ -657,7 +688,7 @@ export const InventoryView: React.FC = () => {
     setFormSku('');
     setFormBarcode('');
     setFormCategory(categoriesList[0]?.name || 'Grocery');
-    setFormTaxRate(5);
+    setFormTaxRate(0);
     setFormUnit('pcs');
     setFormAllowParts(false);
     setFormDescription('');
@@ -696,7 +727,7 @@ export const InventoryView: React.FC = () => {
     setFormSku(raw.sku || '');
     setFormBarcode(raw.barcode || '');
     setFormCategory(raw.category || categoriesList[0]?.name || 'Grocery');
-    setFormTaxRate(Number(raw.taxRate ?? 5));
+    setFormTaxRate(Number(raw.taxRate ?? 0));
     setFormUnit(raw.unit || 'pcs');
     setFormAllowParts(!!raw.allowParts);
     setFormDescription(raw.description || '');
@@ -759,7 +790,7 @@ export const InventoryView: React.FC = () => {
       sku: (raw.sku || '').trim(),
       barcode: (raw.barcode || '').trim(),
       category: (raw.category || categoriesList[0]?.name || 'Grocery').trim(),
-      taxRate: Number(raw.taxRate ?? 5),
+      taxRate: Number(raw.taxRate ?? 0),
       unit: raw.unit || 'pcs',
       allowParts: !!raw.allowParts,
       description: (raw.description || '').trim(),
@@ -828,6 +859,17 @@ export const InventoryView: React.FC = () => {
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim() || isSaving) return;
+
+    if (duplicateSkuItem) {
+      setScannedCodeValue(formSku.trim());
+      setScanDuplicateItem(duplicateSkuItem);
+      return;
+    }
+    if (duplicateBarcodeItem) {
+      setScannedCodeValue(formBarcode.trim());
+      setScanDuplicateItem(duplicateBarcodeItem);
+      return;
+    }
 
     setIsSaving(true);
     setUploadStatusMsg('Saving product and processing images...');
@@ -901,13 +943,13 @@ export const InventoryView: React.FC = () => {
       if (editingItem) {
         await store.updateItem(editingItem.id, {
           name: formName.trim(),
-          sku: formSku.trim() || undefined,
-          barcode: formBarcode.trim() || undefined,
+          sku: formSku.trim() ? formSku.trim() : null,
+          barcode: formBarcode.trim() ? formBarcode.trim() : null,
           category: formCategory.trim() || 'General',
           taxRate: Number(formTaxRate || 0),
           unit: formUnit || 'pcs',
           allowParts: !!formAllowParts,
-          description: formDescription.trim() || undefined,
+          description: formDescription.trim() ? formDescription.trim() : null,
           mrp: masterMrp,
           salePrice: masterSalePrice,
           purchasePrice: masterPurchasePrice,
@@ -950,8 +992,47 @@ export const InventoryView: React.FC = () => {
       setEditingItem(null);
       setFormImages([]);
       setPendingDeletedImageUrls([]);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving item and uploading images:', err);
+      const apiDetail = err?.response?.data?.detail;
+      const errorText = typeof apiDetail === 'string' ? apiDetail : (apiDetail?.message || err?.message || '');
+
+      // If API returns duplicate code / collision error, trigger the duplicate conflict popup
+      if (
+        errorText.toLowerCase().includes('already assigned') ||
+        errorText.toLowerCase().includes('already exists') ||
+        errorText.toLowerCase().includes('duplicate') ||
+        errorText.toLowerCase().includes('must be unique')
+      ) {
+        await refreshData();
+        const currentItems = store.getRawItems();
+        const cleanSku = formSku.trim().toLowerCase();
+        const cleanBar = formBarcode.trim().toLowerCase();
+
+        const found = currentItems.find(i =>
+          i.id !== editingItem?.id && (
+            (cleanSku && ((i.sku && i.sku.trim().toLowerCase() === cleanSku) || (i.barcode && i.barcode.trim().toLowerCase() === cleanSku))) ||
+            (cleanBar && ((i.barcode && i.barcode.trim().toLowerCase() === cleanBar) || (i.sku && i.sku.trim().toLowerCase() === cleanBar)))
+          )
+        );
+
+        const conflictItem = found || {
+          id: 'conflict_remote',
+          name: errorText.match(/product '([^']+)'/)?.[1] || 'Existing Product',
+          sku: cleanSku,
+          barcode: cleanBar,
+          category: 'General',
+          salePrice: 0,
+          purchasePrice: 0,
+          currentStock: 0,
+        };
+
+        setScannedCodeValue(cleanSku || cleanBar);
+        setScanDuplicateItem(conflictItem as any);
+        return;
+      }
+
+      alert(errorText || 'Failed to save product.');
     } finally {
       setIsSaving(false);
       setUploadStatusMsg('');
@@ -2137,6 +2218,7 @@ export const InventoryView: React.FC = () => {
         itemMrp={codeStudioTarget?.mrp}
         publicItemId={codeStudioTarget?.publicItemId}
         defaultStockCount={codeStudioTarget?.currentStock}
+        initialCodeType="QR"
         storeName={store.getActiveTenant()?.name || currentUser?.tenantName || store.getActiveLocation()?.name}
       />
 
@@ -2152,43 +2234,73 @@ export const InventoryView: React.FC = () => {
       {/* Existing Product Found Modal */}
       {scanDuplicateItem && (
         <div className="modal-overlay" style={{ zIndex: 10000 }}>
-          <div className="modal-content" style={{ maxWidth: 460, padding: 24, borderRadius: 'var(--radius-lg)' }}>
+          <div className="modal-content" style={{ maxWidth: 480, padding: 24, borderRadius: 'var(--radius-lg)' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
               <div style={{ 
                 width: 44, 
                 height: 44, 
                 borderRadius: '50%', 
-                backgroundColor: 'var(--primary-50)', 
-                color: 'var(--primary-600)', 
+                backgroundColor: 'var(--amber-50, #fffbeb)', 
+                color: 'var(--amber-600, #d97706)', 
                 display: 'flex', 
                 alignItems: 'center', 
                 justifyContent: 'center', 
                 flexShrink: 0 
               }}>
-                <Package size={22} />
+                <AlertCircle size={24} />
               </div>
               <div>
                 <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
-                  Existing Product Found
+                  Existing Product Conflict
                 </h4>
                 <p style={{ margin: '6px 0 10px 0', fontSize: '0.82rem', color: 'var(--neutral-600)', lineHeight: 1.5 }}>
                   Code <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--neutral-900)' }}>{scannedCodeValue}</strong> is already registered to:
                   <br />
-                  <strong style={{ color: 'var(--primary-700)', fontSize: '0.88rem' }}>{scanDuplicateItem.name}</strong> ({scanDuplicateItem.sku || scanDuplicateItem.barcode})
+                  <strong style={{ color: 'var(--primary-700)', fontSize: '0.9rem' }}>{scanDuplicateItem.name}</strong> (SKU: {scanDuplicateItem.sku || 'N/A'}, Barcode: {scanDuplicateItem.barcode || 'N/A'})
                 </p>
                 <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--neutral-500)' }}>
-                  Do you want to load that existing product into the editor or continue creating a new one?
+                  QuickBill requires unique codes per product. Would you like to edit the existing product or auto-generate a new unique QR code / SKU for this new product?
                 </p>
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, marginTop: 22 }}>
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => setScanDuplicateItem(null)}
+                onClick={() => {
+                  if (activeScanField === 'sku') setFormSku('');
+                  if (activeScanField === 'barcode') setFormBarcode('');
+                  setScanDuplicateItem(null);
+                }}
+                style={{ padding: '7px 12px', fontSize: '0.8rem' }}
               >
-                Continue Creating New
+                Clear & Change
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{
+                  border: '1px solid #86efac',
+                  color: '#15803d',
+                  backgroundColor: '#f0fdf4',
+                  padding: '7px 12px',
+                  fontSize: '0.8rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}
+                onClick={() => {
+                  if (activeScanField === 'sku' || (scanDuplicateItem.sku && scanDuplicateItem.sku.trim().toLowerCase() === scannedCodeValue.toLowerCase())) {
+                    handleAutoGenerateSku();
+                  } else {
+                    handleAutoGenerateBarcode();
+                  }
+                  setScanDuplicateItem(null);
+                }}
+              >
+                <Sparkles size={13} />
+                Generate New Code
               </button>
               <button
                 type="button"
@@ -2196,10 +2308,13 @@ export const InventoryView: React.FC = () => {
                 onClick={() => {
                   const itemToLoad = scanDuplicateItem;
                   setScanDuplicateItem(null);
+                  setIsAddModalOpen(false);
                   openEditModal(itemToLoad);
                 }}
+                style={{ padding: '7px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
               >
-                Load Existing Product
+                <Edit3 size={13} />
+                Edit Old Product
               </button>
             </div>
           </div>
@@ -2338,8 +2453,8 @@ export const InventoryView: React.FC = () => {
                             width: '100%',
                             boxSizing: 'border-box',
                             paddingRight: !formSku.trim() ? 48 : undefined,
-                            borderColor: duplicateSkuItem ? '#f59e0b' : undefined,
-                            backgroundColor: duplicateSkuItem ? '#fffbeb' : undefined
+                            borderColor: duplicateSkuItem ? '#ef4444' : undefined,
+                            backgroundColor: duplicateSkuItem ? '#fef2f2' : undefined
                           }}
                         />
                         {!formSku.trim() && (
@@ -2372,8 +2487,64 @@ export const InventoryView: React.FC = () => {
                         )}
                       </div>
                       {duplicateSkuItem && (
-                        <div style={{ fontSize: '0.68rem', color: '#b45309', marginTop: 3, fontWeight: 500 }}>
-                          ⚠️ In use by <strong>{duplicateSkuItem.name}</strong>
+                        <div style={{ 
+                          fontSize: '0.72rem', 
+                          color: '#dc2626', 
+                          backgroundColor: '#fef2f2', 
+                          border: '1px solid #fecaca', 
+                          borderRadius: 6, 
+                          padding: '6px 8px', 
+                          marginTop: 4, 
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          gap: 4 
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                            <AlertCircle size={12} color="#dc2626" />
+                            <span>SKU in use as {duplicateSkuItem.matchedField} by <strong>{duplicateSkuItem.name}</strong></span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const itemToEdit = duplicateSkuItem;
+                                setIsAddModalOpen(false);
+                                openEditModal(itemToEdit);
+                              }}
+                              style={{
+                                border: '1px solid #f87171',
+                                background: '#fff',
+                                color: '#b91c1c',
+                                borderRadius: 4,
+                                padding: '2px 8px',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Edit Old Product
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleAutoGenerateSku}
+                              style={{
+                                border: '1px solid #22c55e',
+                                background: '#f0fdf4',
+                                color: '#15803d',
+                                borderRadius: 4,
+                                padding: '2px 8px',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 2
+                              }}
+                            >
+                              <Sparkles size={10} />
+                              Generate New SKU
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2422,8 +2593,8 @@ export const InventoryView: React.FC = () => {
                             width: '100%',
                             boxSizing: 'border-box',
                             paddingRight: !formBarcode.trim() ? 48 : undefined,
-                            borderColor: duplicateBarcodeItem ? '#f59e0b' : undefined,
-                            backgroundColor: duplicateBarcodeItem ? '#fffbeb' : undefined
+                            borderColor: duplicateBarcodeItem ? '#ef4444' : undefined,
+                            backgroundColor: duplicateBarcodeItem ? '#fef2f2' : undefined
                           }}
                         />
                         {!formBarcode.trim() && (
@@ -2456,8 +2627,64 @@ export const InventoryView: React.FC = () => {
                         )}
                       </div>
                       {duplicateBarcodeItem && (
-                        <div style={{ fontSize: '0.68rem', color: '#b45309', marginTop: 3, fontWeight: 500 }}>
-                          ⚠️ In use by <strong>{duplicateBarcodeItem.name}</strong>
+                        <div style={{ 
+                          fontSize: '0.72rem', 
+                          color: '#dc2626', 
+                          backgroundColor: '#fef2f2', 
+                          border: '1px solid #fecaca', 
+                          borderRadius: 6, 
+                          padding: '6px 8px', 
+                          marginTop: 4, 
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          gap: 4 
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                            <AlertCircle size={12} color="#dc2626" />
+                            <span>Barcode in use as {duplicateBarcodeItem.matchedField} by <strong>{duplicateBarcodeItem.name}</strong></span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const itemToEdit = duplicateBarcodeItem;
+                                setIsAddModalOpen(false);
+                                openEditModal(itemToEdit);
+                              }}
+                              style={{
+                                border: '1px solid #f87171',
+                                background: '#fff',
+                                color: '#b91c1c',
+                                borderRadius: 4,
+                                padding: '2px 8px',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Edit Old Product
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleAutoGenerateBarcode}
+                              style={{
+                                border: '1px solid #22c55e',
+                                background: '#f0fdf4',
+                                color: '#15803d',
+                                borderRadius: 4,
+                                padding: '2px 8px',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 2
+                              }}
+                            >
+                              <Sparkles size={10} />
+                              Generate New QR / Barcode
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -3174,8 +3401,16 @@ export const InventoryView: React.FC = () => {
                   <button 
                     type="submit" 
                     className="btn btn-primary" 
-                    disabled={isSaving || isUploadingImage || (editingItem ? !hasChanges : !formName.trim())}
-                    title={editingItem && !hasChanges ? 'No changes made to product or branch settings' : undefined}
+                    disabled={isSaving || isUploadingImage || (editingItem ? !hasChanges : !formName.trim()) || !!duplicateSkuItem || !!duplicateBarcodeItem}
+                    title={
+                      duplicateSkuItem
+                        ? `SKU already assigned as ${duplicateSkuItem.matchedField} to ${duplicateSkuItem.name}. Edit old product or generate new SKU.`
+                        : duplicateBarcodeItem
+                        ? `Barcode already assigned as ${duplicateBarcodeItem.matchedField} to ${duplicateBarcodeItem.name}. Edit old product or generate new QR/Barcode.`
+                        : editingItem && !hasChanges
+                        ? 'No changes made to product or branch settings'
+                        : undefined
+                    }
                     style={{
                       padding: '8px 16px',
                       opacity: (isSaving || isUploadingImage || (editingItem ? !hasChanges : !formName.trim())) ? 0.6 : 1,

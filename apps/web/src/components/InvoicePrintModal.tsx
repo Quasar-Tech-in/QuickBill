@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Printer } from 'lucide-react';
+import { X, Printer, Share2 } from 'lucide-react';
 import { Invoice } from '../types';
 import { store } from '../services/store';
 
@@ -44,6 +44,18 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleShareWhatsApp = () => {
+    const rawPhone = (invoice.customerPhone || '').replace(/\D/g, '');
+    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    const finalAmt = Number(invoice.grandTotal || invoice.total || 0).toFixed(2);
+    const dateStr = formatInvoiceDate(invoice.date);
+    const text = `*Receipt from ${storeName}*\nBill No: ${invoice.invoiceNumber}\nDate: ${dateStr}\nTotal: ₹${finalAmt}\n\nThank you for visiting!`;
+    const url = cleanPhone 
+      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}` 
+      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank');
   };
 
   const storeName = activeTenant?.name || 'STORE COUNTER';
@@ -200,22 +212,45 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               </button>
             </div>
 
-            {/* Print Trigger Button */}
-            <button 
-              className="btn btn-primary btn-sm" 
-              onClick={handlePrint} 
-              style={{ 
-                display: 'inline-flex', 
-                alignItems: 'center', 
-                gap: 6, 
-                fontWeight: 700,
-                padding: '6px 16px',
-                fontSize: '0.82rem'
-              }}
-            >
-              <Printer size={15} />
-              <span>Print Receipt</span>
-            </button>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleShareWhatsApp}
+                title="Share invoice on WhatsApp"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 700,
+                  padding: '6px 12px',
+                  fontSize: '0.82rem',
+                  backgroundColor: '#f0fdf4',
+                  borderColor: '#86efac',
+                  color: '#166534'
+                }}
+              >
+                <Share2 size={14} />
+                <span>WhatsApp</span>
+              </button>
+
+              {/* Print Trigger Button */}
+              <button 
+                className="btn btn-primary btn-sm" 
+                onClick={handlePrint} 
+                style={{ 
+                  display: 'inline-flex', 
+                  alignItems: 'center', 
+                  gap: 6, 
+                  fontWeight: 700,
+                  padding: '6px 16px',
+                  fontSize: '0.82rem'
+                }}
+              >
+                <Printer size={15} />
+                <span>Print Receipt</span>
+              </button>
+            </div>
           </div>
         </div>
 

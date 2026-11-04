@@ -34,10 +34,11 @@ import {
   Calendar,
   Upload,
   Image as ImageIcon,
-  X
+  X,
+  Coffee
 } from 'lucide-react';
 import { store } from '../services/store';
-import { User, StoreLocation, UserRole, Tenant } from '../types';
+import { User, StoreLocation, UserRole, Tenant, BusinessPersona, CafeConfig } from '../types';
 import { SyncInventoryModal } from '../components/SyncInventoryModal';
 import { compressImage, formatBytes, CompressionResult } from '../utils/imageCompressor';
 import { uploadItemImage } from '../services/supabaseStorage';
@@ -148,6 +149,17 @@ export const SettingsView: React.FC = () => {
   const [profileLogoUrl, setProfileLogoUrl] = useState(activeTenant?.logoUrl || '');
   const [profileTagline, setProfileTagline] = useState(activeTenant?.tagline || '');
   const [profileReceiptFooter, setProfileReceiptFooter] = useState(activeTenant?.receiptFooterNote || '');
+  const tenantPersona: BusinessPersona = activeTenant?.settings?.businessPersona || 'RETAIL';
+  const [cafeConfig, setCafeConfig] = useState<CafeConfig>(
+    activeTenant?.settings?.cafeConfig || {
+      enableKOT: true,
+      enableQROrdering: true,
+      allowCustomerOrdering: true,
+      autoAcceptOrders: false,
+      taxRate: 5.0,
+      serviceChargeRate: 0.0,
+    }
+  );
   const [profileCurrency, setProfileCurrency] = useState('₹ (INR)');
   const [profileSavedMsg, setProfileSavedMsg] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -165,6 +177,7 @@ export const SettingsView: React.FC = () => {
     logoUrl: (activeTenant?.logoUrl || '').trim(),
     tagline: (activeTenant?.tagline || '').trim(),
     receiptFooterNote: (activeTenant?.receiptFooterNote || '').trim(),
+    cafeConfig: activeTenant?.settings?.cafeConfig,
   }));
   const [initialEditUserSnapshot, setInitialEditUserSnapshot] = useState<string>('');
   const [initialEditLocSnapshot, setInitialEditLocSnapshot] = useState<string>('');
@@ -231,6 +244,9 @@ export const SettingsView: React.FC = () => {
         setProfileLogoUrl(liveTenant.logoUrl || '');
         setProfileTagline(liveTenant.tagline || '');
         if (liveTenant.address) setProfileAddress(liveTenant.address);
+        if (liveTenant.settings?.cafeConfig) {
+          setCafeConfig(prev => ({ ...prev, ...liveTenant.settings?.cafeConfig }));
+        }
         setInitialProfileSnapshot(JSON.stringify({
           name: (liveTenant.name || '').trim(),
           gstin: (liveTenant.gstin || '').trim(),
@@ -240,6 +256,7 @@ export const SettingsView: React.FC = () => {
           logoUrl: (liveTenant.logoUrl || '').trim(),
           tagline: (liveTenant.tagline || '').trim(),
           receiptFooterNote: (liveTenant.receiptFooterNote || '').trim(),
+          cafeConfig: liveTenant.settings?.cafeConfig,
         }));
       }
     } catch (e) {
@@ -600,6 +617,9 @@ export const SettingsView: React.FC = () => {
         logoUrl: profileLogoUrl.trim(),
         tagline: profileTagline.trim(),
         receiptFooterNote: profileReceiptFooter.trim(),
+        settings: {
+          cafeConfig,
+        },
       });
       setInitialProfileSnapshot(JSON.stringify({
         name: profileName.trim(),
@@ -610,6 +630,7 @@ export const SettingsView: React.FC = () => {
         logoUrl: profileLogoUrl.trim(),
         tagline: profileTagline.trim(),
         receiptFooterNote: profileReceiptFooter.trim(),
+        cafeConfig,
       }));
       setProfileSavedMsg(true);
       setTimeout(() => setProfileSavedMsg(false), 3500);
@@ -631,9 +652,10 @@ export const SettingsView: React.FC = () => {
       logoUrl: profileLogoUrl.trim(),
       tagline: profileTagline.trim(),
       receiptFooterNote: profileReceiptFooter.trim(),
+      cafeConfig,
     });
     return current !== initialProfileSnapshot;
-  }, [initialProfileSnapshot, profileName, profileGstin, profilePhone, profileEmail, profileAddress, profileLogoUrl, profileTagline, profileReceiptFooter]);
+  }, [initialProfileSnapshot, profileName, profileGstin, profilePhone, profileEmail, profileAddress, profileLogoUrl, profileTagline, profileReceiptFooter, cafeConfig]);
 
   const isEditUserDirty = useMemo(() => {
     if (!initialEditUserSnapshot) return false;
@@ -1191,6 +1213,74 @@ export const SettingsView: React.FC = () => {
             )}
 
             <form onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Business Persona & Operating Mode */}
+              {/* Café Operations Preferences (Only visible if assigned CAFE or HYBRID by Super Admin) */}
+              {(tenantPersona === 'CAFE' || tenantPersona === 'HYBRID') && (
+                <div style={{
+                  padding: '16px 20px',
+                  borderRadius: '12px',
+                  border: '1.5px solid var(--primary-200, #bfdbfe)',
+                  backgroundColor: 'var(--primary-50, #eff6ff)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Coffee size={20} color="var(--primary-600)" />
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--neutral-900)' }}>
+                        Café Operations Preferences
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--neutral-600)' }}>
+                        Configure floor operations, kitchen ticket dispatch, and digital ordering for your store.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 16,
+                    fontSize: '0.8rem',
+                    color: 'var(--neutral-700)',
+                    paddingTop: 8,
+                    borderTop: '1px dashed var(--neutral-300)'
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={cafeConfig.enableKOT}
+                        onChange={e => setCafeConfig(prev => ({ ...prev, enableKOT: e.target.checked }))}
+                      />
+                      <span style={{ fontWeight: 600 }}>Enable Kitchen Order Tickets (KOT)</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={cafeConfig.enableQROrdering}
+                        onChange={e => setCafeConfig(prev => ({ ...prev, enableQROrdering: e.target.checked }))}
+                      />
+                      <span style={{ fontWeight: 600 }}>Enable Table QR Self-Ordering</span>
+                    </label>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontWeight: 600 }}>Dine-In GST (%):</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={28}
+                        step={0.5}
+                        className="form-input form-input-sm"
+                        style={{ width: 70, padding: '2px 8px' }}
+                        value={cafeConfig.taxRate}
+                        onChange={e => setCafeConfig(prev => ({ ...prev, taxRate: Number(e.target.value) }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Store Branding Section: Logo, Name & Tagline */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
                 {/* Store Name */}

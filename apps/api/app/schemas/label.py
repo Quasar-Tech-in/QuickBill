@@ -6,6 +6,7 @@ from app.schemas.common import BaseSchema
 
 class LabelStyle(str, Enum):
     STANDARD = "STANDARD"
+    JEWELRY_RAT_TAIL = "JEWELRY_RAT_TAIL"
     JEWELRY_STRING_TAG = "JEWELRY_STRING_TAG"
     SHELF = "SHELF"
     SHIPPING = "SHIPPING"
@@ -14,6 +15,7 @@ class PaperSize(str, Enum):
     THERMAL_50x30 = "THERMAL_50x30"
     THERMAL_40x40 = "THERMAL_40x40"
     THERMAL_38x25 = "THERMAL_38x25"
+    RAT_TAIL_76x12 = "RAT_TAIL_76x12"
     DUMBBELL_70x12 = "DUMBBELL_70x12"
     A4_GRID_24 = "A4_GRID_24"
     A4_GRID_40 = "A4_GRID_40"
@@ -37,10 +39,12 @@ class LabelPrintConfig(BaseSchema):
     code_type: CodeType = Field(default=CodeType.BARCODE, alias="codeType")
     quantity: int = Field(default=1, ge=1, le=1000)
     show_price: bool = Field(default=True, alias="showPrice")
-    show_mrp: bool = Field(default=True, alias="showMrp")
+    show_mrp: bool = Field(default=False, alias="showMrp")
     show_sku: bool = Field(default=True, alias="showSku")
     show_store_name: bool = Field(default=True, alias="showStoreName")
     store_name: Optional[str] = Field(default=None, alias="storeName")
+    custom_positions: Optional[dict] = Field(default=None, alias="customPositions")
+    code_scale: Optional[float] = Field(default=1.0, alias="codeScale")
 
 class BatchLabelPrintRequest(BaseSchema):
     items: List[LabelPrintConfig]

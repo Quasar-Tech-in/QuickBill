@@ -240,6 +240,9 @@ export interface Invoice {
   partyPhone?: string;
   consumerName?: string;
   consumerPhone?: string;
+  customerName?: string;
+  customerPhone?: string;
+  total?: number;
   isNewCustomer?: boolean;
   billedById?: string;
   billedByName?: string;
@@ -370,6 +373,132 @@ export interface Tenant {
     usersCount: number;
     locationsCount?: number;
   };
+  settings?: TenantSettings;
+}
+
+export type BusinessPersona = 'RETAIL' | 'CAFE' | 'HYBRID';
+
+export interface CafeConfig {
+  enableQrOrdering?: boolean;
+  enableQROrdering?: boolean;
+  enableKOT?: boolean;
+  autoAcceptOrders?: boolean;
+  allowCustomerOrdering?: boolean;
+  requireOrderApproval?: boolean;
+  autoPrintKot?: boolean;
+  kotPrinterType?: string;
+  allowCustomerOrderCancellation?: boolean;
+  taxRate?: number;
+  serviceChargePercent?: number;
+  serviceChargeRate?: number;
+  sections?: string[];
+}
+
+export interface TenantSettings {
+  businessPersona?: BusinessPersona;
+  cafeConfig?: CafeConfig;
+  currency?: string;
+  currencySymbol?: string;
+  enableRoundOff?: boolean;
+  defaultTaxRate?: number;
+}
+
+export type TableStatus = 'AVAILABLE' | 'OCCUPIED' | 'ORDERING' | 'BILLING' | 'CLEANING';
+
+export interface CafeTable {
+  id: string;
+  businessId?: string;
+  locationId?: string;
+  tableNumber: string | number;
+  label?: string;
+  tableName?: string;
+  section: string;
+  floor?: number;
+  capacity?: number;
+  seatingCapacity?: number;
+  currentStatus: TableStatus;
+  activeSessionId?: string;
+  qrCodeUrl?: string;
+  qrCodeToken?: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface KOTItem {
+  itemId: string;
+  name?: string;
+  itemName?: string;
+  variantName?: string;
+  quantity: number;
+  notes?: string;
+}
+
+export interface KOT {
+  id: string;
+  businessId?: string;
+  locationId?: string;
+  kotNumber: string;
+  sessionId: string;
+  tableId?: string;
+  tableNumber: string;
+  tableName?: string;
+  roundNumber?: number;
+  orderSource?: string;
+  kitchenStatus: 'QUEUED' | 'PREPARING' | 'READY' | 'SERVED';
+  items: KOTItem[];
+  isPrinted?: boolean;
+  printedAt?: string;
+  serverName?: string;
+  specialInstructions?: string;
+  createdAt: string;
+}
+
+export interface TableSessionOrder {
+  orderId: string;
+  source: string;
+  placedAt: string;
+  orderedAt?: string;
+  approvalStatus: 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
+  kotId?: string;
+  kotNumber?: string;
+  rejectionReason?: string;
+  customerName?: string;
+  customerPhone?: string;
+  notes?: string;
+  orderSubtotal?: number;
+  items: {
+    itemId: string;
+    name?: string;
+    itemName?: string;
+    variantId?: string;
+    variantName?: string;
+    unitPrice: number;
+    quantity: number;
+    notes?: string;
+    taxRate?: number;
+    lineTotal?: number;
+  }[];
+}
+
+export interface TableSession {
+  id: string;
+  businessId?: string;
+  locationId?: string;
+  tableId: string;
+  tableNumber: string;
+  sessionNumber?: number | string;
+  sessionStatus: 'ACTIVE' | 'BILLING' | 'SETTLED' | 'CANCELLED';
+  guestCount?: number;
+  customerName?: string;
+  customerPhone?: string;
+  notes?: string;
+  orders: TableSessionOrder[];
+  subtotal: number;
+  taxTotal?: number;
+  grandTotal: number;
+  openedAt: string;
+  closedAt?: string;
 }
 
 export interface PlatformStats {

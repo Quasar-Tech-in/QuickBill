@@ -32,8 +32,7 @@ async def test_generate_custom_thermal_label_pdf(auth_headers):
             "style": "STANDARD",
             "codeType": code_type,
             "quantity": 2,
-            "showPrice": True,
-            "showMrp": True
+            "showPrice": True
         }
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -54,6 +53,29 @@ async def test_generate_jewelry_dumbbell_tag_pdf(auth_headers):
         "showPrice": True,
         "showStoreName": True,
         "storeName": "Royal Jewelers"
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/v1/labels/custom-pdf", json=payload, headers=auth_headers)
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert len(response.content) > 100
+
+@pytest.mark.asyncio
+async def test_generate_jewelry_rattail_tag_pdf(auth_headers):
+    payload = {
+        "itemName": "Solitaire Diamond Pendant",
+        "sku": "JW-PEN-42",
+        "publicItemId": "ITM-9912",
+        "salePrice": 24900.0,
+        "mrp": 27500.0,
+        "paperSize": "RAT_TAIL_76x12",
+        "style": "JEWELRY_RAT_TAIL",
+        "codeType": "QR",
+        "quantity": 3,
+        "showPrice": True,
+        "showStoreName": True,
+        "storeName": "Kalyan Heritage"
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

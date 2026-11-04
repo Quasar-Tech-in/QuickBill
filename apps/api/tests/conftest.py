@@ -1,9 +1,43 @@
+import sys
+import os
+import signal
+import asyncio
 import pytest
 import copy
+import re
 from typing import Dict, Any, List, Optional
 from bson import ObjectId
+
+# On Windows in sandboxed test environments, loopback socket creation (127.0.0.1)
+# is restricted with WinError 10013, causing asyncio ProactorEventLoop._make_self_pipe()
+# to hang indefinitely on accept(). Patch proactor self-pipe for single-threaded async tests.
+if sys.platform == "win32":
+    import asyncio.proactor_events
+
+    class _SandboxDummySock:
+        def fileno(self):
+            return 999
+
+        def setblocking(self, b):
+            pass
+
+        def close(self):
+            pass
+
+    def _dummy_make_self_pipe(self):
+        self._ssock = _SandboxDummySock()
+        self._csock = _SandboxDummySock()
+        self._internal_fds += 1
+
+    signal.set_wakeup_fd = lambda fd, *args, **kwargs: -1
+    asyncio.proactor_events.BaseProactorEventLoop._make_self_pipe = _dummy_make_self_pipe
+    asyncio.proactor_events.BaseProactorEventLoop._loop_self_reading = lambda self, f=None: None
+    asyncio.proactor_events.BaseProactorEventLoop._write_to_self = lambda self: None
+    asyncio.proactor_events.BaseProactorEventLoop._close_self_pipe = lambda self: setattr(self, '_internal_fds', self._internal_fds - 1)
+
 from app.main import app
 from app.core.database import get_database
+
 
 class MockCursor:
     def __init__(self, docs: List[Dict[str, Any]]):
@@ -118,10 +152,23 @@ class MockCollection:
                 if str(doc_val) != str(v):
                     return False
             elif isinstance(v, dict):
-                if "$regex" in v:
-                    pattern = v["$regex"].lower()
-                    if pattern not in str(doc_val).lower():
+                if "$ne" in v:
+                    if doc_val == v["$ne"] or (isinstance(v["$ne"], (str, ObjectId)) and str(doc_val) == str(v["$ne"])):
                         return False
+                elif "$in" in v:
+                    in_list = [str(x) if isinstance(x, ObjectId) else x for x in v["$in"]]
+                    check_val = str(doc_val) if isinstance(doc_val, ObjectId) else doc_val
+                    if check_val not in in_list:
+                        return False
+                elif "$regex" in v:
+                    pattern = v["$regex"]
+                    flags = re.IGNORECASE if "i" in v.get("$options", "i").lower() else 0
+                    try:
+                        if not re.search(pattern, str(doc_val or ""), flags):
+                            return False
+                    except Exception:
+                        if pattern.lower() not in str(doc_val or "").lower():
+                            return False
             else:
                 if doc_val != v:
                     return False
@@ -156,6 +203,11 @@ class MockCollection:
                 if "$inc" in update:
                     for field, inc_val in update["$inc"].items():
                         d[field] = d.get(field, 0) + inc_val
+                if "$push" in update:
+                    for field, push_val in update["$push"].items():
+                        if field not in d or not isinstance(d[field], list):
+                            d[field] = []
+                        d[field].append(copy.deepcopy(push_val))
                 return MockUpdateResult(1)
         if upsert:
             new_doc = copy.deepcopy(filter_query)
@@ -166,9 +218,45 @@ class MockCollection:
             if "$inc" in update:
                 for field, inc_val in update["$inc"].items():
                     new_doc[field] = inc_val
+            if "$push" in update:
+                for field, push_val in update["$push"].items():
+                    new_doc[field] = [copy.deepcopy(push_val)]
             self.data.append(new_doc)
             return MockUpdateResult(1)
         return MockUpdateResult(0)
+
+    async def update_many(self, filter_query: Dict[str, Any], update: Dict[str, Any], session=None) -> MockUpdateResult:
+        modified_count = 0
+        for d in self.data:
+            if self._matches(d, filter_query):
+                if "$set" in update:
+                    _apply_set(d, update["$set"])
+                if "$inc" in update:
+                    for field, inc_val in update["$inc"].items():
+                        d[field] = d.get(field, 0) + inc_val
+                if "$push" in update:
+                    for field, push_val in update["$push"].items():
+                        if field not in d or not isinstance(d[field], list):
+                            d[field] = []
+                        d[field].append(copy.deepcopy(push_val))
+                modified_count += 1
+        return MockUpdateResult(modified_count)
+
+    async def find_one_and_update(self, filter_query: Dict[str, Any], update: Dict[str, Any], return_document=True) -> Optional[Dict[str, Any]]:
+        for d in self.data:
+            if self._matches(d, filter_query):
+                if "$set" in update:
+                    _apply_set(d, update["$set"])
+                if "$inc" in update:
+                    for field, inc_val in update["$inc"].items():
+                        d[field] = d.get(field, 0) + inc_val
+                if "$push" in update:
+                    for field, push_val in update["$push"].items():
+                        if field not in d or not isinstance(d[field], list):
+                            d[field] = []
+                        d[field].append(copy.deepcopy(push_val))
+                return copy.deepcopy(d)
+        return None
 
     async def delete_one(self, filter_query: Dict[str, Any], session=None) -> MockDeleteResult:
         for idx, d in enumerate(self.data):
@@ -217,6 +305,24 @@ def override_db(monkeypatch):
         "tenantId": ObjectId("65f2a1b9a000000000000001"),
         "authorizedTenantIds": ["65f2a1b9a000000000000001"],
         "isActive": True
+    })
+
+    # Seed default store A tenant
+    mock_primary_db.tenants.data.append({
+        "_id": ObjectId("65f2a1b9a000000000000001"),
+        "slug": "65f2a1b9a000000000000001",
+        "name": "Store A",
+        "status": "ACTIVE",
+        "subscription": {
+            "status": "ACTIVE",
+            "tier": "PROFESSIONAL",
+            "maxUsers": 10,
+            "maxLocations": 3,
+            "endDate": "2027-01-01T00:00:00Z"
+        },
+        "settings": {
+            "businessPersona": "RETAIL"
+        }
     })
 
     # Seed default store B tenant
