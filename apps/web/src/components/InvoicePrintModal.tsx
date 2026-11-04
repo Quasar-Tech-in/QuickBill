@@ -34,36 +34,26 @@ const formatInvoiceDate = (val?: string | null): string => {
   return str;
 };
 
-const RECEIPT_SCALE_CACHE_KEY = 'qb_pos_receipt_scale_v2';
 const RECEIPT_FORMAT_CACHE_KEY = 'qb_pos_receipt_format_v2';
 const RECEIPT_MARGIN_CACHE_KEY = 'qb_pos_receipt_margin_v2';
 
 export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, onClose }) => {
-  // Support POS Thermal 80mm (3-inch), POS Thermal 58mm (2-inch), and A4 Standard
+  // Support POS Thermal 48mm (2-inch), POS Thermal 58mm, POS Thermal 80mm (3-inch), and A4 Standard
   const [printFormat, setPrintFormat] = useState<'POS_80' | 'POS_58' | 'POS_48' | 'A4'>(() => {
     try {
       const cached = localStorage.getItem(RECEIPT_FORMAT_CACHE_KEY);
       if (cached === 'POS_48' || cached === 'POS_58' || cached === 'A4' || cached === 'POS_80') return cached;
     } catch (_) {}
-    return 'POS_80';
-  });
-
-  const [receiptScale, setReceiptScale] = useState<number>(() => {
-    try {
-      const cached = localStorage.getItem(RECEIPT_SCALE_CACHE_KEY);
-      const parsed = cached ? parseFloat(cached) : 1.0;
-      if (parsed >= 0.8 && parsed <= 1.2) return parsed;
-    } catch (_) {}
-    return 1.0;
+    return 'POS_48'; // 48mm Roll by default
   });
 
   const [receiptLeftMargin, setReceiptLeftMargin] = useState<number>(() => {
     try {
       const cached = localStorage.getItem(RECEIPT_MARGIN_CACHE_KEY);
-      const parsed = cached !== null ? parseFloat(cached) : 0;
+      const parsed = cached !== null ? parseFloat(cached) : 1;
       if (!isNaN(parsed) && parsed >= -10 && parsed <= 15) return parsed;
     } catch (_) {}
-    return 0; // Flush 0mm left margin by default
+    return 1; // 1mm left margin by default (perfect for 48mm/58mm rolls)
   });
 
   const handleMarginChange = (newMargin: number) => {
@@ -82,14 +72,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   };
 
   const isPos = printFormat === 'POS_80' || printFormat === 'POS_58' || printFormat === 'POS_48';
-
-  const handleScaleChange = (newScale: number) => {
-    const clamped = Math.round(Math.max(0.8, Math.min(1.2, newScale)) * 100) / 100;
-    setReceiptScale(clamped);
-    try {
-      localStorage.setItem(RECEIPT_SCALE_CACHE_KEY, String(clamped));
-    } catch (_) {}
-  };
   
   const activeTenant = store.getActiveTenant();
   const activeLocation = store.getActiveLocation();
@@ -299,110 +281,58 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 </button>
               </div>
 
-              {/* Receipt Width Fit Slider & Stepper */}
+              {/* Left Margin Alignment Stepper */}
               {isPos && (
-                <>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--neutral-100)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
-                    <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Roll Fit:</span>
-                    <button
-                      type="button"
-                      onClick={() => handleScaleChange(receiptScale - 0.05)}
-                      style={{
-                        width: 18,
-                        height: 18,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: 3,
-                        border: '1px solid var(--neutral-300)',
-                        backgroundColor: '#ffffff',
-                        fontSize: '0.75rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        padding: 0
-                      }}
-                      title="Narrow receipt width by 5%"
-                    >
-                      -
-                    </button>
-                    <span style={{ fontSize: '0.70rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 32, textAlign: 'center' }}>
-                      {Math.round(receiptScale * 100)}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleScaleChange(receiptScale + 0.05)}
-                      style={{
-                        width: 18,
-                        height: 18,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: 3,
-                        border: '1px solid var(--neutral-300)',
-                        backgroundColor: '#ffffff',
-                        fontSize: '0.75rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        padding: 0
-                      }}
-                      title="Widen receipt width by 5%"
-                    >
-                      +
-                    </button>
-                  </div>
-
-                  {/* Left Margin Alignment Stepper */}
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--neutral-100)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
-                    <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Left Margin:</span>
-                    <button
-                      type="button"
-                      onClick={() => handleMarginChange(receiptLeftMargin - 1)}
-                      disabled={receiptLeftMargin <= -10}
-                      style={{
-                        width: 18,
-                        height: 18,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: 3,
-                        border: '1px solid var(--neutral-300)',
-                        backgroundColor: '#ffffff',
-                        fontSize: '0.75rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        padding: 0
-                      }}
-                      title="Shift left by 1mm (supports negative to cancel printer driver hardware margins)"
-                    >
-                      -
-                    </button>
-                    <span style={{ fontSize: '0.70rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 48, textAlign: 'center' }}>
-                      {receiptLeftMargin === 0 ? '0mm' : (receiptLeftMargin > 0 ? '+' : '') + receiptLeftMargin + 'mm'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleMarginChange(receiptLeftMargin + 1)}
-                      disabled={receiptLeftMargin >= 15}
-                      style={{
-                        width: 18,
-                        height: 18,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: 3,
-                        border: '1px solid var(--neutral-300)',
-                        backgroundColor: '#ffffff',
-                        fontSize: '0.75rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        padding: 0
-                      }}
-                      title="Shift right by 1mm"
-                    >
-                      +
-                    </button>
-                  </div>
-                </>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--neutral-100)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Left Margin:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleMarginChange(receiptLeftMargin - 1)}
+                    disabled={receiptLeftMargin <= -10}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 3,
+                      border: '1px solid var(--neutral-300)',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                    title="Shift left by 1mm (supports negative to cancel printer driver hardware margins)"
+                  >
+                    -
+                  </button>
+                  <span style={{ fontSize: '0.70rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 48, textAlign: 'center' }}>
+                    {receiptLeftMargin === 0 ? '0mm' : (receiptLeftMargin > 0 ? '+' : '') + receiptLeftMargin + 'mm'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleMarginChange(receiptLeftMargin + 1)}
+                    disabled={receiptLeftMargin >= 15}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 3,
+                      border: '1px solid var(--neutral-300)',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                    title="Shift right by 1mm"
+                  >
+                    +
+                  </button>
+                </div>
               )}
             </div>
 
@@ -471,9 +401,8 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               className={`receipt-pos-container ${printFormat === 'POS_48' ? 'receipt-pos-48' : printFormat === 'POS_58' ? 'receipt-pos-58' : 'receipt-pos-80'}`}
               style={{ 
                 ['--receipt-left-margin' as any]: `${receiptLeftMargin}mm`,
-                maxWidth: printFormat === 'POS_48' ? Math.round(155 * receiptScale) : printFormat === 'POS_58' ? Math.round(182 * receiptScale) : Math.round(265 * receiptScale), 
-                marginLeft: `${receiptLeftMargin}mm`,
-                marginRight: 'auto',
+                maxWidth: printFormat === 'POS_48' ? 155 : printFormat === 'POS_58' ? 182 : 265, 
+                margin: '0 auto',
                 textAlign: 'left',
                 boxSizing: 'border-box',
                 padding: printFormat === 'POS_48' ? '0 1px' : printFormat === 'POS_58' ? '0 2px' : '0 4px',

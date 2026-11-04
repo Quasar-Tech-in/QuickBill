@@ -904,7 +904,7 @@ button:disabled:hover,
     box-sizing: border-box !important;
     overflow: visible !important;
     margin: 0 !important;
-    margin-left: var(--receipt-left-margin, 0mm) !important;
+    margin-left: var(--receipt-left-margin, 1mm) !important;
     margin-right: auto !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
@@ -934,6 +934,11 @@ button:disabled:hover,
     border: none !important;
     box-shadow: none !important;
   }
+}
+
+/* Screen mode thermal receipt preview - always perfectly centered in web modal */
+.receipt-pos-container {
+  margin: 0 auto;
 }
 
 
@@ -3031,7 +3036,7 @@ button:disabled:hover,
     box-sizing: border-box !important;
     overflow: visible !important;
     margin: 0 !important;
-    margin-left: var(--receipt-left-margin, 0mm) !important;
+    margin-left: var(--receipt-left-margin, 1mm) !important;
     margin-right: auto !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
