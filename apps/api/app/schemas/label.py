@@ -45,6 +45,7 @@ class LabelPrintConfig(BaseSchema):
     store_name: Optional[str] = Field(default=None, alias="storeName")
     custom_positions: Optional[dict] = Field(default=None, alias="customPositions")
     code_scale: Optional[float] = Field(default=1.0, alias="codeScale")
+    element_styles: Optional[dict] = Field(default=None, alias="elementStyles")
 
 class BatchLabelPrintRequest(BaseSchema):
     items: List[LabelPrintConfig]

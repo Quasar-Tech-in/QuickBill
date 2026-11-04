@@ -30,6 +30,45 @@ class LabelService:
         drawing.drawOn(c, x, y)
 
     @staticmethod
+    def _resolve_font_and_text(
+        elem_id: str,
+        base_size: float,
+        default_bold: bool,
+        text: str,
+        element_styles: Optional[dict] = None,
+        is_monospace: bool = False,
+    ):
+        styles = element_styles or {}
+        elem_style = styles.get(elem_id, {})
+        size_multiplier = 1.0
+        bold = default_bold
+        italic = False
+        uppercase = False
+        if isinstance(elem_style, dict):
+            try:
+                size_multiplier = float(elem_style.get("size", 1.0))
+            except (ValueError, TypeError):
+                size_multiplier = 1.0
+            bold = bool(elem_style.get("bold", default_bold))
+            italic = bool(elem_style.get("italic", False))
+            uppercase = bool(elem_style.get("uppercase", False))
+
+        font_size = max(2.5, min(24.0, base_size * size_multiplier))
+
+        family = "Courier" if is_monospace else "Helvetica"
+        if bold and italic:
+            font_name = f"{family}-BoldOblique"
+        elif bold:
+            font_name = f"{family}-Bold"
+        elif italic:
+            font_name = f"{family}-Oblique"
+        else:
+            font_name = family
+
+        final_text = text.upper() if uppercase else text
+        return font_name, font_size, final_text
+
+    @staticmethod
     def generate_single_thermal_50x30(
         config: LabelPrintConfig, store_name: str
     ) -> bytes:
@@ -76,23 +115,25 @@ class LabelService:
             if use_custom:
                 # 1. Custom Store Name
                 if config.show_store_name and "storeName" in cp:
-                    c.setFont("Helvetica-Bold", 7 if height >= 30 * mm else 6)
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 7 if height >= 30 * mm else 6, True, display_store[:28], config.element_styles)
+                    c.setFont(fn, fs)
                     sx = (cp["storeName"]["x"] / 100.0) * width
                     sy = ((100.0 - cp["storeName"]["y"]) / 100.0) * height
                     if abs(cp["storeName"]["x"] - 50) < 15:
-                        c.drawCentredString(sx, sy - 1.5 * mm, display_store[:28])
+                        c.drawCentredString(sx, sy - 1.5 * mm, txt)
                     else:
-                        c.drawString(sx, sy - 1.5 * mm, display_store[:28])
+                        c.drawString(sx, sy - 1.5 * mm, txt)
 
                 # 2. Custom Item Name
                 if "productName" in cp:
-                    c.setFont("Helvetica-Bold", 7.5 if height >= 30 * mm else 6.5)
+                    fn, fs, txt = LabelService._resolve_font_and_text("productName", 7.5 if height >= 30 * mm else 6.5, True, config.item_name[:26], config.element_styles)
+                    c.setFont(fn, fs)
                     px = (cp["productName"]["x"] / 100.0) * width
                     py = ((100.0 - cp["productName"]["y"]) / 100.0) * height
                     if abs(cp["productName"]["x"] - 50) < 15:
-                        c.drawCentredString(px, py - 1.5 * mm, config.item_name[:26])
+                        c.drawCentredString(px, py - 1.5 * mm, txt)
                     else:
-                        c.drawString(px, py - 1.5 * mm, config.item_name[:26])
+                        c.drawString(px, py - 1.5 * mm, txt)
 
                 # 3. Custom Code Generation
                 if is_qr:
@@ -107,8 +148,9 @@ class LabelService:
                     if "barcodeText" in cp:
                         bx = (cp["barcodeText"]["x"] / 100.0) * width
                         by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
-                        c.setFont("Helvetica", 5.5)
-                        c.drawCentredString(bx, by - 1.5 * mm, display_code)
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.5, False, display_code, config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawCentredString(bx, by - 1.5 * mm, txt)
                 else:
                     bc_h = (7 * mm if height >= 30 * mm else 5.5 * mm) * scale
                     bw = max(0.20, 0.42 * scale)
@@ -227,31 +269,36 @@ class LabelService:
 
             if use_custom:
                 if config.show_store_name and "storeName" in cp:
-                    c.setFont("Helvetica-Bold", 5)
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5, True, display_store[:16], config.element_styles)
+                    c.setFont(fn, fs)
                     sx = (cp["storeName"]["x"] / 100.0) * width
                     sy = ((100.0 - cp["storeName"]["y"]) / 100.0) * height
-                    c.drawString(sx, sy - 1.2 * mm, display_store[:16])
+                    c.drawString(sx, sy - 1.2 * mm, txt)
                 elif config.show_store_name:
-                    c.setFont("Helvetica-Bold", 5)
-                    c.drawString(1.5 * mm, 8.8 * mm, display_store[:16])
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5, True, display_store[:16], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawString(1.5 * mm, 8.8 * mm, txt)
 
                 if "productName" in cp:
-                    c.setFont("Helvetica", 5)
+                    fn, fs, txt = LabelService._resolve_font_and_text("productName", 5, False, config.item_name[:18], config.element_styles)
+                    c.setFont(fn, fs)
                     px = (cp["productName"]["x"] / 100.0) * width
                     py = ((100.0 - cp["productName"]["y"]) / 100.0) * height
-                    c.drawString(px, py - 1.2 * mm, config.item_name[:18])
+                    c.drawString(px, py - 1.2 * mm, txt)
                 else:
-                    c.setFont("Helvetica", 5)
-                    c.drawString(1.5 * mm, 5.8 * mm, config.item_name[:18])
+                    fn, fs, txt = LabelService._resolve_font_and_text("productName", 5, False, config.item_name[:18], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawString(1.5 * mm, 5.8 * mm, txt)
 
                 if config.show_price and config.sale_price:
-                    c.setFont("Helvetica-Bold", 7)
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 7, True, f"Rs. {config.sale_price:,.2f}", config.element_styles)
+                    c.setFont(fn, fs)
                     if "price" in cp:
                         prx = (cp["price"]["x"] / 100.0) * width
                         pry = ((100.0 - cp["price"]["y"]) / 100.0) * height
-                        c.drawString(prx, pry - 1.2 * mm, f"Rs. {config.sale_price:,.2f}")
+                        c.drawString(prx, pry - 1.2 * mm, txt)
                     else:
-                        c.drawString(1.5 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
+                        c.drawString(1.5 * mm, 2 * mm, txt)
             else:
                 if config.show_store_name:
                     c.setFont("Helvetica-Bold", 5)
@@ -289,20 +336,23 @@ class LabelService:
                     if "barcodeText" in cp:
                         bx = (cp["barcodeText"]["x"] / 100.0) * width
                         by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
-                        c.setFont("Helvetica-Bold", 4.8)
-                        c.drawString(bx, by - 1.2 * mm, raw_code[:12])
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:12], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(bx, by - 1.2 * mm, txt)
                     else:
-                        c.setFont("Helvetica-Bold", 4.8)
-                        c.drawString(38 * mm, 7.5 * mm, raw_code[:12])
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:12], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(38 * mm, 7.5 * mm, txt)
 
                     if config.show_sku and config.sku:
-                        c.setFont("Helvetica", 4.2)
+                        fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.2, False, f"SKU:{config.sku[:10]}", config.element_styles)
+                        c.setFont(fn, fs)
                         if "sku" in cp:
                             skx = (cp["sku"]["x"] / 100.0) * width
                             sky = ((100.0 - cp["sku"]["y"]) / 100.0) * height
-                            c.drawString(skx, sky - 1.2 * mm, f"SKU:{config.sku[:10]}")
+                            c.drawString(skx, sky - 1.2 * mm, txt)
                         else:
-                            c.drawString(38 * mm, 3.8 * mm, f"SKU:{config.sku[:10]}")
+                            c.drawString(38 * mm, 3.8 * mm, txt)
                 else:
                     bc_h = min(8 * mm, max(3 * mm, 5.5 * mm * scale))
                     bw = max(0.16, 0.22 * scale)
@@ -321,11 +371,13 @@ class LabelService:
                     if "barcodeText" in cp:
                         bx = (cp["barcodeText"]["x"] / 100.0) * width
                         by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
-                        c.setFont("Helvetica", 4.5)
-                        c.drawString(bx, by - 1.2 * mm, raw_code[:14])
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.5, False, raw_code[:14], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(bx, by - 1.2 * mm, txt)
                     else:
-                        c.setFont("Helvetica", 4.5)
-                        c.drawString(27.5 * mm, 1.5 * mm, raw_code[:14])
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.5, False, raw_code[:14], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(27.5 * mm, 1.5 * mm, txt)
             else:
                 if is_qr:
                     qr_size = 8.5 * mm
@@ -391,31 +443,36 @@ class LabelService:
             # --- LEFT WING (0mm to 28mm) ---
             if use_custom:
                 if config.show_store_name and "storeName" in cp:
-                    c.setFont("Helvetica-Bold", 5.5)
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5.5, True, display_store[:18], config.element_styles)
+                    c.setFont(fn, fs)
                     sx = (cp["storeName"]["x"] / 100.0) * width
                     sy = ((100.0 - cp["storeName"]["y"]) / 100.0) * height
-                    c.drawString(sx, sy - 1.2 * mm, display_store[:18])
+                    c.drawString(sx, sy - 1.2 * mm, txt)
                 elif config.show_store_name:
-                    c.setFont("Helvetica-Bold", 5.5)
-                    c.drawString(2 * mm, 8.5 * mm, display_store[:18])
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5.5, True, display_store[:18], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawString(2 * mm, 8.5 * mm, txt)
 
                 if "productName" in cp:
-                    c.setFont("Helvetica", 5.5)
+                    fn, fs, txt = LabelService._resolve_font_and_text("productName", 5.5, False, config.item_name[:20], config.element_styles)
+                    c.setFont(fn, fs)
                     px = (cp["productName"]["x"] / 100.0) * width
                     py = ((100.0 - cp["productName"]["y"]) / 100.0) * height
-                    c.drawString(px, py - 1.2 * mm, config.item_name[:20])
+                    c.drawString(px, py - 1.2 * mm, txt)
                 else:
-                    c.setFont("Helvetica", 5.5)
-                    c.drawString(2 * mm, 5.5 * mm, config.item_name[:20])
+                    fn, fs, txt = LabelService._resolve_font_and_text("productName", 5.5, False, config.item_name[:20], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawString(2 * mm, 5.5 * mm, txt)
 
                 if config.show_price and config.sale_price:
-                    c.setFont("Helvetica-Bold", 7)
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 7, True, f"Rs. {config.sale_price:,.2f}", config.element_styles)
+                    c.setFont(fn, fs)
                     if "price" in cp:
                         prx = (cp["price"]["x"] / 100.0) * width
                         pry = ((100.0 - cp["price"]["y"]) / 100.0) * height
-                        c.drawString(prx, pry - 1.2 * mm, f"Rs. {config.sale_price:,.2f}")
+                        c.drawString(prx, pry - 1.2 * mm, txt)
                     else:
-                        c.drawString(2 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
+                        c.drawString(2 * mm, 2 * mm, txt)
             else:
                 if config.show_store_name:
                     c.setFont("Helvetica-Bold", 5.5)
@@ -447,20 +504,23 @@ class LabelService:
                     if "barcodeText" in cp:
                         bx = (cp["barcodeText"]["x"] / 100.0) * width
                         by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
-                        c.setFont("Helvetica-Bold", 5)
-                        c.drawString(bx, by - 1.2 * mm, raw_code[:12])
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5, True, raw_code[:12], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(bx, by - 1.2 * mm, txt)
                     else:
-                        c.setFont("Helvetica-Bold", 5)
-                        c.drawString(44 * mm, 6.5 * mm, raw_code[:12])
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5, True, raw_code[:12], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(44 * mm, 6.5 * mm, txt)
 
                     if config.show_sku and config.sku:
-                        c.setFont("Helvetica", 4.5)
+                        fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.5, False, f"SKU:{config.sku[:10]}", config.element_styles)
+                        c.setFont(fn, fs)
                         if "sku" in cp:
                             skx = (cp["sku"]["x"] / 100.0) * width
                             sky = ((100.0 - cp["sku"]["y"]) / 100.0) * height
-                            c.drawString(skx, sky - 1.2 * mm, f"SKU:{config.sku[:10]}")
+                            c.drawString(skx, sky - 1.2 * mm, txt)
                         else:
-                            c.drawString(44 * mm, 2.5 * mm, f"SKU:{config.sku[:10]}")
+                            c.drawString(44 * mm, 2.5 * mm, txt)
                 else:
                     bc_h = min(8 * mm, max(3 * mm, 5.5 * mm * scale))
                     bw = max(0.16, 0.23 * scale)
@@ -479,17 +539,19 @@ class LabelService:
                     if "barcodeText" in cp:
                         bx = (cp["barcodeText"]["x"] / 100.0) * width
                         by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
-                        c.setFont("Helvetica-Bold", 5)
-                        c.drawString(bx, by - 1.2 * mm, raw_code[:12])
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5, True, raw_code[:12], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(bx, by - 1.2 * mm, txt)
 
                     if config.show_sku and config.sku:
-                        c.setFont("Helvetica-Bold", 5)
+                        fn, fs, txt = LabelService._resolve_font_and_text("sku", 5, True, f"SKU: {config.sku[:14]}", config.element_styles)
+                        c.setFont(fn, fs)
                         if "sku" in cp:
                             skx = (cp["sku"]["x"] / 100.0) * width
                             sky = ((100.0 - cp["sku"]["y"]) / 100.0) * height
-                            c.drawString(skx, sky - 1.2 * mm, f"SKU: {config.sku[:14]}")
+                            c.drawString(skx, sky - 1.2 * mm, txt)
                         else:
-                            c.drawString(44 * mm, 1.5 * mm, f"SKU: {config.sku[:14]}")
+                            c.drawString(44 * mm, 1.5 * mm, txt)
             else:
                 if is_qr:
                     qr_size = 8 * mm

@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
-  Printer, 
+  Printer,
+  Type,
+  Bold,
+  Italic, 
   X, 
   Tag, 
   Gem, 
@@ -46,6 +49,24 @@ export interface ElementPos {
 }
 
 export type LayoutPositions = Record<string, ElementPos>;
+
+export interface ElementStyleConfig {
+  size: number;       // scale multiplier: 0.6 to 1.8 (default 1.0)
+  bold: boolean;      // true / false
+  italic: boolean;    // true / false
+  uppercase: boolean; // true / false
+}
+
+export type LayoutStyles = Record<string, ElementStyleConfig>;
+
+export const DEFAULT_ELEMENT_STYLES: LayoutStyles = {
+  storeName: { size: 1.0, bold: true, italic: false, uppercase: false },
+  productName: { size: 1.0, bold: true, italic: false, uppercase: false },
+  price: { size: 1.0, bold: true, italic: false, uppercase: false },
+  barcodeText: { size: 1.0, bold: true, italic: false, uppercase: false },
+  sku: { size: 1.0, bold: false, italic: false, uppercase: false },
+};
+
 
 const CACHE_KEY = 'qb_label_studio_design_v2';
 
@@ -124,6 +145,11 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   // Cached positions dictionary for every template
   const [positionsByTemplate, setPositionsByTemplate] = useState<Record<string, LayoutPositions>>({});
+  // Selected Element for Typography & Style Inspector
+  const [selectedElementId, setSelectedElementId] = useState<'productName' | 'price' | 'storeName' | 'barcodeText' | 'sku'>('productName');
+  const [elementStyles, setElementStyles] = useState<LayoutStyles>(DEFAULT_ELEMENT_STYLES);
+  const [stylesByTemplate, setStylesByTemplate] = useState<Record<string, LayoutStyles>>({});
+
 
   // Active element positions
   const [elementPositions, setElementPositions] = useState<LayoutPositions>(DEFAULT_RATTAIL_POSITIONS);
@@ -172,7 +198,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     curArr = arrangement,
     curCodeType = codeType,
     curCodeScale = codeScale,
-    curSnap = dragSnapToGrid
+    curSnap = dragSnapToGrid,
+    curStyles: LayoutStyles = elementStyles
   ) => {
     try {
       const templateKey = curPaper;
@@ -181,6 +208,12 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         [templateKey]: newPositions,
       };
       setPositionsByTemplate(updatedPositionsByTemplate);
+
+      const updatedStylesByTemplate = {
+        ...stylesByTemplate,
+        [templateKey]: curStyles,
+      };
+      setStylesByTemplate(updatedStylesByTemplate);
 
       const cacheObj = {
         version: 2,
@@ -196,12 +229,45 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         showSku,
         showStoreName,
         positionsByTemplate: updatedPositionsByTemplate,
+        stylesByTemplate: updatedStylesByTemplate,
+        elementStyles: curStyles,
       };
       localStorage.setItem(CACHE_KEY, JSON.stringify(cacheObj));
     } catch (err) {
       console.warn('Failed to cache label design:', err);
     }
-  }, [positionsByTemplate, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, showProductName, showPrice, showSku, showStoreName]);
+  }, [positionsByTemplate, stylesByTemplate, elementStyles, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, showProductName, showPrice, showSku, showStoreName]);
+
+  // Update typography style for a specific label element
+  const handleUpdateElementStyle = (
+    elemId: string,
+    partial: Partial<ElementStyleConfig>
+  ) => {
+    const current = elementStyles[elemId] || DEFAULT_ELEMENT_STYLES[elemId] || { size: 1.0, bold: true, italic: false, uppercase: false };
+    const updated: ElementStyleConfig = {
+      ...current,
+      ...partial,
+    };
+    const nextStyles: LayoutStyles = {
+      ...elementStyles,
+      [elemId]: updated,
+    };
+    setElementStyles(nextStyles);
+    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, nextStyles);
+  };
+
+  // Reset typography style for a specific label element
+  const handleResetElementStyle = (elemId: string) => {
+    const defaultVal = DEFAULT_ELEMENT_STYLES[elemId] || { size: 1.0, bold: true, italic: false, uppercase: false };
+    const nextStyles: LayoutStyles = {
+      ...elementStyles,
+      [elemId]: defaultVal,
+    };
+    setElementStyles(nextStyles);
+    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, nextStyles);
+    setCacheNotification(`Reset typography for ${elemId}`);
+    setTimeout(() => setCacheNotification(null), 1500);
+  };
 
   // Update code scale with live cache persistence
   const handleUpdateCodeScale = (newScale: number) => {
@@ -237,11 +303,18 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           if (typeof cached.showStoreName === 'boolean') setShowStoreName(cached.showStoreName);
 
           const templateKey = cached.paperSize || paperSize;
+          if (cached.stylesByTemplate && cached.stylesByTemplate[templateKey]) {
+            setStylesByTemplate(cached.stylesByTemplate);
+            setElementStyles(cached.stylesByTemplate[templateKey]);
+          } else if (cached.elementStyles) {
+            setElementStyles(cached.elementStyles);
+          }
+
           if (cached.positionsByTemplate && cached.positionsByTemplate[templateKey]) {
             setPositionsByTemplate(cached.positionsByTemplate);
             setElementPositions(cached.positionsByTemplate[templateKey]);
             setIsCustomLayout(true);
-            setCacheNotification('Loaded saved design');
+            setCacheNotification('Loaded saved design & typography');
             setTimeout(() => setCacheNotification(null), 2500);
             return;
           }
@@ -257,15 +330,16 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     setIsCustomLayout(false);
   }, [isOpen, itemName, itemPrice, itemSku, propStoreName, initialCodeType, resolveDefaultPositions]);
 
-  // Reset layout to default preset
+  // Reset layout and typography to default preset
   const resetLayout = useCallback((targetArr = arrangement, targetStyle = style, targetPaper = paperSize) => {
     const defaults = resolveDefaultPositions(targetArr, targetStyle, targetPaper);
     setElementPositions(defaults);
+    setElementStyles(DEFAULT_ELEMENT_STYLES);
     setIsCustomLayout(false);
-    saveDesignToCache(defaults, targetPaper, targetStyle, targetArr);
-    setCacheNotification('Layout reset to default');
+    saveDesignToCache(defaults, targetPaper, targetStyle, targetArr, codeType, codeScale, dragSnapToGrid, DEFAULT_ELEMENT_STYLES);
+    setCacheNotification('Layout & typography reset to default');
     setTimeout(() => setCacheNotification(null), 2000);
-  }, [arrangement, style, paperSize, resolveDefaultPositions, saveDesignToCache]);
+  }, [arrangement, style, paperSize, codeType, codeScale, dragSnapToGrid, resolveDefaultPositions, saveDesignToCache]);
 
   const barcodeRendererRef = useRef<BarcodeRendererRef | null>(null);
 
@@ -380,6 +454,9 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     e.preventDefault();
     e.stopPropagation();
     setActiveDragId(id);
+    if (id !== 'code' && (id === 'productName' || id === 'price' || id === 'storeName' || id === 'barcodeText' || id === 'sku')) {
+      setSelectedElementId(id);
+    }
 
     if (!canvasContainerRef.current) return;
     const rect = canvasContainerRef.current.getBoundingClientRect();
@@ -435,6 +512,46 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
+  };
+
+
+  // Helper for computing live canvas style properties
+  const getElementStyleProps = (id: string, baseRem: number, defaultBold: boolean) => {
+    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false };
+    return {
+      fontSize: `${(baseRem * (cfg.size || 1.0)).toFixed(3)}rem`,
+      fontWeight: cfg.bold ? 800 : 400,
+      fontStyle: cfg.italic ? 'italic' : 'normal',
+      textTransform: (cfg.uppercase ? 'uppercase' : 'none') as React.CSSProperties['textTransform'],
+      outline: selectedElementId === id ? '2px solid var(--primary-500)' : 'none',
+      outlineOffset: '2px',
+    };
+  };
+
+  // Helper for computing 2D canvas font string in 300 DPI image generation
+  const getCanvasFont = (id: string, basePx: number, defaultBold: boolean, isMonospace = false) => {
+    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false };
+    const fontPx = Math.max(8, Math.round(basePx * (cfg.size || 1.0)));
+    const fontStyle = cfg.italic ? 'italic ' : '';
+    const fontWeight = cfg.bold ? 'bold ' : 'normal ';
+    const fontFamily = isMonospace ? 'monospace' : 'sans-serif';
+    return `${fontStyle}${fontWeight}${fontPx}px ${fontFamily}`;
+  };
+
+  // Helper for inline CSS string in isolated print HTML
+  const getPrintInlineCss = (id: string, basePt: number, defaultBold: boolean, isMonospace = false) => {
+    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false };
+    const pt = Math.max(3, Number((basePt * (cfg.size || 1.0)).toFixed(2)));
+    const weight = cfg.bold ? 'bold' : 'normal';
+    const style = cfg.italic ? 'italic' : 'normal';
+    const transform = cfg.uppercase ? 'uppercase' : 'none';
+    const family = isMonospace ? 'font-family:monospace;' : '';
+    return `font-size:${pt}pt;font-weight:${weight};font-style:${style};text-transform:${transform};${family}`;
+  };
+
+  const formatElementText = (id: string, text: string) => {
+    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id];
+    return cfg?.uppercase ? text.toUpperCase() : text;
   };
 
   // Download raw QR code / Barcode graphic
@@ -514,21 +631,21 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           const sX = (pos.storeName.x / 100) * canvas.width;
           const sY = (pos.storeName.y / 100) * canvas.height;
           ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 13px sans-serif';
-          ctx.fillText((storeName || 'Store').substring(0, 18), sX, sY);
+          ctx.font = getCanvasFont('storeName', 13, true);
+          ctx.fillText(formatElementText('storeName', storeName || 'Store').substring(0, 18), sX, sY);
         }
         if (showProductName) {
           const pX = (pos.productName.x / 100) * canvas.width;
           const pY = (pos.productName.y / 100) * canvas.height;
           ctx.fillStyle = '#1e293b';
-          ctx.font = '600 13px sans-serif';
-          ctx.fillText((productName || 'Item').substring(0, 20), pX, pY);
+          ctx.font = getCanvasFont('productName', 13, true);
+          ctx.fillText(formatElementText('productName', productName || 'Item').substring(0, 20), pX, pY);
         }
         if (showPrice) {
           const prX = (pos.price.x / 100) * canvas.width;
           const prY = (pos.price.y / 100) * canvas.height;
           ctx.fillStyle = '#1e1b4b';
-          ctx.font = 'bold 18px sans-serif';
+          ctx.font = getCanvasFont('price', 18, true);
           ctx.fillText(`₹${(price || 0).toFixed(2)}`, prX, prY);
         }
 
@@ -550,15 +667,15 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         const bX = (pos.barcodeText.x / 100) * canvas.width;
         const bY = (pos.barcodeText.y / 100) * canvas.height;
         ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 12px monospace';
-        ctx.fillText(barcodeValue.substring(0, 12), bX, bY);
+        ctx.font = getCanvasFont('barcodeText', 12, true, true);
+        ctx.fillText(formatElementText('barcodeText', barcodeValue).substring(0, 12), bX, bY);
 
         if (showSku && sku) {
           const skX = (pos.sku.x / 100) * canvas.width;
           const skY = (pos.sku.y / 100) * canvas.height;
           ctx.fillStyle = '#64748b';
-          ctx.font = '11px sans-serif';
-          ctx.fillText(`SKU:${sku.substring(0, 10)}`, skX, skY);
+          ctx.font = getCanvasFont('sku', 11, false);
+          ctx.fillText(formatElementText('sku', `SKU:${sku.substring(0, 10)}`), skX, skY);
         }
 
       } else if (isRatTail || arrangement === 'DUAL_FLAP') {
@@ -578,21 +695,21 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           const sX = (pos.storeName.x / 100) * canvas.width;
           const sY = (pos.storeName.y / 100) * canvas.height;
           ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 13px sans-serif';
-          ctx.fillText((storeName || 'Store').substring(0, 20), sX, sY);
+          ctx.font = getCanvasFont('storeName', 13, true);
+          ctx.fillText(formatElementText('storeName', storeName || 'Store').substring(0, 20), sX, sY);
         }
         if (showProductName) {
           const pX = (pos.productName.x / 100) * canvas.width;
           const pY = (pos.productName.y / 100) * canvas.height;
           ctx.fillStyle = '#1e293b';
-          ctx.font = '600 13px sans-serif';
-          ctx.fillText((productName || 'Item').substring(0, 20), pX, pY);
+          ctx.font = getCanvasFont('productName', 13, true);
+          ctx.fillText(formatElementText('productName', productName || 'Item').substring(0, 20), pX, pY);
         }
         if (showPrice) {
           const prX = (pos.price.x / 100) * canvas.width;
           const prY = (pos.price.y / 100) * canvas.height;
           ctx.fillStyle = '#1e1b4b';
-          ctx.font = 'bold 18px sans-serif';
+          ctx.font = getCanvasFont('price', 18, true);
           ctx.fillText(`₹${(price || 0).toFixed(2)}`, prX, prY);
         }
 
@@ -626,15 +743,15 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         const bX = (pos.barcodeText.x / 100) * canvas.width;
         const bY = (pos.barcodeText.y / 100) * canvas.height;
         ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 12px monospace';
-        ctx.fillText(barcodeValue.substring(0, 12), bX, bY);
+        ctx.font = getCanvasFont('barcodeText', 12, true, true);
+        ctx.fillText(formatElementText('barcodeText', barcodeValue).substring(0, 12), bX, bY);
 
         if (showSku && sku) {
           const skX = (pos.sku.x / 100) * canvas.width;
           const skY = (pos.sku.y / 100) * canvas.height;
           ctx.fillStyle = '#64748b';
-          ctx.font = '11px sans-serif';
-          ctx.fillText(`SKU:${sku.substring(0, 10)}`, skX, skY);
+          ctx.font = getCanvasFont('sku', 11, false);
+          ctx.fillText(formatElementText('sku', `SKU:${sku.substring(0, 10)}`), skX, skY);
         }
 
         // Tail strap (520 to 760px)
@@ -831,9 +948,9 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style="position:absolute;left:42mm;top:0;width:28mm;height:12mm;border:0.2mm solid #cbd5e1;border-left:0.3mm dashed #64748b;box-sizing:border-box;"></div>
 
               <!-- Draggable / Custom Positioned Elements -->
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);font-size:5pt;font-weight:bold;line-height:1;white-space:nowrap;">${escapeHtml(storeName || 'Store')}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);font-size:5pt;font-weight:600;line-height:1;white-space:nowrap;">${escapeHtml(productName || 'Item')}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);font-size:6.5pt;font-weight:bold;line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 6.5, true)}line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
               
               ${codeDataUrl ? `
                 <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
@@ -841,8 +958,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 </div>
               ` : ''}
               
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);font-size:5pt;font-family:monospace;font-weight:bold;line-height:1;">${escapeHtml(barcodeValue.substring(0, 12))}</div>
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);font-size:4pt;color:#333;line-height:1;">SKU:${escapeHtml(sku.substring(0, 10))}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', barcodeValue.substring(0, 12)))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 4, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 10)))}</div>` : ''}
             </div>
           `;
         } else if (isRatTail || arrangement === 'DUAL_FLAP') {
@@ -855,9 +972,9 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style="position:absolute;left:52mm;top:4.5mm;width:24mm;height:3mm;border:0.2mm solid #cbd5e1;background:#f8fafc;box-sizing:border-box;"></div>
 
               <!-- Custom Elements -->
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);font-size:5pt;font-weight:bold;line-height:1;white-space:nowrap;">${escapeHtml(storeName || 'Store')}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);font-size:5pt;font-weight:600;line-height:1;white-space:nowrap;">${escapeHtml(productName || 'Item')}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);font-size:6.5pt;font-weight:bold;line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 6.5, true)}line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
 
               ${codeDataUrl ? `
                 <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
@@ -865,8 +982,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 </div>
               ` : ''}
 
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);font-size:5pt;font-family:monospace;font-weight:bold;line-height:1;">${escapeHtml(barcodeValue.substring(0, 12))}</div>
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);font-size:4pt;color:#333;line-height:1;">SKU:${escapeHtml(sku.substring(0, 10))}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', barcodeValue.substring(0, 12)))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 4, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 10)))}</div>` : ''}
             </div>
           `;
         } else if (arrangement === 'SIDE_BY_SIDE') {
@@ -1018,6 +1135,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         storeName: storeName || 'Store',
         customPositions: pos, // Pass custom layout coordinates to backend ReportLab!
         codeScale,
+        elementStyles,
       };
 
       const response = await apiClient.post('/labels/custom-pdf', payload, {
@@ -1441,6 +1559,189 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               </div>
             </div>
 
+            {/* ELEMENT TYPOGRAPHY & DESIGN INSPECTOR */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 8,
+                backgroundColor: '#ffffff',
+                border: '1px solid var(--neutral-200)',
+                borderRadius: 'var(--radius-md)',
+                padding: '6px 10px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+              }}
+            >
+              {/* Element Selector Buttons */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--neutral-600)', display: 'inline-flex', alignItems: 'center', gap: 3, marginRight: 2 }}>
+                  <Type size={12} color="var(--primary-600)" />
+                  <span>Typography:</span>
+                </span>
+                {[
+                  { id: 'productName', label: 'Item Name' },
+                  { id: 'price', label: 'Price' },
+                  { id: 'storeName', label: 'Store' },
+                  { id: 'barcodeText', label: 'Code Text' },
+                  { id: 'sku', label: 'SKU' },
+                ].map((item) => {
+                  const isSelected = selectedElementId === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setSelectedElementId(item.id as any)}
+                      style={{
+                        padding: '2px 8px',
+                        fontSize: '0.68rem',
+                        fontWeight: isSelected ? 800 : 600,
+                        borderRadius: 4,
+                        border: `1px solid ${isSelected ? 'var(--primary-500)' : 'var(--neutral-300)'}`,
+                        backgroundColor: isSelected ? 'var(--primary-600)' : '#f8fafc',
+                        color: isSelected ? '#ffffff' : 'var(--neutral-700)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Style Controls for Selected Element */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {/* Size Controls */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, backgroundColor: 'var(--neutral-100)', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--neutral-200)' }}>
+                  <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Text Size:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = elementStyles[selectedElementId]?.size ?? 1.0;
+                      handleUpdateElementStyle(selectedElementId, { size: Math.max(0.6, Math.round((cur - 0.05) * 100) / 100) });
+                    }}
+                    style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
+                    title="Decrease font size by 5%"
+                  >
+                    -
+                  </button>
+                  <input
+                    type="range"
+                    min="0.6"
+                    max="1.8"
+                    step="0.05"
+                    value={elementStyles[selectedElementId]?.size ?? 1.0}
+                    onChange={(e) => handleUpdateElementStyle(selectedElementId, { size: parseFloat(e.target.value) })}
+                    style={{ width: 50, height: 4, accentColor: 'var(--primary-600)', cursor: 'pointer' }}
+                    title={`Text Size: ${Math.round((elementStyles[selectedElementId]?.size ?? 1.0) * 100)}%`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = elementStyles[selectedElementId]?.size ?? 1.0;
+                      handleUpdateElementStyle(selectedElementId, { size: Math.min(1.8, Math.round((cur + 0.05) * 100) / 100) });
+                    }}
+                    style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
+                    title="Increase font size by 5%"
+                  >
+                    +
+                  </button>
+                  <span style={{ fontSize: '0.66rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 32, textAlign: 'center' }}>
+                    {Math.round((elementStyles[selectedElementId]?.size ?? 1.0) * 100)}%
+                  </span>
+                </div>
+
+                {/* Bold Toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cur = elementStyles[selectedElementId]?.bold ?? true;
+                    handleUpdateElementStyle(selectedElementId, { bold: !cur });
+                  }}
+                  style={{
+                    padding: '2px 7px',
+                    fontSize: '0.70rem',
+                    fontWeight: 900,
+                    borderRadius: 4,
+                    border: `1px solid ${elementStyles[selectedElementId]?.bold ? 'var(--primary-500)' : 'var(--neutral-300)'}`,
+                    backgroundColor: elementStyles[selectedElementId]?.bold ? 'var(--primary-100)' : '#ffffff',
+                    color: elementStyles[selectedElementId]?.bold ? 'var(--primary-800)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3
+                  }}
+                  title="Toggle Bold"
+                >
+                  <Bold size={11} strokeWidth={3} />
+                  <span>B</span>
+                </button>
+
+                {/* Italic Toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cur = elementStyles[selectedElementId]?.italic ?? false;
+                    handleUpdateElementStyle(selectedElementId, { italic: !cur });
+                  }}
+                  style={{
+                    padding: '2px 7px',
+                    fontSize: '0.70rem',
+                    fontStyle: 'italic',
+                    fontWeight: 700,
+                    borderRadius: 4,
+                    border: `1px solid ${elementStyles[selectedElementId]?.italic ? 'var(--primary-500)' : 'var(--neutral-300)'}`,
+                    backgroundColor: elementStyles[selectedElementId]?.italic ? 'var(--primary-100)' : '#ffffff',
+                    color: elementStyles[selectedElementId]?.italic ? 'var(--primary-800)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3
+                  }}
+                  title="Toggle Italic"
+                >
+                  <Italic size={11} />
+                  <span>I</span>
+                </button>
+
+                {/* Uppercase Toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cur = elementStyles[selectedElementId]?.uppercase ?? false;
+                    handleUpdateElementStyle(selectedElementId, { uppercase: !cur });
+                  }}
+                  style={{
+                    padding: '2px 6px',
+                    fontSize: '0.66rem',
+                    fontWeight: 800,
+                    borderRadius: 4,
+                    border: `1px solid ${elementStyles[selectedElementId]?.uppercase ? 'var(--primary-500)' : 'var(--neutral-300)'}`,
+                    backgroundColor: elementStyles[selectedElementId]?.uppercase ? 'var(--primary-100)' : '#ffffff',
+                    color: elementStyles[selectedElementId]?.uppercase ? 'var(--primary-800)' : 'var(--neutral-700)',
+                    cursor: 'pointer'
+                  }}
+                  title="Toggle Uppercase"
+                >
+                  AA
+                </button>
+
+                {/* Reset Element Style */}
+                <button
+                  type="button"
+                  onClick={() => handleResetElementStyle(selectedElementId)}
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '2px 6px', fontSize: '0.66rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                  title="Reset element style"
+                >
+                  <RotateCcw size={10} />
+                  <span>Reset</span>
+                </button>
+              </div>
+            </div>
+
             {/* LIVE DRAG & DROP WORKBENCH */}
             <div 
               style={{
@@ -1598,14 +1899,13 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           borderRadius: 4,
                           border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                           backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          fontSize: '0.66rem',
-                          fontWeight: 800,
                           color: 'var(--neutral-900)',
                           whiteSpace: 'nowrap',
-                          zIndex: 10
+                          zIndex: 10,
+                          ...getElementStyleProps('storeName', 0.66, true)
                         }}
                       >
-                        {storeName || 'Store'}
+                        {formatElementText('storeName', storeName || 'Store')}
                       </div>
                     )}
 
@@ -1623,17 +1923,16 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           borderRadius: 4,
                           border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                           backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          fontSize: '0.74rem',
-                          fontWeight: 700,
                           color: 'var(--neutral-800)',
                           maxWidth: 190,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          zIndex: 10
+                          zIndex: 10,
+                          ...getElementStyleProps('productName', 0.74, true)
                         }}
                       >
-                        {productName}
+                        {formatElementText('productName', productName)}
                       </div>
                     )}
 

@@ -34,9 +34,42 @@ const formatInvoiceDate = (val?: string | null): string => {
   return str;
 };
 
+const RECEIPT_SCALE_CACHE_KEY = 'qb_pos_receipt_scale_v2';
+const RECEIPT_FORMAT_CACHE_KEY = 'qb_pos_receipt_format_v2';
+
 export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, onClose }) => {
-  // Default to POS Thermal 80mm standard template as requested
-  const [printFormat, setPrintFormat] = useState<'POS' | 'A4'>('POS');
+  // Support POS Thermal 80mm (3-inch), POS Thermal 58mm (2-inch), and A4 Standard
+  const [printFormat, setPrintFormat] = useState<'POS_80' | 'POS_58' | 'A4'>(() => {
+    try {
+      const cached = localStorage.getItem(RECEIPT_FORMAT_CACHE_KEY);
+      if (cached === 'POS_58' || cached === 'A4' || cached === 'POS_80') return cached;
+    } catch (_) {}
+    return 'POS_80';
+  });
+
+  const [receiptScale, setReceiptScale] = useState<number>(() => {
+    try {
+      const cached = localStorage.getItem(RECEIPT_SCALE_CACHE_KEY);
+      const parsed = cached ? parseFloat(cached) : 1.0;
+      if (parsed >= 0.8 && parsed <= 1.2) return parsed;
+    } catch (_) {}
+    return 1.0;
+  });
+
+  const handleFormatChange = (fmt: 'POS_80' | 'POS_58' | 'A4') => {
+    setPrintFormat(fmt);
+    try {
+      localStorage.setItem(RECEIPT_FORMAT_CACHE_KEY, fmt);
+    } catch (_) {}
+  };
+
+  const handleScaleChange = (newScale: number) => {
+    const clamped = Math.round(Math.max(0.8, Math.min(1.2, newScale)) * 100) / 100;
+    setReceiptScale(clamped);
+    try {
+      localStorage.setItem(RECEIPT_SCALE_CACHE_KEY, String(clamped));
+    } catch (_) {}
+  };
   
   const activeTenant = store.getActiveTenant();
   const activeLocation = store.getActiveLocation();
@@ -169,47 +202,118 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
           {/* Bottom Action Row: Format Switcher & Action Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-            {/* Format Toggle Switch */}
-            <div 
-              style={{ 
-                display: 'inline-flex', 
-                background: 'var(--neutral-100)', 
-                padding: 3, 
-                borderRadius: 'var(--radius-md)', 
-                border: '1px solid var(--neutral-200)',
-                gap: 2
-              }}
-            >
-              <button
-                type="button"
-                className={`btn btn-sm ${printFormat === 'POS' ? 'btn-primary' : 'btn-secondary'}`}
+            {/* Format Toggle Switch & Width Fit */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <div 
                 style={{ 
-                  border: 'none', 
-                  padding: '4px 10px', 
-                  fontSize: '0.76rem', 
-                  fontWeight: 700,
-                  borderRadius: 'var(--radius-sm)',
-                  boxShadow: printFormat === 'POS' ? 'var(--shadow-sm)' : 'none'
+                  display: 'inline-flex', 
+                  background: 'var(--neutral-100)', 
+                  padding: 3, 
+                  borderRadius: 'var(--radius-md)', 
+                  border: '1px solid var(--neutral-200)',
+                  gap: 2
                 }}
-                onClick={() => setPrintFormat('POS')}
               >
-                Thermal (80mm)
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${printFormat === 'A4' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ 
-                  border: 'none', 
-                  padding: '4px 10px', 
-                  fontSize: '0.76rem', 
-                  fontWeight: 700,
-                  borderRadius: 'var(--radius-sm)',
-                  boxShadow: printFormat === 'A4' ? 'var(--shadow-sm)' : 'none'
-                }}
-                onClick={() => setPrintFormat('A4')}
-              >
-                A4 Standard
-              </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${printFormat === 'POS_80' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ 
+                    border: 'none', 
+                    padding: '4px 9px', 
+                    fontSize: '0.74rem', 
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: printFormat === 'POS_80' ? 'var(--shadow-sm)' : 'none'
+                  }}
+                  onClick={() => handleFormatChange('POS_80')}
+                  title="Calibrated 80mm (3-inch) thermal POS receipt"
+                >
+                  Thermal (80mm)
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${printFormat === 'POS_58' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ 
+                    border: 'none', 
+                    padding: '4px 9px', 
+                    fontSize: '0.74rem', 
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: printFormat === 'POS_58' ? 'var(--shadow-sm)' : 'none'
+                  }}
+                  onClick={() => handleFormatChange('POS_58')}
+                  title="Compact 58mm (2-inch) portable Bluetooth thermal POS receipt"
+                >
+                  Thermal (58mm)
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${printFormat === 'A4' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ 
+                    border: 'none', 
+                    padding: '4px 9px', 
+                    fontSize: '0.74rem', 
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: printFormat === 'A4' ? 'var(--shadow-sm)' : 'none'
+                  }}
+                  onClick={() => handleFormatChange('A4')}
+                >
+                  A4 Standard
+                </button>
+              </div>
+
+              {/* Receipt Width Fit Slider & Stepper */}
+              {(printFormat === 'POS_80' || printFormat === 'POS_58') && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--neutral-100)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Roll Fit:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleScaleChange(receiptScale - 0.05)}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 3,
+                      border: '1px solid var(--neutral-300)',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                    title="Narrow receipt width by 5%"
+                  >
+                    -
+                  </button>
+                  <span style={{ fontSize: '0.70rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 32, textAlign: 'center' }}>
+                    {Math.round(receiptScale * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleScaleChange(receiptScale + 0.05)}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 3,
+                      border: '1px solid var(--neutral-300)',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                    title="Widen receipt width by 5%"
+                  >
+                    +
+                  </button>
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -263,17 +367,27 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
             flex: 1, 
             padding: printFormat === 'A4' ? '28px 32px' : '20px 16px',
             backgroundColor: '#ffffff',
-            fontFamily: printFormat === 'POS' ? 'var(--font-mono, monospace)' : 'var(--font-sans)',
+            fontFamily: (printFormat === 'POS_80' || printFormat === 'POS_58') ? 'var(--font-mono, monospace)' : 'var(--font-sans)',
             color: '#000000',
-            fontSize: printFormat === 'POS' ? '0.76rem' : '0.84rem',
+            fontSize: printFormat === 'POS_58' ? '0.67rem' : printFormat === 'POS_80' ? '0.73rem' : '0.84rem',
             lineHeight: 1.4,
           }}
         >
-          {printFormat === 'POS' ? (
+          {(printFormat === 'POS_80' || printFormat === 'POS_58') ? (
             /* ========================================================
-               STANDARD THERMAL POS TEMPLATE (80mm)
+               CALIBRATED THERMAL POS TEMPLATE (80mm & 58mm)
                ======================================================== */
-            <div style={{ maxWidth: 330, margin: '0 auto', textAlign: 'center' }}>
+            <div 
+              className={`receipt-pos-container ${printFormat === 'POS_58' ? 'receipt-pos-58' : 'receipt-pos-80'}`}
+              style={{ 
+                maxWidth: printFormat === 'POS_58' ? Math.round(182 * receiptScale) : Math.round(265 * receiptScale), 
+                margin: '0 auto', 
+                textAlign: 'center',
+                boxSizing: 'border-box',
+                padding: printFormat === 'POS_58' ? '0 2px' : '0 4px',
+                fontSize: printFormat === 'POS_58' ? '0.67rem' : '0.73rem'
+              }}
+            >
               {/* Company & Location Header Directly on Receipt */}
               <div style={{ marginBottom: 8 }}>
                 {storeLogo && (
@@ -330,10 +444,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px dashed #000000', fontWeight: 800 }}>
-                    <th style={{ padding: '3px 0', width: '50%' }}>ITEM</th>
-                    <th style={{ padding: '3px 0', textAlign: 'center', width: '15%' }}>QTY</th>
-                    <th style={{ padding: '3px 0', textAlign: 'right', width: '15%' }}>PRICE</th>
-                    <th style={{ padding: '3px 0', textAlign: 'right', width: '20%' }}>AMT</th>
+                    <th style={{ padding: '3px 0', width: '45%' }}>ITEM</th>
+                    <th style={{ padding: '3px 0', textAlign: 'center', width: '16%' }}>QTY</th>
+                    <th style={{ padding: '3px 0', textAlign: 'right', width: '18%' }}>PRICE</th>
+                    <th style={{ padding: '3px 0', textAlign: 'right', width: '21%', paddingRight: 2 }}>AMT</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -376,7 +490,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                           {line.unitPrice.toFixed(2)}
                         </td>
 
-                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700 }}>
+                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700, paddingRight: 2 }}>
                           {hasDisc && line.originalTotal !== undefined && Math.abs(line.originalTotal - line.total) > 0.01 && (
                             <div style={{ fontSize: '0.62rem', textDecoration: 'line-through', color: '#777777', fontWeight: 400 }}>
                               {line.originalTotal.toFixed(2)}
@@ -478,7 +592,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               </div>
 
               {/* Footer Notice */}
-              <div style={{ borderTop: '1px dashed #000000', marginTop: 10, paddingTop: 6, textAlign: 'center', fontSize: '0.68rem' }}>
+              <div style={{ borderTop: '1px dashed #000000', marginTop: 10, paddingTop: 6, textAlign: 'center', fontSize: printFormat === 'POS_58' ? '0.62rem' : '0.68rem', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                 <p style={{ margin: 0, fontWeight: 800 }}>*** THANK YOU FOR SHOPPING WITH US! ***</p>
                 <p style={{ margin: '2px 0 0 0', color: '#555555' }}>{receiptFooter}</p>
               </div>
