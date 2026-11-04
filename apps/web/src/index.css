@@ -920,6 +920,13 @@ button:disabled:hover,
     width: 100% !important;
   }
 
+  .receipt-pos-55 {
+    max-width: 47mm !important;
+    width: 100% !important;
+    font-size: 7.8pt !important;
+    padding: 0 !important;
+  }
+
   .receipt-pos-48 {
     max-width: 42mm !important;
     width: 100% !important;
@@ -3050,6 +3057,13 @@ button:disabled:hover,
   .receipt-pos-58 {
     max-width: 48mm !important;
     width: 100% !important;
+  }
+
+  .receipt-pos-55 {
+    max-width: 47mm !important;
+    width: 100% !important;
+    font-size: 7.8pt !important;
+    padding: 0 !important;
   }
 
   .receipt-pos-48 {
