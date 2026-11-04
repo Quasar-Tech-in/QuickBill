@@ -79,7 +79,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
   const handlePrint = () => {
     // Hide any injected Netlify badges or drawer elements before triggering print
-    document.querySelectorAll('[id*="netlify"], [class*="netlify"], [data-netlify], a[href*="netlify.com"], iframe[src*="netlify"]').forEach(el => {
+    document.querySelectorAll('.mobile-bottom-nav, .mobile-drawer, [id*="netlify"], [class*="netlify"], [data-netlify], a[href*="netlify.com"], iframe[src*="netlify"]').forEach(el => {
       (el as HTMLElement).style.setProperty('display', 'none', 'important');
     });
     window.print();
@@ -425,12 +425,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               }`}
               style={{ 
                 ['--receipt-left-margin' as any]: `${receiptLeftMargin}mm`,
-                maxWidth: printFormat === 'POS_48' ? 181 : printFormat === 'POS_55' ? 208 : printFormat === 'POS_58' ? 219 : 302, 
+                maxWidth: printFormat === 'POS_48' ? 144 : printFormat === 'POS_55' ? 158 : printFormat === 'POS_58' ? 174 : 265, 
                 margin: '0 auto',
                 textAlign: 'left',
                 boxSizing: 'border-box',
                 padding: printFormat === 'POS_48' ? '0 1px' : printFormat === 'POS_55' ? '0 1.5px' : printFormat === 'POS_58' ? '0 2px' : '0 4px',
-                fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_55' ? '0.66rem' : printFormat === 'POS_58' ? '0.67rem' : '0.73rem'
+                fontSize: printFormat === 'POS_48' ? '0.58rem' : printFormat === 'POS_55' ? '0.62rem' : printFormat === 'POS_58' ? '0.67rem' : '0.73rem'
               }}
             >
               {/* Company & Location Header Directly on Receipt */}
@@ -489,10 +489,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_55' ? '0.66rem' : '0.74rem', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px dashed #000000', fontWeight: 800, fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_55' ? '0.66rem' : '0.74rem' }}>
-                    <th style={{ padding: '3px 0', textAlign: 'left', width: printFormat === 'POS_48' ? '39%' : printFormat === 'POS_55' ? '45%' : '45%' }}>ITEM</th>
+                    <th style={{ padding: '3px 0', textAlign: 'left', width: printFormat === 'POS_48' ? '38%' : printFormat === 'POS_55' ? '38%' : '45%' }}>ITEM</th>
                     <th style={{ padding: '3px 0', textAlign: 'center', width: printFormat === 'POS_48' ? '15%' : '15%' }}>QTY</th>
                     <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '21%' : printFormat === 'POS_55' ? '20%' : '18%' }}>PRICE</th>
-                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '25%' : printFormat === 'POS_55' ? '20%' : '21%', paddingRight: printFormat === 'POS_48' || printFormat === 'POS_55' ? 0 : 2 }}>AMT</th>
+                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '26%' : printFormat === 'POS_55' ? '26%' : '21%', paddingRight: 0 }}>AMT</th>
                   </tr>
                 </thead>
                 <tbody>
