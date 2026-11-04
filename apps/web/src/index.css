@@ -891,8 +891,10 @@ button:disabled:hover,
     background: #fff !important;
     color: #000 !important;
   }
-  .sidebar, .top-header, .btn, .no-print {
+  .sidebar, .top-header, .btn, .no-print,
+  [class*="netlify"], [id*="netlify"], [data-netlify], a[href*="netlify.com"], iframe[src*="netlify"], .netlify-badge, #netlify-drawer {
     display: none !important;
+    visibility: hidden !important;
   }
   .page-container, .main-wrapper {
     padding: 0 !important;
@@ -904,33 +906,33 @@ button:disabled:hover,
     box-sizing: border-box !important;
     overflow: visible !important;
     margin: 0 !important;
-    margin-left: var(--receipt-left-margin, 1mm) !important;
+    margin-left: var(--receipt-left-margin, 0mm) !important;
     margin-right: auto !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
   }
 
   .receipt-pos-80 {
-    max-width: 72mm !important;
+    max-width: 80mm !important;
     width: 100% !important;
   }
 
   .receipt-pos-58 {
-    max-width: 48mm !important;
+    max-width: 58mm !important;
     width: 100% !important;
   }
 
   .receipt-pos-55 {
-    max-width: 47mm !important;
+    max-width: 55mm !important;
     width: 100% !important;
-    font-size: 7.8pt !important;
+    font-size: 8.2pt !important;
     padding: 0 !important;
   }
 
   .receipt-pos-48 {
-    max-width: 42mm !important;
+    max-width: 48mm !important;
     width: 100% !important;
-    font-size: 7.2pt !important;
+    font-size: 7.6pt !important;
     padding: 0 !important;
   }
 
@@ -2999,8 +3001,22 @@ button:disabled:hover,
   .no-print, 
   button, 
   .card-header,
-  .pagination-container {
+  .pagination-container,
+  [class*="netlify"],
+  [id*="netlify"],
+  [data-netlify],
+  [data-netlify-drawer],
+  a[href*="netlify.com"],
+  iframe[src*="netlify"],
+  .netlify-badge,
+  #netlify-badge,
+  #netlify-drawer,
+  netlify-drawer {
     display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    opacity: 0 !important;
   }
 
   /* Make modal printable container visible and isolated */
@@ -3043,33 +3059,33 @@ button:disabled:hover,
     box-sizing: border-box !important;
     overflow: visible !important;
     margin: 0 !important;
-    margin-left: var(--receipt-left-margin, 1mm) !important;
+    margin-left: var(--receipt-left-margin, 0mm) !important;
     margin-right: auto !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
   }
 
   .receipt-pos-80 {
-    max-width: 72mm !important;
+    max-width: 80mm !important;
     width: 100% !important;
   }
 
   .receipt-pos-58 {
-    max-width: 48mm !important;
+    max-width: 58mm !important;
     width: 100% !important;
   }
 
   .receipt-pos-55 {
-    max-width: 47mm !important;
+    max-width: 55mm !important;
     width: 100% !important;
-    font-size: 7.8pt !important;
+    font-size: 8.2pt !important;
     padding: 0 !important;
   }
 
   .receipt-pos-48 {
-    max-width: 42mm !important;
+    max-width: 48mm !important;
     width: 100% !important;
-    font-size: 7.2pt !important;
+    font-size: 7.6pt !important;
     padding: 0 !important;
   }
 
