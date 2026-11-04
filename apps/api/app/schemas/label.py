@@ -46,6 +46,7 @@ class LabelPrintConfig(BaseSchema):
     custom_positions: Optional[dict] = Field(default=None, alias="customPositions")
     code_scale: Optional[float] = Field(default=1.0, alias="codeScale")
     element_styles: Optional[dict] = Field(default=None, alias="elementStyles")
+    custom_barcode_text: Optional[str] = Field(default=None, alias="customBarcodeText")
 
 class BatchLabelPrintRequest(BaseSchema):
     items: List[LabelPrintConfig]

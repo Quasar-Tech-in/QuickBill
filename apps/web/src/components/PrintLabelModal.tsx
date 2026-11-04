@@ -131,6 +131,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   const [sku, setSku] = useState<string>(itemSku || '');
   const [showSku, setShowSku] = useState(true);
   const [storeName, setStoreName] = useState<string>(resolveInitialStoreName);
+  const [customBarcodeText, setCustomBarcodeText] = useState<string>('');
   const [showStoreName, setShowStoreName] = useState(true);
 
   // Formatting & Arrangement States
@@ -231,6 +232,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         positionsByTemplate: updatedPositionsByTemplate,
         stylesByTemplate: updatedStylesByTemplate,
         elementStyles: curStyles,
+        customBarcodeText,
       };
       localStorage.setItem(CACHE_KEY, JSON.stringify(cacheObj));
     } catch (err) {
@@ -301,6 +303,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           if (typeof cached.showPrice === 'boolean') setShowPrice(cached.showPrice);
           if (typeof cached.showSku === 'boolean') setShowSku(cached.showSku);
           if (typeof cached.showStoreName === 'boolean') setShowStoreName(cached.showStoreName);
+          if (typeof cached.customBarcodeText === 'string') setCustomBarcodeText(cached.customBarcodeText);
 
           const templateKey = cached.paperSize || paperSize;
           if (cached.stylesByTemplate && cached.stylesByTemplate[templateKey]) {
@@ -345,11 +348,12 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   // Determine standard payload strings
   const barcodeValue = (itemBarcode || sku || publicItemId || 'ITM-1001').replace(/^ITEM:/, '').trim();
+  const effectiveBarcodeText = customBarcodeText.trim() !== '' ? customBarcodeText.trim() : barcodeValue;
   const qrValue = publicItemId 
     ? (publicItemId.startsWith('ITEM:') ? publicItemId : `ITEM:${publicItemId}`) 
     : (itemBarcode || sku || 'ITM-1001');
 
-  const activePayload = codeType === 'QR' ? qrValue : barcodeValue;
+  const activePayload = codeType === 'QR' ? qrValue : effectiveBarcodeText;
 
   if (!isOpen) return null;
 
@@ -516,13 +520,14 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
 
   // Helper for computing live canvas style properties
-  const getElementStyleProps = (id: string, baseRem: number, defaultBold: boolean) => {
+  const getElementStyleProps = (id: string, baseRem: number, defaultBold: boolean, isMonospace = false) => {
     const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false };
     return {
       fontSize: `${(baseRem * (cfg.size || 1.0)).toFixed(3)}rem`,
       fontWeight: cfg.bold ? 800 : 400,
       fontStyle: cfg.italic ? 'italic' : 'normal',
       textTransform: (cfg.uppercase ? 'uppercase' : 'none') as React.CSSProperties['textTransform'],
+      fontFamily: isMonospace ? 'var(--font-mono)' : 'inherit',
       outline: selectedElementId === id ? '2px solid var(--primary-500)' : 'none',
       outlineOffset: '2px',
     };
@@ -668,7 +673,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         const bY = (pos.barcodeText.y / 100) * canvas.height;
         ctx.fillStyle = '#0f172a';
         ctx.font = getCanvasFont('barcodeText', 12, true, true);
-        ctx.fillText(formatElementText('barcodeText', barcodeValue).substring(0, 12), bX, bY);
+        ctx.fillText(formatElementText('barcodeText', effectiveBarcodeText).substring(0, 12), bX, bY);
 
         if (showSku && sku) {
           const skX = (pos.sku.x / 100) * canvas.width;
@@ -744,7 +749,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         const bY = (pos.barcodeText.y / 100) * canvas.height;
         ctx.fillStyle = '#0f172a';
         ctx.font = getCanvasFont('barcodeText', 12, true, true);
-        ctx.fillText(formatElementText('barcodeText', barcodeValue).substring(0, 12), bX, bY);
+        ctx.fillText(formatElementText('barcodeText', effectiveBarcodeText).substring(0, 12), bX, bY);
 
         if (showSku && sku) {
           const skX = (pos.sku.x / 100) * canvas.width;
@@ -789,36 +794,36 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         const bX = (pos.barcodeText.x / 100) * canvas.width;
         const bY = (pos.barcodeText.y / 100) * canvas.height;
         ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 13px monospace';
-        ctx.fillText(barcodeValue, bX, bY);
+        ctx.font = getCanvasFont('barcodeText', 13, true, true);
+        ctx.fillText(formatElementText('barcodeText', effectiveBarcodeText), bX, bY);
 
         ctx.textAlign = 'left';
         if (showStoreName) {
           const sX = (pos.storeName.x / 100) * canvas.width;
           const sY = (pos.storeName.y / 100) * canvas.height;
           ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 15px sans-serif';
-          ctx.fillText((storeName || 'Store').substring(0, 22), sX, sY);
+          ctx.font = getCanvasFont('storeName', 15, true);
+          ctx.fillText(formatElementText('storeName', storeName || 'Store').substring(0, 22), sX, sY);
         }
         if (showProductName) {
           const pX = (pos.productName.x / 100) * canvas.width;
           const pY = (pos.productName.y / 100) * canvas.height;
           ctx.fillStyle = '#1e293b';
-          ctx.font = '600 15px sans-serif';
-          ctx.fillText((productName || 'Item').substring(0, 22), pX, pY);
+          ctx.font = getCanvasFont('productName', 15, true);
+          ctx.fillText(formatElementText('productName', productName || 'Item').substring(0, 22), pX, pY);
         }
         if (showSku && sku) {
           const skX = (pos.sku.x / 100) * canvas.width;
           const skY = (pos.sku.y / 100) * canvas.height;
           ctx.fillStyle = '#64748b';
-          ctx.font = '13px sans-serif';
-          ctx.fillText(`SKU: ${sku}`, skX, skY);
+          ctx.font = getCanvasFont('sku', 13, false);
+          ctx.fillText(formatElementText('sku', `SKU: ${sku}`), skX, skY);
         }
         if (showPrice) {
           const prX = (pos.price.x / 100) * canvas.width;
           const prY = (pos.price.y / 100) * canvas.height;
           ctx.fillStyle = '#1e1b4b';
-          ctx.font = 'bold 24px sans-serif';
+          ctx.font = getCanvasFont('price', 24, true);
           ctx.fillText(`₹${(price || 0).toFixed(2)}`, prX, prY);
         }
 
@@ -837,15 +842,15 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           const sX = (pos.storeName.x / 100) * canvas.width;
           const sY = (pos.storeName.y / 100) * canvas.height;
           ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 16px sans-serif';
-          ctx.fillText((storeName || 'Store').substring(0, 28), sX, sY);
+          ctx.font = getCanvasFont('storeName', 16, true);
+          ctx.fillText(formatElementText('storeName', storeName || 'Store').substring(0, 28), sX, sY);
         }
         if (showProductName) {
           const pX = (pos.productName.x / 100) * canvas.width;
           const pY = (pos.productName.y / 100) * canvas.height;
           ctx.fillStyle = '#1e293b';
-          ctx.font = '600 16px sans-serif';
-          ctx.fillText((productName || 'Item').substring(0, 28), pX, pY);
+          ctx.font = getCanvasFont('productName', 16, true);
+          ctx.fillText(formatElementText('productName', productName || 'Item').substring(0, 28), pX, pY);
         }
 
         if (rawDataUrl) {
@@ -864,16 +869,16 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         const bX = (pos.barcodeText.x / 100) * canvas.width;
         const bY = (pos.barcodeText.y / 100) * canvas.height;
         ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 14px monospace';
-        ctx.fillText(barcodeValue, bX, bY);
+        ctx.font = getCanvasFont('barcodeText', 14, true, true);
+        ctx.fillText(formatElementText('barcodeText', effectiveBarcodeText), bX, bY);
 
         ctx.textAlign = 'left';
         if (showSku && sku) {
           const skX = (pos.sku.x / 100) * canvas.width;
           const skY = (pos.sku.y / 100) * canvas.height;
           ctx.fillStyle = '#64748b';
-          ctx.font = '14px sans-serif';
-          ctx.fillText(`SKU: ${sku}`, skX, skY);
+          ctx.font = getCanvasFont('sku', 14, false);
+          ctx.fillText(formatElementText('sku', `SKU: ${sku}`), skX, skY);
         }
 
         ctx.textAlign = 'right';
@@ -881,7 +886,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           const prX = (pos.price.x / 100) * canvas.width;
           const prY = (pos.price.y / 100) * canvas.height;
           ctx.fillStyle = '#1e1b4b';
-          ctx.font = 'bold 22px sans-serif';
+          ctx.font = getCanvasFont('price', 22, true);
           ctx.fillText(`₹${(price || 0).toFixed(2)}`, prX, prY);
         }
       }
@@ -958,7 +963,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 </div>
               ` : ''}
               
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', barcodeValue.substring(0, 12)))}</div>
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 12)))}</div>
               ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 4, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 10)))}</div>` : ''}
             </div>
           `;
@@ -982,7 +987,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 </div>
               ` : ''}
 
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', barcodeValue.substring(0, 12)))}</div>
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 12)))}</div>
               ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 4, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 10)))}</div>` : ''}
             </div>
           `;
@@ -994,27 +999,27 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   <img src="${codeDataUrl}" style="max-height:${parseFloat(h_mm) * 0.7 * codeScale}mm;max-width:30mm;object-fit:contain;" />
                 </div>
               ` : ''}
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);font-size:5pt;font-family:monospace;">${escapeHtml(barcodeValue)}</div>
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);font-size:6pt;font-weight:bold;">${escapeHtml(storeName || 'Store')}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);font-size:6pt;font-weight:600;">${escapeHtml(productName || 'Item')}</div>` : ''}
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);font-size:5pt;color:#444;">SKU: ${escapeHtml(sku)}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);font-size:7.5pt;font-weight:bold;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 6, true)}">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 6, true)}">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 5, false)}color:#444;">SKU: ${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 7.5, true)}">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
             </div>
           `;
         } else {
           // Standard Stacked Layout
           return `
             <div style="width:${w_mm};height:${h_mm};position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;border:0.3mm solid #cbd5e1;padding:1mm;font-family:Arial,Helvetica,sans-serif;color:#000000;">
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%);font-size:6pt;font-weight:bold;white-space:nowrap;">${escapeHtml(storeName || 'Store')}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%);font-size:6.5pt;font-weight:bold;white-space:nowrap;">${escapeHtml(productName || 'Item')}</div>` : ''}
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('storeName', 6, true)}white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('productName', 6.5, true)}white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
               ${codeDataUrl ? `
                 <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);">
                   <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${7 * codeScale}mm` : `${13 * codeScale}mm`};max-width:40mm;object-fit:contain;" />
                 </div>
               ` : ''}
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);font-size:5pt;font-family:monospace;">${escapeHtml(barcodeValue)}</div>
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);font-size:5.5pt;">SKU:${escapeHtml(sku)}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-100%,-50%);font-size:7pt;font-weight:bold;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 5.5, false)}">SKU:${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-100%,-50%);${getPrintInlineCss('price', 7, true)}">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
             </div>
           `;
         }
@@ -1122,7 +1127,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       const payload = {
         itemName: productName,
         sku: sku,
-        barcode: itemBarcode || barcodeValue,
+        barcode: itemBarcode || effectiveBarcodeText,
         salePrice: price,
         publicItemId,
         style,
@@ -1136,6 +1141,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         customPositions: pos, // Pass custom layout coordinates to backend ReportLab!
         codeScale,
         elementStyles,
+        customBarcodeText: effectiveBarcodeText,
       };
 
       const response = await apiClient.post('/labels/custom-pdf', payload, {
@@ -1578,7 +1584,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--neutral-600)', display: 'inline-flex', alignItems: 'center', gap: 3, marginRight: 2 }}>
                   <Type size={12} color="var(--primary-600)" />
-                  <span>Typography:</span>
+                  <span>Element:</span>
                 </span>
                 {[
                   { id: 'productName', label: 'Item Name' },
@@ -1609,6 +1615,47 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Live Real-Time Content Input for Selected Element */}
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, backgroundColor: 'var(--neutral-50)', padding: '2px 8px', borderRadius: 4, border: '1.5px solid var(--primary-400)', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--primary-700)', whiteSpace: 'nowrap' }}>
+                  {selectedElementId === 'productName' ? 'Item Name:' : selectedElementId === 'price' ? 'Price (₹):' : selectedElementId === 'storeName' ? 'Store:' : selectedElementId === 'barcodeText' ? 'Code Text:' : 'SKU:'}
+                </span>
+                <input
+                  type={selectedElementId === 'price' ? 'number' : 'text'}
+                  value={
+                    selectedElementId === 'productName'
+                      ? productName
+                      : selectedElementId === 'price'
+                      ? price
+                      : selectedElementId === 'storeName'
+                      ? storeName
+                      : selectedElementId === 'barcodeText'
+                      ? (customBarcodeText !== '' ? customBarcodeText : barcodeValue)
+                      : sku
+                  }
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (selectedElementId === 'productName') setProductName(val);
+                    else if (selectedElementId === 'price') setPrice(parseFloat(val) || 0);
+                    else if (selectedElementId === 'storeName') setStoreName(val);
+                    else if (selectedElementId === 'barcodeText') setCustomBarcodeText(val);
+                    else if (selectedElementId === 'sku') setSku(val);
+                  }}
+                  placeholder="Type to edit in real time..."
+                  style={{
+                    padding: '2px 6px',
+                    fontSize: '0.74rem',
+                    fontWeight: 600,
+                    border: '1px solid var(--neutral-300)',
+                    borderRadius: 3,
+                    minWidth: 150,
+                    maxWidth: 220,
+                    backgroundColor: '#ffffff',
+                    color: 'var(--neutral-900)'
+                  }}
+                />
               </div>
 
               {/* Style Controls for Selected Element */}
@@ -1812,7 +1859,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      justifyContent: 'center'
+                      justifyContent: 'center',
+                      overflow: 'hidden'
                     }}>
                       {/* Top die-cut guide */}
                       <div style={{
@@ -1889,6 +1937,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     {showStoreName && (
                       <div
                         onPointerDown={(e) => handlePointerDown('storeName', e)}
+                        onClick={() => setSelectedElementId('storeName')}
                         style={{
                           position: 'absolute',
                           left: `${elementPositions.storeName?.x ?? 5}%`,
@@ -1913,6 +1962,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     {showProductName && (
                       <div
                         onPointerDown={(e) => handlePointerDown('productName', e)}
+                        onClick={() => setSelectedElementId('productName')}
                         style={{
                           position: 'absolute',
                           left: `${elementPositions.productName?.x ?? 5}%`,
@@ -1940,6 +1990,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     {showPrice && (
                       <div
                         onPointerDown={(e) => handlePointerDown('price', e)}
+                        onClick={() => setSelectedElementId('price')}
                         style={{
                           position: 'absolute',
                           left: `${elementPositions.price?.x ?? 5}%`,
@@ -1950,11 +2001,10 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           borderRadius: 4,
                           border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                           backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          fontSize: '0.94rem',
-                          fontWeight: 900,
                           color: '#1e1b4b',
                           whiteSpace: 'nowrap',
-                          zIndex: 10
+                          zIndex: 10,
+                          ...getElementStyleProps('price', 0.94, true)
                         }}
                       >
                         ₹{Number(price || 0).toFixed(2)}
@@ -1998,6 +2048,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     {/* 5. Barcode Number Text */}
                     <div
                       onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                      onClick={() => setSelectedElementId('barcodeText')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.barcodeText?.x ?? 64}%`,
@@ -2008,21 +2059,20 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         borderRadius: 4,
                         border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                        fontSize: '0.68rem',
-                        fontFamily: 'var(--font-mono)',
-                        fontWeight: 800,
                         color: 'var(--neutral-900)',
                         whiteSpace: 'nowrap',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('barcodeText', 0.68, true, true)
                       }}
                     >
-                      {barcodeValue}
+                      {formatElementText('barcodeText', effectiveBarcodeText.substring(0, 12))}
                     </div>
 
                     {/* 6. SKU Text */}
                     {showSku && sku && (
                       <div
                         onPointerDown={(e) => handlePointerDown('sku', e)}
+                        onClick={() => setSelectedElementId('sku')}
                         style={{
                           position: 'absolute',
                           left: `${elementPositions.sku?.x ?? 64}%`,
@@ -2033,21 +2083,20 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           borderRadius: 4,
                           border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                           backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          fontSize: '0.62rem',
                           color: 'var(--neutral-600)',
-                          fontWeight: 700,
                           whiteSpace: 'nowrap',
-                          zIndex: 10
+                          zIndex: 10,
+                          ...getElementStyleProps('sku', 0.62, false)
                         }}
                       >
-                        SKU: {sku}
+                        {formatElementText('sku', `SKU: ${sku}`)}
                       </div>
                     )}
                   </div>
                 </div>
 
               ) : isRatTail || arrangement === 'DUAL_FLAP' ? (
-                /* JEWELRY RAT-TAIL CANVAS (76mm x 12mm Asymmetrical with Right Tail) */
+                /* AUTHENTIC JEWELRY RAT-TAIL CANVAS (76mm x 12mm) */
                 <div style={{ width: '100%', maxWidth: 580, padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div 
                     ref={canvasContainerRef}
@@ -2119,6 +2168,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     {showStoreName && (
                       <div
                         onPointerDown={(e) => handlePointerDown('storeName', e)}
+                        onClick={() => setSelectedElementId('storeName')}
                         style={{
                           position: 'absolute',
                           left: `${elementPositions.storeName?.x ?? 4}%`,
@@ -2129,20 +2179,20 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           borderRadius: 4,
                           border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                           backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          fontSize: '0.66rem',
-                          fontWeight: 800,
                           color: 'var(--neutral-900)',
                           whiteSpace: 'nowrap',
-                          zIndex: 10
+                          zIndex: 10,
+                          ...getElementStyleProps('storeName', 0.66, true)
                         }}
                       >
-                        {storeName || 'Store'}
+                        {formatElementText('storeName', storeName || 'Store')}
                       </div>
                     )}
 
                     {showProductName && (
                       <div
                         onPointerDown={(e) => handlePointerDown('productName', e)}
+                        onClick={() => setSelectedElementId('productName')}
                         style={{
                           position: 'absolute',
                           left: `${elementPositions.productName?.x ?? 4}%`,
@@ -2153,23 +2203,23 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           borderRadius: 4,
                           border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                           backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          fontSize: '0.74rem',
-                          fontWeight: 700,
                           color: 'var(--neutral-800)',
                           maxWidth: 180,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          zIndex: 10
+                          zIndex: 10,
+                          ...getElementStyleProps('productName', 0.74, true)
                         }}
                       >
-                        {productName}
+                        {formatElementText('productName', productName)}
                       </div>
                     )}
 
                     {showPrice && (
                       <div
                         onPointerDown={(e) => handlePointerDown('price', e)}
+                        onClick={() => setSelectedElementId('price')}
                         style={{
                           position: 'absolute',
                           left: `${elementPositions.price?.x ?? 4}%`,
@@ -2180,11 +2230,10 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           borderRadius: 4,
                           border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                           backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          fontSize: '0.96rem',
-                          fontWeight: 900,
                           color: '#1e1b4b',
                           whiteSpace: 'nowrap',
-                          zIndex: 10
+                          zIndex: 10,
+                          ...getElementStyleProps('price', 0.96, true)
                         }}
                       >
                         ₹{Number(price || 0).toFixed(2)}
@@ -2226,6 +2275,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
                     <div
                       onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                      onClick={() => setSelectedElementId('barcodeText')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.barcodeText?.x ?? 38}%`,
@@ -2236,20 +2286,19 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         borderRadius: 4,
                         border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                        fontSize: '0.70rem',
-                        fontFamily: 'var(--font-mono)',
-                        fontWeight: 800,
                         color: 'var(--neutral-900)',
                         whiteSpace: 'nowrap',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('barcodeText', 0.70, true, true)
                       }}
                     >
-                      {barcodeValue}
+                      {formatElementText('barcodeText', effectiveBarcodeText.substring(0, 12))}
                     </div>
 
                     {showSku && sku && (
                       <div
                         onPointerDown={(e) => handlePointerDown('sku', e)}
+                        onClick={() => setSelectedElementId('sku')}
                         style={{
                           position: 'absolute',
                           left: `${elementPositions.sku?.x ?? 38}%`,
@@ -2260,14 +2309,13 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           borderRadius: 4,
                           border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                           backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          fontSize: '0.62rem',
                           color: 'var(--neutral-500)',
-                          fontWeight: 700,
                           whiteSpace: 'nowrap',
-                          zIndex: 10
+                          zIndex: 10,
+                          ...getElementStyleProps('sku', 0.62, false)
                         }}
                       >
-                        SKU: {sku}
+                        {formatElementText('sku', `SKU: ${sku}`)}
                       </div>
                     )}
                   </div>
@@ -2323,6 +2371,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
                   <div
                     onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                    onClick={() => setSelectedElementId('barcodeText')}
                     style={{
                       position: 'absolute',
                       left: `${elementPositions.barcodeText?.x ?? 24}%`,
@@ -2330,21 +2379,20 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                       transform: 'translate(-50%, -50%)',
                       cursor: 'move',
                       padding: '2px 4px',
-                      fontSize: '0.68rem',
-                      fontFamily: 'var(--font-mono)',
-                      fontWeight: 700,
                       color: 'var(--neutral-700)',
                       border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                       backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                      zIndex: 10
+                      zIndex: 10,
+                      ...getElementStyleProps('barcodeText', 0.68, true, true)
                     }}
                   >
-                    {barcodeValue}
+                    {formatElementText('barcodeText', effectiveBarcodeText)}
                   </div>
 
                   {showStoreName && (
                     <div
                       onPointerDown={(e) => handlePointerDown('storeName', e)}
+                      onClick={() => setSelectedElementId('storeName')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.storeName?.x ?? 56}%`,
@@ -2352,21 +2400,21 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         transform: 'translate(0, -50%)',
                         cursor: 'move',
                         padding: '2px 4px',
-                        fontSize: '0.72rem',
-                        fontWeight: 800,
                         color: 'var(--neutral-900)',
                         border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('storeName', 0.72, true)
                       }}
                     >
-                      {storeName || 'Store'}
+                      {formatElementText('storeName', storeName || 'Store')}
                     </div>
                   )}
 
                   {showProductName && (
                     <div
                       onPointerDown={(e) => handlePointerDown('productName', e)}
+                      onClick={() => setSelectedElementId('productName')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.productName?.x ?? 56}%`,
@@ -2374,8 +2422,6 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         transform: 'translate(0, -50%)',
                         cursor: 'move',
                         padding: '2px 4px',
-                        fontSize: '0.78rem',
-                        fontWeight: 700,
                         color: 'var(--neutral-800)',
                         border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
@@ -2383,16 +2429,18 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('productName', 0.78, true)
                       }}
                     >
-                      {productName}
+                      {formatElementText('productName', productName)}
                     </div>
                   )}
 
                   {showSku && sku && (
                     <div
                       onPointerDown={(e) => handlePointerDown('sku', e)}
+                      onClick={() => setSelectedElementId('sku')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.sku?.x ?? 56}%`,
@@ -2400,20 +2448,21 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         transform: 'translate(0, -50%)',
                         cursor: 'move',
                         padding: '2px 4px',
-                        fontSize: '0.64rem',
                         color: 'var(--neutral-500)',
                         border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('sku', 0.64, false)
                       }}
                     >
-                      SKU: {sku}
+                      {formatElementText('sku', `SKU: ${sku}`)}
                     </div>
                   )}
 
                   {showPrice && (
                     <div
                       onPointerDown={(e) => handlePointerDown('price', e)}
+                      onClick={() => setSelectedElementId('price')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.price?.x ?? 56}%`,
@@ -2421,12 +2470,11 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         transform: 'translate(0, -50%)',
                         cursor: 'move',
                         padding: '2px 4px',
-                        fontSize: '0.94rem',
-                        fontWeight: 900,
                         color: '#1e1b4b',
                         border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('price', 0.94, true)
                       }}
                     >
                       ₹{Number(price || 0).toFixed(2)}
@@ -2453,6 +2501,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   {showStoreName && (
                     <div
                       onPointerDown={(e) => handlePointerDown('storeName', e)}
+                      onClick={() => setSelectedElementId('storeName')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.storeName?.x ?? 50}%`,
@@ -2460,22 +2509,22 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         transform: 'translate(-50%, -50%)',
                         cursor: 'move',
                         padding: '2px 4px',
-                        fontSize: '0.75rem',
-                        fontWeight: 800,
                         color: 'var(--neutral-900)',
                         border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
                         whiteSpace: 'nowrap',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('storeName', 0.75, true)
                       }}
                     >
-                      {storeName || 'Store'}
+                      {formatElementText('storeName', storeName || 'Store')}
                     </div>
                   )}
 
                   {showProductName && (
                     <div
                       onPointerDown={(e) => handlePointerDown('productName', e)}
+                      onClick={() => setSelectedElementId('productName')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.productName?.x ?? 50}%`,
@@ -2483,8 +2532,6 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         transform: 'translate(-50%, -50%)',
                         cursor: 'move',
                         padding: '2px 4px',
-                        fontSize: '0.82rem',
-                        fontWeight: 700,
                         color: 'var(--neutral-800)',
                         border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
@@ -2492,10 +2539,11 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('productName', 0.82, true)
                       }}
                     >
-                      {productName}
+                      {formatElementText('productName', productName)}
                     </div>
                   )}
 
@@ -2533,6 +2581,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
                   <div
                     onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                    onClick={() => setSelectedElementId('barcodeText')}
                     style={{
                       position: 'absolute',
                       left: `${elementPositions.barcodeText?.x ?? 50}%`,
@@ -2540,21 +2589,20 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                       transform: 'translate(-50%, -50%)',
                       cursor: 'move',
                       padding: '2px 4px',
-                      fontSize: '0.72rem',
-                      fontFamily: 'var(--font-mono)',
-                      fontWeight: 700,
                       color: 'var(--neutral-700)',
                       border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                       backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                      zIndex: 10
+                      zIndex: 10,
+                      ...getElementStyleProps('barcodeText', 0.72, true, true)
                     }}
                   >
-                    {barcodeValue}
+                    {formatElementText('barcodeText', effectiveBarcodeText)}
                   </div>
 
                   {showSku && sku && (
                     <div
                       onPointerDown={(e) => handlePointerDown('sku', e)}
+                      onClick={() => setSelectedElementId('sku')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.sku?.x ?? 15}%`,
@@ -2562,20 +2610,21 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         transform: 'translate(0, -50%)',
                         cursor: 'move',
                         padding: '2px 4px',
-                        fontSize: '0.68rem',
                         color: 'var(--neutral-600)',
                         border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('sku', 0.68, false)
                       }}
                     >
-                      SKU: {sku}
+                      {formatElementText('sku', `SKU: ${sku}`)}
                     </div>
                   )}
 
                   {showPrice && (
                     <div
                       onPointerDown={(e) => handlePointerDown('price', e)}
+                      onClick={() => setSelectedElementId('price')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.price?.x ?? 85}%`,
@@ -2583,12 +2632,11 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         transform: 'translate(-100%, -50%)',
                         cursor: 'move',
                         padding: '2px 4px',
-                        fontSize: '0.90rem',
-                        fontWeight: 900,
                         color: '#1e1b4b',
                         border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                        zIndex: 10
+                        zIndex: 10,
+                        ...getElementStyleProps('price', 0.90, true)
                       }}
                     >
                       ₹{Number(price || 0).toFixed(2)}
@@ -2721,6 +2769,25 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     saveDesignToCache(elementPositions);
                   }}
                   placeholder="Store Header"
+                  className="input input-sm"
+                  style={{ width: '100%', fontSize: '0.82rem' }}
+                />
+              </div>
+
+              {/* Code / Barcode Text Input */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-700)' }}>
+                    Code Text on Tag:
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  value={customBarcodeText !== '' ? customBarcodeText : barcodeValue}
+                  onChange={(e) => {
+                    setCustomBarcodeText(e.target.value);
+                  }}
+                  placeholder="Custom Code Text"
                   className="input input-sm"
                   style={{ width: '100%', fontSize: '0.82rem' }}
                 />

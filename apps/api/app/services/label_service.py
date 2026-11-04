@@ -98,6 +98,11 @@ class LabelService:
             code_payload = (config.barcode or config.sku or config.public_item_id or "ITM-1001").replace("ITEM:", "").strip()
             display_code = code_payload
 
+        if config.custom_barcode_text and config.custom_barcode_text.strip():
+            display_code = config.custom_barcode_text.strip()
+            if not is_qr:
+                code_payload = display_code
+
         cp = config.custom_positions or {}
         use_custom = bool(cp)
         scale = getattr(config, 'code_scale', 1.0) or 1.0
@@ -189,37 +194,44 @@ class LabelService:
                     else:
                         c.drawRightString(width - (2.5 * mm), 2.5 * mm, f"Rs. {config.sale_price:,.2f}")
             else:
-                # Standard Default Layout
+                # Standard Default Layout (with full typography style support)
                 if config.show_store_name:
-                    c.setFont("Helvetica-Bold", 7 if height >= 30 * mm else 6)
-                    c.drawCentredString(cx, height - (4.5 * mm), display_store[:28])
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 7 if height >= 30 * mm else 6, True, display_store[:28], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawCentredString(cx, height - (4.5 * mm), txt)
 
-                c.setFont("Helvetica-Bold", 7.5 if height >= 30 * mm else 6.5)
-                c.drawCentredString(cx, height - (8.5 * mm), config.item_name[:26])
+                fn, fs, txt = LabelService._resolve_font_and_text("productName", 7.5 if height >= 30 * mm else 6.5, True, config.item_name[:26], config.element_styles)
+                c.setFont(fn, fs)
+                c.drawCentredString(cx, height - (8.5 * mm), txt)
 
                 if is_qr:
                     qr_size = min(14 * mm, height - (16 * mm))
                     LabelService._draw_qr(c, code_payload, cx - (qr_size / 2), 7 * mm, qr_size)
-                    c.setFont("Helvetica", 5.5)
-                    c.drawCentredString(cx, 5.5 * mm, display_code)
+                    fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.5, False, display_code, config.element_styles, is_monospace=True)
+                    c.setFont(fn, fs)
+                    c.drawCentredString(cx, 5.5 * mm, txt)
                 else:
                     try:
                         bc_h = 7 * mm if height >= 30 * mm else 5.5 * mm
                         bc = code128.Code128(code_payload, barHeight=bc_h, barWidth=0.42)
                         bc.drawOn(c, cx - (14 * mm), 9 * mm)
-                        c.setFont("Helvetica", 5.5)
-                        c.drawCentredString(cx, 6.5 * mm, display_code)
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.5, False, display_code, config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawCentredString(cx, 6.5 * mm, txt)
                     except Exception:
-                        c.setFont("Helvetica", 5.5)
-                        c.drawCentredString(cx, 9 * mm, display_code)
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.5, False, display_code, config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawCentredString(cx, 9 * mm, txt)
 
-                c.setFont("Helvetica", 5.5)
                 if config.show_sku and config.sku:
-                    c.drawString(2.5 * mm, 2.5 * mm, f"SKU: {config.sku[:12]}")
+                    fn, fs, txt = LabelService._resolve_font_and_text("sku", 5.5, False, f"SKU: {config.sku[:12]}", config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawString(2.5 * mm, 2.5 * mm, txt)
 
                 if config.show_price and config.sale_price:
-                    c.setFont("Helvetica-Bold", 8)
-                    c.drawRightString(width - (2.5 * mm), 2.5 * mm, f"Rs. {config.sale_price:,.2f}")
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 8, True, f"Rs. {config.sale_price:,.2f}", config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawRightString(width - (2.5 * mm), 2.5 * mm, txt)
 
             c.showPage()
 

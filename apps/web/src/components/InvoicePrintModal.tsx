@@ -39,10 +39,10 @@ const RECEIPT_FORMAT_CACHE_KEY = 'qb_pos_receipt_format_v2';
 
 export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, onClose }) => {
   // Support POS Thermal 80mm (3-inch), POS Thermal 58mm (2-inch), and A4 Standard
-  const [printFormat, setPrintFormat] = useState<'POS_80' | 'POS_58' | 'A4'>(() => {
+  const [printFormat, setPrintFormat] = useState<'POS_80' | 'POS_58' | 'POS_48' | 'A4'>(() => {
     try {
       const cached = localStorage.getItem(RECEIPT_FORMAT_CACHE_KEY);
-      if (cached === 'POS_58' || cached === 'A4' || cached === 'POS_80') return cached;
+      if (cached === 'POS_48' || cached === 'POS_58' || cached === 'A4' || cached === 'POS_80') return cached;
     } catch (_) {}
     return 'POS_80';
   });
@@ -56,12 +56,14 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
     return 1.0;
   });
 
-  const handleFormatChange = (fmt: 'POS_80' | 'POS_58' | 'A4') => {
+  const handleFormatChange = (fmt: 'POS_80' | 'POS_58' | 'POS_48' | 'A4') => {
     setPrintFormat(fmt);
     try {
       localStorage.setItem(RECEIPT_FORMAT_CACHE_KEY, fmt);
     } catch (_) {}
   };
+
+  const isPos = printFormat === 'POS_80' || printFormat === 'POS_58' || printFormat === 'POS_48';
 
   const handleScaleChange = (newScale: number) => {
     const clamped = Math.round(Math.max(0.8, Math.min(1.2, newScale)) * 100) / 100;
@@ -219,8 +221,8 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   className={`btn btn-sm ${printFormat === 'POS_80' ? 'btn-primary' : 'btn-secondary'}`}
                   style={{ 
                     border: 'none', 
-                    padding: '4px 9px', 
-                    fontSize: '0.74rem', 
+                    padding: '4px 8px', 
+                    fontSize: '0.72rem', 
                     fontWeight: 700,
                     borderRadius: 'var(--radius-sm)',
                     boxShadow: printFormat === 'POS_80' ? 'var(--shadow-sm)' : 'none'
@@ -228,31 +230,47 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   onClick={() => handleFormatChange('POS_80')}
                   title="Calibrated 80mm (3-inch) thermal POS receipt"
                 >
-                  Thermal (80mm)
+                  80mm Roll
                 </button>
                 <button
                   type="button"
                   className={`btn btn-sm ${printFormat === 'POS_58' ? 'btn-primary' : 'btn-secondary'}`}
                   style={{ 
                     border: 'none', 
-                    padding: '4px 9px', 
-                    fontSize: '0.74rem', 
+                    padding: '4px 8px', 
+                    fontSize: '0.72rem', 
                     fontWeight: 700,
                     borderRadius: 'var(--radius-sm)',
                     boxShadow: printFormat === 'POS_58' ? 'var(--shadow-sm)' : 'none'
                   }}
                   onClick={() => handleFormatChange('POS_58')}
-                  title="Compact 58mm (2-inch) portable Bluetooth thermal POS receipt"
+                  title="Compact 58mm (2.25-inch) portable Bluetooth thermal POS receipt"
                 >
-                  Thermal (58mm)
+                  58mm Roll
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${printFormat === 'POS_48' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ 
+                    border: 'none', 
+                    padding: '4px 8px', 
+                    fontSize: '0.72rem', 
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: printFormat === 'POS_48' ? 'var(--shadow-sm)' : 'none'
+                  }}
+                  onClick={() => handleFormatChange('POS_48')}
+                  title="Pocket 48mm (2-inch) mini Bluetooth thermal printer roll"
+                >
+                  48mm Roll
                 </button>
                 <button
                   type="button"
                   className={`btn btn-sm ${printFormat === 'A4' ? 'btn-primary' : 'btn-secondary'}`}
                   style={{ 
                     border: 'none', 
-                    padding: '4px 9px', 
-                    fontSize: '0.74rem', 
+                    padding: '4px 8px', 
+                    fontSize: '0.72rem', 
                     fontWeight: 700,
                     borderRadius: 'var(--radius-sm)',
                     boxShadow: printFormat === 'A4' ? 'var(--shadow-sm)' : 'none'
@@ -264,7 +282,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               </div>
 
               {/* Receipt Width Fit Slider & Stepper */}
-              {(printFormat === 'POS_80' || printFormat === 'POS_58') && (
+              {isPos && (
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--neutral-100)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
                   <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Roll Fit:</span>
                   <button
@@ -367,25 +385,25 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
             flex: 1, 
             padding: printFormat === 'A4' ? '28px 32px' : '20px 16px',
             backgroundColor: '#ffffff',
-            fontFamily: (printFormat === 'POS_80' || printFormat === 'POS_58') ? 'var(--font-mono, monospace)' : 'var(--font-sans)',
+            fontFamily: isPos ? 'var(--font-mono, monospace)' : 'var(--font-sans)',
             color: '#000000',
-            fontSize: printFormat === 'POS_58' ? '0.67rem' : printFormat === 'POS_80' ? '0.73rem' : '0.84rem',
+            fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_58' ? '0.67rem' : printFormat === 'POS_80' ? '0.73rem' : '0.84rem',
             lineHeight: 1.4,
           }}
         >
-          {(printFormat === 'POS_80' || printFormat === 'POS_58') ? (
+          {isPos ? (
             /* ========================================================
                CALIBRATED THERMAL POS TEMPLATE (80mm & 58mm)
                ======================================================== */
             <div 
-              className={`receipt-pos-container ${printFormat === 'POS_58' ? 'receipt-pos-58' : 'receipt-pos-80'}`}
+              className={`receipt-pos-container ${printFormat === 'POS_48' ? 'receipt-pos-48' : printFormat === 'POS_58' ? 'receipt-pos-58' : 'receipt-pos-80'}`}
               style={{ 
-                maxWidth: printFormat === 'POS_58' ? Math.round(182 * receiptScale) : Math.round(265 * receiptScale), 
+                maxWidth: printFormat === 'POS_48' ? Math.round(155 * receiptScale) : printFormat === 'POS_58' ? Math.round(182 * receiptScale) : Math.round(265 * receiptScale), 
                 margin: '0 auto', 
                 textAlign: 'center',
                 boxSizing: 'border-box',
-                padding: printFormat === 'POS_58' ? '0 2px' : '0 4px',
-                fontSize: printFormat === 'POS_58' ? '0.67rem' : '0.73rem'
+                padding: printFormat === 'POS_48' ? '0 1px' : printFormat === 'POS_58' ? '0 2px' : '0 4px',
+                fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_58' ? '0.67rem' : '0.73rem'
               }}
             >
               {/* Company & Location Header Directly on Receipt */}
@@ -400,7 +418,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     />
                   </div>
                 )}
-                <h2 style={{ fontSize: '1.15rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0, color: '#000000' }}>
+                <h2 style={{ fontSize: printFormat === 'POS_48' ? '0.92rem' : '1.15rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0, color: '#000000' }}>
                   {storeName}
                 </h2>
                 {storeTagline && (
@@ -432,7 +450,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <div style={{ borderBottom: '1px dashed #000000', margin: '6px 0' }} />
 
               {/* Consistent Invoice Number & Date */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', fontWeight: 700, textAlign: 'left' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: printFormat === 'POS_48' ? '0.64rem' : '0.74rem', fontWeight: 700, textAlign: 'left' }}>
                 <span>Receipt: {invoice.invoiceNumber}</span>
                 <span>Date: {formatInvoiceDate(invoice.date)}</span>
               </div>
@@ -441,13 +459,13 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <div style={{ borderBottom: '1px dashed #000000', margin: '6px 0' }} />
 
               {/* Item Lines Table */}
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', textAlign: 'left' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: printFormat === 'POS_48' ? '0.62rem' : '0.74rem', textAlign: 'left' }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px dashed #000000', fontWeight: 800 }}>
-                    <th style={{ padding: '3px 0', width: '45%' }}>ITEM</th>
-                    <th style={{ padding: '3px 0', textAlign: 'center', width: '16%' }}>QTY</th>
-                    <th style={{ padding: '3px 0', textAlign: 'right', width: '18%' }}>PRICE</th>
-                    <th style={{ padding: '3px 0', textAlign: 'right', width: '21%', paddingRight: 2 }}>AMT</th>
+                  <tr style={{ borderBottom: '1px dashed #000000', fontWeight: 800, fontSize: printFormat === 'POS_48' ? '0.62rem' : '0.74rem' }}>
+                    <th style={{ padding: '3px 0', width: printFormat === 'POS_48' ? '41%' : '45%' }}>ITEM</th>
+                    <th style={{ padding: '3px 0', textAlign: 'center', width: printFormat === 'POS_48' ? '15%' : '16%' }}>QTY</th>
+                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '20%' : '18%' }}>PRICE</th>
+                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '24%' : '21%', paddingRight: 2 }}>AMT</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -508,7 +526,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <div style={{ borderBottom: '1px dashed #000000', margin: '6px 0' }} />
 
               {/* Totals Breakdown */}
-              <div style={{ fontSize: '0.74rem', lineHeight: 1.45 }}>
+              <div style={{ fontSize: printFormat === 'POS_48' ? '0.64rem' : '0.74rem', lineHeight: 1.45 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: '#333333', fontWeight: 600 }}>
                   <span>Total Qty:</span>
                   <span>{formatQty(totalQuantity)}{returnedQuantitySum > 0 ? ` (Ret: ${formatQty(returnedQuantitySum)})` : ''}</span>
@@ -566,7 +584,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 margin: '6px 0',
                 display: 'flex', 
                 justifyContent: 'space-between', 
-                fontSize: '0.98rem', 
+                fontSize: printFormat === 'POS_48' ? '0.85rem' : '0.98rem', 
                 fontWeight: 900 
               }}>
                 <span>GRAND TOTAL:</span>
@@ -574,7 +592,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               </div>
 
               {/* Settlement Info */}
-              <div style={{ fontSize: '0.73rem', lineHeight: 1.35 }}>
+              <div style={{ fontSize: printFormat === 'POS_48' ? '0.64rem' : '0.73rem', lineHeight: 1.35 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>Payment Mode:</span>
                   <span style={{ fontWeight: 700 }}>{invoice.paymentMode}</span>
@@ -592,7 +610,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               </div>
 
               {/* Footer Notice */}
-              <div style={{ borderTop: '1px dashed #000000', marginTop: 10, paddingTop: 6, textAlign: 'center', fontSize: printFormat === 'POS_58' ? '0.62rem' : '0.68rem', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+              <div style={{ borderTop: '1px dashed #000000', marginTop: 10, paddingTop: 6, textAlign: 'center', fontSize: printFormat === 'POS_48' ? '0.58rem' : printFormat === 'POS_58' ? '0.62rem' : '0.68rem', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                 <p style={{ margin: 0, fontWeight: 800 }}>*** THANK YOU FOR SHOPPING WITH US! ***</p>
                 <p style={{ margin: '2px 0 0 0', color: '#555555' }}>{receiptFooter}</p>
               </div>
