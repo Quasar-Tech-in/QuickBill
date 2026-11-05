@@ -271,6 +271,7 @@ export interface Invoice {
   paymentMode: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'BANK_TRANSFER';
   status: 'PAID' | 'PARTIAL' | 'UNPAID' | 'CONFIRMED' | 'PARTIALLY_RETURNED' | 'RETURNED' | 'CANCELLED' | 'REFUNDED';
   notes?: string;
+  shareToken?: string;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -3477,7 +3477,7 @@ class StoreService {
 
 
   // --- Strict Tenant & Location-Isolated Invoices (Live Database Integration) ---
-  private mapSaleDocToInvoice(doc: any): Invoice {
+  public mapSaleDocToInvoice(doc: any): Invoice {
     const rawBalance = doc.balanceDue !== undefined ? doc.balanceDue : (doc.balance_due !== undefined ? doc.balance_due : 0);
     const rawPaid = doc.paidAmount !== undefined ? doc.paidAmount : (doc.paid_amount !== undefined ? doc.paid_amount : 0);
     const rawGrand = doc.grandTotal !== undefined ? doc.grandTotal : (doc.grand_total !== undefined ? doc.grand_total : 0);
@@ -3557,6 +3557,7 @@ class StoreService {
       paymentMode: (doc.paymentMode || doc.payment_mode || 'CASH') as any,
       status: (doc.status || doc.paymentStatus || doc.payment_status || (Number(rawBalance) <= 0 ? 'PAID' : (Number(rawPaid) > 0 ? 'PARTIAL' : 'UNPAID'))) as any,
       notes: doc.notes || undefined,
+      shareToken: doc.shareToken || doc.share_token || undefined,
     };
   }
 

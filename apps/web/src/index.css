@@ -96,6 +96,16 @@ body {
   position: relative;
 }
 
+/* Public Digital Invoice View Layout - Smooth Scrollable Container */
+.public-invoice-page {
+  height: 100vh;
+  max-height: 100vh;
+  width: 100%;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* Sidebar Styling - Fixed 100vh, static frame */
 .sidebar {
   width: 260px;
@@ -927,17 +937,38 @@ button:disabled:hover,
   }
 
   .receipt-pos-55 {
-    max-width: 42mm !important;
+    max-width: 38mm !important;
     width: 100% !important;
-    font-size: 7.2pt !important;
+    font-size: 6.2pt !important;
     padding: 0 !important;
   }
 
   .receipt-pos-48 {
-    max-width: 38mm !important;
+    max-width: 33mm !important;
     width: 100% !important;
-    font-size: 6.8pt !important;
+    font-size: 5.6pt !important;
     padding: 0 !important;
+  }
+
+  
+  .receipt-pos-container table {
+    table-layout: fixed !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .receipt-pos-container td, .receipt-pos-container th {
+    overflow: hidden !important;
+    word-break: break-word !important;
+  }
+  /* Extra Netlify badge killer rule */
+  [class*="netlify"], [id*="netlify"], [data-netlify], netlify-drawer, #netlify-drawer, .netlify-badge {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    opacity: 0 !important;
+    position: absolute !important;
+    left: -9999px !important;
   }
 
   .invoice-printable {
@@ -3058,6 +3089,26 @@ button:disabled:hover,
     break-inside: avoid !important;
   }
 
+  .public-invoice-page {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+  }
+
+  .public-bill-card {
+    border: none !important;
+    box-shadow: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+  }
+
   .invoice-printable * {
     color: #000000 !important;
     background: transparent !important;
@@ -3084,16 +3135,16 @@ button:disabled:hover,
   }
 
   .receipt-pos-55 {
-    max-width: 42mm !important;
+    max-width: 38mm !important;
     width: 100% !important;
-    font-size: 7.2pt !important;
+    font-size: 6.2pt !important;
     padding: 0 !important;
   }
 
   .receipt-pos-48 {
-    max-width: 38mm !important;
+    max-width: 33mm !important;
     width: 100% !important;
-    font-size: 6.8pt !important;
+    font-size: 5.6pt !important;
     padding: 0 !important;
   }
 

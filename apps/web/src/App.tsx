@@ -31,6 +31,7 @@ import { TableManagementView } from './views/TableManagementView';
 import { IncomingOrdersView } from './views/IncomingOrdersView';
 import { KitchenOrdersView } from './views/KitchenOrdersView';
 import { DigitalMenuPage } from './customer/DigitalMenuPage';
+import { PublicInvoiceView } from './views/PublicInvoiceView';
 import { store } from './services/store';
 import { Invoice, Tenant, User } from './types';
 
@@ -561,7 +562,10 @@ export const App: React.FC = () => {
         {/* Public Customer Self-Ordering Digital Menu Route */}
         {/* New clean URL: /menu/{slug}/{tableNum}?t={token} */}
         <Route path="/menu/:slug/:tableNum" element={<DigitalMenuPage />} />
-        {/* Legacy URL — kept for backward compat with old printed QR codes */}
+        {/* Public Customer Invoice Viewer (Cryptographically Protected) */}
+        <Route path="/bill/:token" element={<PublicInvoiceView />} />
+        <Route path="/invoice/p/:token" element={<PublicInvoiceView />} />
+        {/* Legacy URL - kept for backward compat with old printed QR codes */}
         <Route path="/order/:businessId/:tableId" element={<DigitalMenuPage />} />
 
         {/* Protected Authenticated Routes */}
