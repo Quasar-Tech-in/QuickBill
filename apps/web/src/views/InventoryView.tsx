@@ -38,8 +38,7 @@ import {
   RefreshCw,
   FileSpreadsheet,
   Lock,
-  Scale,
-  Scan
+  Scale
 } from 'lucide-react';
 import { Item, StoreLocation, ItemLocationInventory, ItemCategory, ItemImage, InventoryMovement } from '../types';
 import { store } from '../services/store';
@@ -2409,31 +2408,9 @@ export const InventoryView: React.FC = () => {
                   {/* Row 2: SKU, Barcode, GST Rate, Unit */}
                   <div className="modal-grid-row-4">
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                        <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)' }}>
-                          SKU Code
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => setActiveScanField('sku')}
-                          style={{
-                            border: 'none',
-                            background: 'none',
-                            padding: '0 4px',
-                            color: 'var(--primary-600)',
-                            fontSize: '0.7rem',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 3
-                          }}
-                          title="Scan SKU using camera or barcode gun"
-                        >
-                          <Scan size={12} />
-                          <span>Scan</span>
-                        </button>
-                      </div>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
+                        SKU Code
+                      </label>
                       <div style={{ position: 'relative', width: '100%' }}>
                         <input
                           type="text"
@@ -2549,31 +2526,9 @@ export const InventoryView: React.FC = () => {
                       )}
                     </div>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                        <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)' }}>
-                          Barcode Number
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => setActiveScanField('barcode')}
-                          style={{
-                            border: 'none',
-                            background: 'none',
-                            padding: '0 4px',
-                            color: 'var(--primary-600)',
-                            fontSize: '0.7rem',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 3
-                          }}
-                          title="Scan Barcode using camera or barcode gun"
-                        >
-                          <Scan size={12} />
-                          <span>Scan</span>
-                        </button>
-                      </div>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--neutral-700)', display: 'block', marginBottom: 3 }}>
+                        Barcode Number
+                      </label>
                       <div style={{ position: 'relative', width: '100%' }}>
                         <input
                           type="text"

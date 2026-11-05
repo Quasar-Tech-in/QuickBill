@@ -848,14 +848,9 @@ export const ItemsScreen: React.FC = () => {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
                     <Text style={styles.fieldLabel}>SKU</Text>
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                      <TouchableOpacity onPress={() => setIsScanningForField('SKU')}>
-                        <Text style={styles.formActionLink}>⚡ Scan</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={handleAutoGenerateSku}>
-                        <Text style={styles.formActionLink}>⚡ Auto</Text>
-                      </TouchableOpacity>
-                    </View>
+                    <TouchableOpacity onPress={handleAutoGenerateSku}>
+                      <Text style={styles.formActionLink}>⚡ Auto</Text>
+                    </TouchableOpacity>
                   </View>
                   <TextInput 
                     style={[styles.modalInput, !!skuCollision && styles.inputWarning]} 
@@ -873,14 +868,9 @@ export const ItemsScreen: React.FC = () => {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
                     <Text style={styles.fieldLabel}>Barcode</Text>
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                      <TouchableOpacity onPress={() => setIsScanningForField('BARCODE')}>
-                        <Text style={styles.formActionLink}>⚡ Scan</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={handleAutoGenerateBarcode}>
-                        <Text style={styles.formActionLink}>⚡ Auto</Text>
-                      </TouchableOpacity>
-                    </View>
+                    <TouchableOpacity onPress={handleAutoGenerateBarcode}>
+                      <Text style={styles.formActionLink}>⚡ Auto</Text>
+                    </TouchableOpacity>
                   </View>
                   <TextInput 
                     style={[styles.modalInput, !!barcodeCollision && styles.inputWarning]} 

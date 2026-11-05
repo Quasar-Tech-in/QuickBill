@@ -129,4 +129,10 @@ class SaleResponse(BaseSchema):
     notes: Optional[str] = None
     created_at: Optional[datetime] = Field(default=None, alias="createdAt")
     updated_at: Optional[datetime] = Field(None, alias="updatedAt")
+    share_token: Optional[str] = Field(None, alias="shareToken")
+
+class AttachCustomerRequest(BaseSchema):
+    phone: str = Field(..., min_length=7)
+    name: Optional[str] = None
+
 

@@ -1,12 +1,15 @@
+import re
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from app.core.database import get_tenant_db
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from app.core.database import get_tenant_db, db_manager
 from app.core.security import get_current_user, get_current_business_id, enforce_active_store_operations, TokenPayload
 from app.schemas.common import PaginatedResponse
-from app.schemas.sale import SaleCreateRequest, SaleUpdateRequest, SaleResponse
+from app.schemas.sale import SaleCreateRequest, SaleUpdateRequest, SaleResponse, AttachCustomerRequest
 from app.services.sale_service import SaleService
+from app.services.invoice_pdf_service import InvoicePdfService
 
 router = APIRouter(prefix="/sales", tags=["Sales & Billing"])
 
@@ -174,3 +177,173 @@ async def update_sale_return(
     )
     return SaleResponse(**doc)
 
+@router.post("/{sale_id}/attach-customer", response_model=SaleResponse, response_model_by_alias=True)
+async def attach_customer_to_sale(
+    sale_id: str,
+    payload: AttachCustomerRequest,
+    business_id: str = Depends(get_current_business_id),
+):
+    """
+    Attaches a customer phone number to an invoice before sharing to WhatsApp.
+    1. Normalizes phone number.
+    2. Searches for existing customer under the business.
+    3. If found: links customer to sale, updates visits/spent.
+    4. If not found: registers new customer in 'customers' collection.
+    5. Updates sale document (customerId, customerName, customerPhone, partyId, partyNameSnapshot, partyPhoneSnapshot).
+    6. Ensures 256-bit unguessable shareToken is generated.
+    7. Returns updated SaleResponse.
+    """
+    db = await get_tenant_db(business_id)
+    s_oid = ObjectId(sale_id) if ObjectId.is_valid(sale_id) else None
+    b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
+    if not s_oid:
+        raise HTTPException(status_code=404, detail="Sale invoice not found")
+
+    b_filter = {"$or": [{"businessId": b_oid}, {"businessId": business_id}]}
+    invoice_doc = await db.invoices.find_one({"_id": s_oid, **b_filter})
+    if not invoice_doc:
+        raise HTTPException(status_code=404, detail="Sale invoice not found")
+
+    clean_digits = re.sub(r"\D", "", payload.phone)
+    if len(clean_digits) > 10 and clean_digits.startswith("91"):
+        ten_digits = clean_digits[2:]
+    elif len(clean_digits) > 10 and clean_digits.startswith("0"):
+        ten_digits = clean_digits[1:]
+    else:
+        ten_digits = clean_digits[-10:] if len(clean_digits) >= 10 else clean_digits
+
+    if len(ten_digits) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number: must be 10 digits")
+
+    full_phone = f"+91{ten_digits}"
+    spaced_phone = f"+91 {ten_digits[:5]} {ten_digits[5:]}"
+    local_spaced = f"{ten_digits[:5]} {ten_digits[5:]}"
+
+    phone_filter = {
+        "$or": [
+            {"phone": full_phone},
+            {"phone": ten_digits},
+            {"phone": spaced_phone},
+            {"phone": local_spaced},
+            {"phone": payload.phone.strip()},
+            {"phone": {"$regex": rf"{ten_digits}$"}}
+        ]
+    }
+    customer_query = {"$and": [b_filter, phone_filter]}
+
+    now = datetime.now(timezone.utc)
+    existing_customer = await db.customers.find_one(customer_query)
+    if not existing_customer:
+        existing_customer = await db.parties.find_one(customer_query)
+
+    invoice_amount = float(invoice_doc.get("grandTotal") or 0.0)
+
+    if existing_customer:
+        cust_id = existing_customer["_id"]
+        cust_name = existing_customer.get("name") or payload.name or f"Customer {ten_digits[-4:]}"
+        await db.customers.update_one(
+            {"_id": cust_id},
+            {
+                "$inc": {"totalVisits": 1, "totalSpent": invoice_amount},
+                "$set": {"lastVisitDate": now, "updatedAt": now}
+            }
+        )
+    else:
+        cust_name = payload.name.strip() if (payload.name and payload.name.strip()) else f"Customer {ten_digits[-4:]}"
+        new_customer_doc = {
+            "businessId": b_oid,
+            "name": cust_name,
+            "phone": full_phone,
+            "email": None,
+            "tags": ["WALK_IN", "WHATSAPP_SHARED"],
+            "totalSpent": invoice_amount,
+            "totalVisits": 1,
+            "lastVisitDate": now,
+            "firstPurchaseDate": now,
+            "createdAt": now,
+            "updatedAt": now
+        }
+        res = await db.customers.insert_one(new_customer_doc)
+        cust_id = res.inserted_id
+
+    share_token = invoice_doc.get("shareToken")
+    if not share_token:
+        share_token = secrets.token_urlsafe(32)
+
+    update_data = {
+        "partyId": cust_id,
+        "partyNameSnapshot": cust_name,
+        "partyPhoneSnapshot": full_phone,
+        "consumerName": cust_name,
+        "consumerPhone": full_phone,
+        "shareToken": share_token,
+        "updatedAt": now
+    }
+
+    await db.invoices.update_one({"_id": s_oid}, {"$set": update_data})
+
+    updated_doc = await db.invoices.find_one({"_id": s_oid})
+    updated_doc["_id"] = str(updated_doc["_id"])
+    updated_doc["businessId"] = str(updated_doc["businessId"])
+    if updated_doc.get("partyId"):
+        updated_doc["partyId"] = str(updated_doc["partyId"])
+
+    return SaleResponse(**updated_doc)
+
+@router.get("/{sale_id}/share-token")
+async def get_or_generate_share_token(
+    sale_id: str,
+    business_id: str = Depends(get_current_business_id),
+):
+    """
+    Returns or lazily creates a 256-bit unguessable share token for this invoice.
+    """
+    db = await get_tenant_db(business_id)
+    s_oid = ObjectId(sale_id) if ObjectId.is_valid(sale_id) else None
+    b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
+    if not s_oid:
+        raise HTTPException(status_code=404, detail="Sale invoice not found")
+
+    doc = await db.invoices.find_one({"_id": s_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sale invoice not found")
+
+    token = doc.get("shareToken")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        await db.invoices.update_one({"_id": s_oid}, {"$set": {"shareToken": token}})
+
+    return {"shareToken": token, "invoiceNumber": doc.get("invoiceNumber")}
+
+@router.get("/{sale_id}/pdf")
+async def get_authenticated_invoice_pdf(
+    sale_id: str,
+    format_type: str = Query("A4", pattern="^(A4|THERMAL)$"),
+    business_id: str = Depends(get_current_business_id),
+):
+    """
+    Generates and returns an official Tax Invoice PDF for an authenticated user.
+    """
+    db = await get_tenant_db(business_id)
+    s_oid = ObjectId(sale_id) if ObjectId.is_valid(sale_id) else None
+    b_oid = ObjectId(business_id) if ObjectId.is_valid(business_id) else ObjectId()
+    if not s_oid:
+        raise HTTPException(status_code=404, detail="Sale invoice not found")
+
+    doc = await db.invoices.find_one({"_id": s_oid, "$or": [{"businessId": b_oid}, {"businessId": business_id}]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sale invoice not found")
+
+    primary = db_manager.get_primary_database()
+    tenant = await primary.tenants.find_one({"$or": [{"_id": b_oid}, {"slug": str(business_id)}]})
+
+    pdf_bytes = InvoicePdfService.generate_pdf(doc, tenant, format_type=format_type)
+    inv_no = doc.get("invoiceNumber", "Invoice").replace(" ", "_")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=Invoice_{inv_no}.pdf"
+        }
+    )

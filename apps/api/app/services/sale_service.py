@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import re
+import secrets
 from typing import Dict, Any, List
 from bson import ObjectId
 from fastapi import HTTPException, status
@@ -288,7 +289,8 @@ class SaleService:
             "paymentMode": request.payment_mode,
             "notes": request.notes,
             "createdByUserId": user_id,
-            "createdAt": now
+            "createdAt": now,
+            "shareToken": secrets.token_urlsafe(32)
         }
 
         # 6. Save Invoice & Update Inventory Movements

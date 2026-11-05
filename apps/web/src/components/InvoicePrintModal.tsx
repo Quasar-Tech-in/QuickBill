@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { X, Printer, Share2 } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { X, Printer, Share2, Send, CheckCircle2, AlertCircle, Phone, User, Loader2 } from 'lucide-react';
 import { Invoice } from '../types';
-import { store } from '../services/store';
+import { store, apiClient } from '../services/store';
 
 interface InvoicePrintModalProps {
   invoice: Invoice;
@@ -34,54 +34,202 @@ const formatInvoiceDate = (val?: string | null): string => {
   return str;
 };
 
+const RECEIPT_FORMAT_CACHE_KEY = 'qb_pos_receipt_format_v2';
+const RECEIPT_MARGIN_CACHE_KEY = 'qb_pos_receipt_margin_v2';
+
 export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, onClose }) => {
-  // Default to POS Thermal 80mm standard template as requested
-  const [printFormat, setPrintFormat] = useState<'POS' | 'A4'>('POS');
+  const [activeInvoice, setActiveInvoice] = useState<Invoice>(invoice);
+  const [showPhonePrompt, setShowPhonePrompt] = useState(false);
+  const [phoneInput, setPhoneInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [isAttaching, setIsAttaching] = useState(false);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  // Support POS Thermal 48mm (2-inch), POS Thermal 58mm, POS Thermal 80mm (3-inch), and A4 Standard
+  const [printFormat, setPrintFormat] = useState<'POS_80' | 'POS_58' | 'POS_55' | 'POS_48' | 'A4'>(() => {
+    try {
+      const cached = localStorage.getItem(RECEIPT_FORMAT_CACHE_KEY);
+      if (cached === 'POS_48' || cached === 'POS_55' || cached === 'POS_58' || cached === 'A4' || cached === 'POS_80') return cached;
+    } catch (_) {}
+    return 'POS_55'; // 55mm Roll by default
+  });
+
+  const [receiptLeftMargin, setReceiptLeftMargin] = useState<number>(() => {
+    try {
+      const cached = localStorage.getItem(RECEIPT_MARGIN_CACHE_KEY);
+      const parsed = cached !== null ? parseFloat(cached) : 0;
+      if (!isNaN(parsed) && parsed >= -10 && parsed <= 15) return parsed;
+    } catch (_) {}
+    return 0; // 0mm left margin by default (printer hardware provides its own 3mm margin)
+  });
+
+  const handleMarginChange = (newMargin: number) => {
+    const clamped = Math.max(-10, Math.min(15, Math.round(newMargin * 10) / 10));
+    setReceiptLeftMargin(clamped);
+    try {
+      localStorage.setItem(RECEIPT_MARGIN_CACHE_KEY, String(clamped));
+    } catch (_) {}
+  };
+
+  const handleFormatChange = (fmt: 'POS_80' | 'POS_58' | 'POS_55' | 'POS_48' | 'A4') => {
+    setPrintFormat(fmt);
+    try {
+      localStorage.setItem(RECEIPT_FORMAT_CACHE_KEY, fmt);
+    } catch (_) {}
+  };
+
+  const isPos = printFormat === 'POS_80' || printFormat === 'POS_58' || printFormat === 'POS_55' || printFormat === 'POS_48';
   
   const activeTenant = store.getActiveTenant();
   const activeLocation = store.getActiveLocation();
-  const branchLocation = store.getAllLocations().find(l => l.id === invoice.locationId || l.name === invoice.locationName);
+  const branchLocation = store.getAllLocations().find(l => l.id === activeInvoice.locationId || l.name === activeInvoice.locationName);
 
   const handlePrint = () => {
+    // 1. Purge any injected Netlify badges, drawer or feedback elements completely
+    document.querySelectorAll('netlify-drawer, #netlify-drawer, .netlify-badge, [class*="netlify"], [id*="netlify"], [data-netlify], [data-netlify-drawer], a[href*="netlify.com"], iframe[src*="netlify"]').forEach(el => el.remove());
+    
+    // 2. Scan elements for "Powered by Netlify" text and purge
+    document.querySelectorAll('div, a, span, p, footer, aside, section').forEach(el => {
+      const txt = el.textContent?.trim().toLowerCase() || '';
+      if (txt === 'powered by netlify' || txt.includes('powered by netlify')) {
+        el.remove();
+      }
+    });
+
+    // 3. Suppress mobile bottom nav and background headers
+    document.querySelectorAll('.mobile-bottom-nav, .mobile-drawer, .sidebar, .header').forEach(el => {
+      (el as HTMLElement).style.setProperty('display', 'none', 'important');
+    });
+
     window.print();
   };
 
+  const getCleanPhone = (inv: Invoice): string => {
+    const raw = (inv.customerPhone || inv.consumerPhone || inv.partyPhone || '').replace(/\D/g, '');
+    if (raw.length > 10 && raw.startsWith('91')) return raw.slice(2);
+    if (raw.length > 10 && raw.startsWith('0')) return raw.slice(1);
+    return raw.length >= 10 ? raw.slice(-10) : raw;
+  };
+
+  const executeWhatsAppDispatch = async (inv: Invoice, targetTenDigitPhone: string) => {
+    let token = inv.shareToken;
+    if (!token) {
+      try {
+        const tokenRes = await apiClient.get(`/sales/${inv.id}/share-token`);
+        token = tokenRes.data.shareToken;
+      } catch (e) {
+        console.warn('Could not fetch share token:', e);
+      }
+    }
+
+    const clean10 = targetTenDigitPhone.replace(/\D/g, '').slice(-10);
+    const fullPhone = `91${clean10}`;
+    const origin = window.location.origin;
+    const publicLink = token ? `${origin}/bill/${token}` : '';
+
+    const finalAmt = Number(inv.grandTotal || inv.total || 0).toFixed(2);
+    const dateStr = formatInvoiceDate(inv.date);
+    const customerDisplayName = inv.customerName || inv.consumerName || inv.partyName || 'Valued Customer';
+
+    const itemLines = (inv.items || [])
+      .map((it: any) => `• ${it.nameSnapshot || it.name} x ${formatQty(it.quantity)} = ₹${Number(it.lineTotal || it.total || 0).toFixed(2)}`)
+      .join('\n');
+
+    let text = `🧾 *TAX INVOICE - ${storeName}*\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `*Bill No:* ${inv.invoiceNumber}\n`;
+    text += `*Date:* ${dateStr}\n`;
+    text += `*Customer:* ${customerDisplayName}\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `*ITEMS PURCHASED:*\n${itemLines}\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `*Total Qty:* ${formatQty(totalQuantity)}\n`;
+    text += `*Taxable Value:* ₹${inv.subtotal.toFixed(2)}\n`;
+    text += `*GST:* ₹${inv.taxTotal.toFixed(2)}\n`;
+    text += `*GRAND TOTAL:* *₹${finalAmt}*\n`;
+    text += `*Payment Mode:* ${inv.paymentMode || 'CASH'} (Paid: ₹${Number(inv.paidAmount !== undefined ? inv.paidAmount : inv.grandTotal).toFixed(2)})\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━\n`;
+    if (publicLink) {
+      text += `📄 *View & Download Official PDF Bill:*\n${publicLink}\n`;
+      text += `━━━━━━━━━━━━━━━━━━━━\n`;
+    }
+    text += `*** THANK YOU FOR SHOPPING WITH US! ***`;
+
+    const waUrl = `https://api.whatsapp.com/send?phone=${fullPhone}&text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
+  };
+
   const handleShareWhatsApp = () => {
-    const rawPhone = (invoice.customerPhone || '').replace(/\D/g, '');
-    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
-    const finalAmt = Number(invoice.grandTotal || invoice.total || 0).toFixed(2);
-    const dateStr = formatInvoiceDate(invoice.date);
-    const text = `*Receipt from ${storeName}*\nBill No: ${invoice.invoiceNumber}\nDate: ${dateStr}\nTotal: ₹${finalAmt}\n\nThank you for visiting!`;
-    const url = cleanPhone 
-      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}` 
-      : `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
+    const existingPhone = getCleanPhone(activeInvoice);
+    if (existingPhone && existingPhone.length === 10) {
+      executeWhatsAppDispatch(activeInvoice, existingPhone);
+    } else {
+      const existingName = (activeInvoice.consumerName || activeInvoice.partyName || '').trim();
+      const isGeneric = !existingName || /walk-in|counter/i.test(existingName);
+      setNameInput(isGeneric ? '' : existingName);
+      setPhoneInput('');
+      setPhoneError(null);
+      setShowPhonePrompt(true);
+    }
+  };
+
+  const handleConfirmAttachAndShare = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanDigits = phoneInput.replace(/\D/g, '');
+    const tenDigits = cleanDigits.length > 10 ? cleanDigits.slice(-10) : cleanDigits;
+
+    if (tenDigits.length !== 10) {
+      setPhoneError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    try {
+      setIsAttaching(true);
+      setPhoneError(null);
+
+      const res = await apiClient.post(`/sales/${activeInvoice.id}/attach-customer`, {
+        phone: `+91${tenDigits}`,
+        name: nameInput.trim() || undefined
+      });
+
+      const updatedSale = res.data;
+      const updatedInv = store.mapSaleDocToInvoice(updatedSale);
+      setActiveInvoice(updatedInv);
+
+      setShowPhonePrompt(false);
+      executeWhatsAppDispatch(updatedInv, tenDigits);
+    } catch (err: any) {
+      console.error('Failed to attach customer:', err);
+      setPhoneError(err.response?.data?.detail || 'Failed to link customer. Please check network.');
+    } finally {
+      setIsAttaching(false);
+    }
   };
 
   const storeName = activeTenant?.name || 'STORE COUNTER';
   const storeLogo = activeTenant?.logoUrl;
   const storeTagline = activeTenant?.tagline;
   const receiptFooter = activeTenant?.receiptFooterNote || 'Please keep this receipt for future reference';
-  const branchName = invoice.locationName || activeLocation?.name || 'Main Branch';
-  const branchAddress = invoice.locationAddress || branchLocation?.address || activeLocation?.address || '';
-  const branchPhone = invoice.locationPhone || branchLocation?.phone || activeLocation?.phone || '';
-  const gstin = invoice.locationGstin || branchLocation?.gstin || (invoice.locationId === activeLocation?.id ? activeLocation?.gstin : undefined) || activeTenant?.gstin || '';
+  const branchName = activeInvoice.locationName || activeLocation?.name || 'Main Branch';
+  const branchAddress = activeInvoice.locationAddress || branchLocation?.address || activeLocation?.address || '';
+  const branchPhone = activeInvoice.locationPhone || branchLocation?.phone || activeLocation?.phone || '';
+  const gstin = activeInvoice.locationGstin || branchLocation?.gstin || (activeInvoice.locationId === activeLocation?.id ? activeLocation?.gstin : undefined) || activeTenant?.gstin || '';
 
-  const grossSubtotal = invoice.grossTotal !== undefined
-    ? invoice.grossTotal
-    : invoice.items.reduce((sum, it) => sum + (Number(it.unitPrice || 0) * Number(it.quantity || 0)), 0);
+  const grossSubtotal = activeInvoice.grossTotal !== undefined
+    ? activeInvoice.grossTotal
+    : activeInvoice.items.reduce((sum, it) => sum + (Number(it.unitPrice || 0) * Number(it.quantity || 0)), 0);
 
-  const itemDiscountsSum = invoice.itemDiscountTotal !== undefined
-    ? invoice.itemDiscountTotal
-    : invoice.items.reduce((sum, it) => sum + (it.discountAmount || 0), 0);
+  const itemDiscountsSum = activeInvoice.itemDiscountTotal !== undefined
+    ? activeInvoice.itemDiscountTotal
+    : activeInvoice.items.reduce((sum, it) => sum + (it.discountAmount || 0), 0);
 
-  const orderDiscountAmount = invoice.orderDiscountAmount !== undefined
-    ? invoice.orderDiscountAmount
-    : (invoice.invoiceDiscount !== undefined ? invoice.invoiceDiscount : Math.max(0, (invoice.discountTotal || 0) - itemDiscountsSum));
+  const orderDiscountAmount = activeInvoice.orderDiscountAmount !== undefined
+    ? activeInvoice.orderDiscountAmount
+    : (activeInvoice.invoiceDiscount !== undefined ? activeInvoice.invoiceDiscount : Math.max(0, (activeInvoice.discountTotal || 0) - itemDiscountsSum));
 
-  const totalItemsCount = invoice.items?.length || 0;
-  const totalQuantity = (invoice.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
-  const returnedQuantitySum = (invoice.items || []).reduce((sum, it) => sum + (Number(it.returnedQuantity) || 0), 0);
+  const totalItemsCount = activeInvoice.items?.length || 0;
+  const totalQuantity = (activeInvoice.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+  const returnedQuantitySum = (activeInvoice.items || []).reduce((sum, it) => sum + (Number(it.returnedQuantity) || 0), 0);
   const activeQuantity = Math.max(0, totalQuantity - returnedQuantitySum);
 
   return (
@@ -123,9 +271,9 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 Receipt No:
               </span>
               <span style={{ fontSize: '1rem', fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--neutral-900)' }}>
-                {invoice.invoiceNumber}
+                {activeInvoice.invoiceNumber}
               </span>
-              {invoice.hasReturns && (
+              {activeInvoice.hasReturns && (
                 <span style={{ 
                   fontSize: '0.72rem', 
                   fontWeight: 700, 
@@ -135,7 +283,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   borderRadius: 'var(--radius-sm)',
                   border: '1px solid rgba(239, 68, 68, 0.25)' 
                 }}>
-                  🔄 {invoice.status === 'RETURNED' ? 'FULLY RETURNED' : 'PARTIAL RETURN'}
+                  🔄 {activeInvoice.status === 'RETURNED' ? 'FULLY RETURNED' : 'PARTIAL RETURN'}
                 </span>
               )}
             </div>
@@ -169,47 +317,152 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
           {/* Bottom Action Row: Format Switcher & Action Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-            {/* Format Toggle Switch */}
-            <div 
-              style={{ 
-                display: 'inline-flex', 
-                background: 'var(--neutral-100)', 
-                padding: 3, 
-                borderRadius: 'var(--radius-md)', 
-                border: '1px solid var(--neutral-200)',
-                gap: 2
-              }}
-            >
-              <button
-                type="button"
-                className={`btn btn-sm ${printFormat === 'POS' ? 'btn-primary' : 'btn-secondary'}`}
+            {/* Format Toggle Switch & Width Fit */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <div 
                 style={{ 
-                  border: 'none', 
-                  padding: '4px 10px', 
-                  fontSize: '0.76rem', 
-                  fontWeight: 700,
-                  borderRadius: 'var(--radius-sm)',
-                  boxShadow: printFormat === 'POS' ? 'var(--shadow-sm)' : 'none'
+                  display: 'inline-flex', 
+                  background: 'var(--neutral-100)', 
+                  padding: 3, 
+                  borderRadius: 'var(--radius-md)', 
+                  border: '1px solid var(--neutral-200)',
+                  gap: 2
                 }}
-                onClick={() => setPrintFormat('POS')}
               >
-                Thermal (80mm)
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${printFormat === 'A4' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ 
-                  border: 'none', 
-                  padding: '4px 10px', 
-                  fontSize: '0.76rem', 
-                  fontWeight: 700,
-                  borderRadius: 'var(--radius-sm)',
-                  boxShadow: printFormat === 'A4' ? 'var(--shadow-sm)' : 'none'
-                }}
-                onClick={() => setPrintFormat('A4')}
-              >
-                A4 Standard
-              </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${printFormat === 'POS_80' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ 
+                    border: 'none', 
+                    padding: '4px 8px', 
+                    fontSize: '0.72rem', 
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: printFormat === 'POS_80' ? 'var(--shadow-sm)' : 'none'
+                  }}
+                  onClick={() => handleFormatChange('POS_80')}
+                  title="Calibrated 80mm (3-inch) thermal POS receipt"
+                >
+                  80mm Roll
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${printFormat === 'POS_58' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ 
+                    border: 'none', 
+                    padding: '4px 8px', 
+                    fontSize: '0.72rem', 
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: printFormat === 'POS_58' ? 'var(--shadow-sm)' : 'none'
+                  }}
+                  onClick={() => handleFormatChange('POS_58')}
+                  title="Compact 58mm (2.25-inch) portable Bluetooth thermal POS receipt"
+                >
+                  58mm Roll
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${printFormat === 'POS_55' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ 
+                    border: 'none', 
+                    padding: '4px 8px', 
+                    fontSize: '0.72rem', 
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: printFormat === 'POS_55' ? 'var(--shadow-sm)' : 'none'
+                  }}
+                  onClick={() => handleFormatChange('POS_55')}
+                  title="Calibrated 55mm thermal POS paper roll"
+                >
+                  55mm Roll
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${printFormat === 'POS_48' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ 
+                    border: 'none', 
+                    padding: '4px 8px', 
+                    fontSize: '0.72rem', 
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: printFormat === 'POS_48' ? 'var(--shadow-sm)' : 'none'
+                  }}
+                  onClick={() => handleFormatChange('POS_48')}
+                  title="Pocket 48mm (2-inch) mini Bluetooth thermal printer roll"
+                >
+                  48mm Roll
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${printFormat === 'A4' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ 
+                    border: 'none', 
+                    padding: '4px 8px', 
+                    fontSize: '0.72rem', 
+                    fontWeight: 700,
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: printFormat === 'A4' ? 'var(--shadow-sm)' : 'none'
+                  }}
+                  onClick={() => handleFormatChange('A4')}
+                >
+                  A4 Standard
+                </button>
+              </div>
+
+              {/* Left Margin Alignment Stepper */}
+              {isPos && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--neutral-100)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--neutral-200)' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Left Margin:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleMarginChange(receiptLeftMargin - 1)}
+                    disabled={receiptLeftMargin <= -10}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 3,
+                      border: '1px solid var(--neutral-300)',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                    title="Shift left by 1mm (supports negative to cancel printer driver hardware margins)"
+                  >
+                    -
+                  </button>
+                  <span style={{ fontSize: '0.70rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 48, textAlign: 'center' }}>
+                    {receiptLeftMargin === 0 ? '0mm' : (receiptLeftMargin > 0 ? '+' : '') + receiptLeftMargin + 'mm'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleMarginChange(receiptLeftMargin + 1)}
+                    disabled={receiptLeftMargin >= 15}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 3,
+                      border: '1px solid var(--neutral-300)',
+                      backgroundColor: '#ffffff',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                    title="Shift right by 1mm"
+                  >
+                    +
+                  </button>
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -263,19 +516,34 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
             flex: 1, 
             padding: printFormat === 'A4' ? '28px 32px' : '20px 16px',
             backgroundColor: '#ffffff',
-            fontFamily: printFormat === 'POS' ? 'var(--font-mono, monospace)' : 'var(--font-sans)',
+            fontFamily: isPos ? 'var(--font-mono, monospace)' : 'var(--font-sans)',
             color: '#000000',
-            fontSize: printFormat === 'POS' ? '0.76rem' : '0.84rem',
+            fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_58' ? '0.67rem' : printFormat === 'POS_80' ? '0.73rem' : '0.84rem',
             lineHeight: 1.4,
           }}
         >
-          {printFormat === 'POS' ? (
+          {isPos ? (
             /* ========================================================
-               STANDARD THERMAL POS TEMPLATE (80mm)
+               CALIBRATED THERMAL POS TEMPLATE (80mm & 58mm)
                ======================================================== */
-            <div style={{ maxWidth: 330, margin: '0 auto', textAlign: 'center' }}>
+            <div 
+              className={`receipt-pos-container ${
+                printFormat === 'POS_48' ? 'receipt-pos-48' : 
+                printFormat === 'POS_55' ? 'receipt-pos-55' : 
+                printFormat === 'POS_58' ? 'receipt-pos-58' : 'receipt-pos-80'
+              }`}
+              style={{ 
+                ['--receipt-left-margin' as any]: `${receiptLeftMargin}mm`,
+                maxWidth: printFormat === 'POS_48' ? 125 : printFormat === 'POS_55' ? 144 : printFormat === 'POS_58' ? 166 : 265, 
+                margin: '0 auto',
+                textAlign: 'left',
+                boxSizing: 'border-box',
+                padding: printFormat === 'POS_48' ? '0 1px' : printFormat === 'POS_55' ? '0 1.5px' : printFormat === 'POS_58' ? '0 2px' : '0 4px',
+                fontSize: printFormat === 'POS_48' ? '0.54rem' : printFormat === 'POS_55' ? '0.58rem' : printFormat === 'POS_58' ? '0.64rem' : '0.73rem'
+              }}
+            >
               {/* Company & Location Header Directly on Receipt */}
-              <div style={{ marginBottom: 8 }}>
+              <div style={{ marginBottom: 8, textAlign: 'center' }}>
                 {storeLogo && (
                   <div style={{ marginBottom: 4 }}>
                     <img 
@@ -286,7 +554,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     />
                   </div>
                 )}
-                <h2 style={{ fontSize: '1.15rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0, color: '#000000' }}>
+                <h2 style={{ fontSize: printFormat === 'POS_48' ? '0.92rem' : printFormat === 'POS_55' ? '0.98rem' : '1.15rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0, color: '#000000' }}>
                   {storeName}
                 </h2>
                 {storeTagline && (
@@ -318,26 +586,26 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <div style={{ borderBottom: '1px dashed #000000', margin: '6px 0' }} />
 
               {/* Consistent Invoice Number & Date */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', fontWeight: 700, textAlign: 'left' }}>
-                <span>Receipt: {invoice.invoiceNumber}</span>
-                <span>Date: {formatInvoiceDate(invoice.date)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: printFormat === 'POS_48' ? '0.64rem' : printFormat === 'POS_55' ? '0.68rem' : '0.74rem', fontWeight: 700, textAlign: 'left' }}>
+                <span>Receipt: {activeInvoice.invoiceNumber}</span>
+                <span>Date: {formatInvoiceDate(activeInvoice.date)}</span>
               </div>
 
               {/* Dashed Separator */}
               <div style={{ borderBottom: '1px dashed #000000', margin: '6px 0' }} />
 
               {/* Item Lines Table */}
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', textAlign: 'left' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_55' ? '0.66rem' : '0.74rem', textAlign: 'left' }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px dashed #000000', fontWeight: 800 }}>
-                    <th style={{ padding: '3px 0', width: '50%' }}>ITEM</th>
-                    <th style={{ padding: '3px 0', textAlign: 'center', width: '15%' }}>QTY</th>
-                    <th style={{ padding: '3px 0', textAlign: 'right', width: '15%' }}>PRICE</th>
-                    <th style={{ padding: '3px 0', textAlign: 'right', width: '20%' }}>AMT</th>
+                  <tr style={{ borderBottom: '1px dashed #000000', fontWeight: 800, fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_55' ? '0.66rem' : '0.74rem' }}>
+                    <th style={{ padding: '3px 0', textAlign: 'left', width: printFormat === 'POS_48' ? '38%' : printFormat === 'POS_55' ? '38%' : '44%' }}>ITEM</th>
+                    <th style={{ padding: '3px 0', textAlign: 'center', width: printFormat === 'POS_48' ? '14%' : printFormat === 'POS_55' ? '14%' : '15%' }}>QTY</th>
+                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '21%' : printFormat === 'POS_55' ? '21%' : '19%' }}>PRICE</th>
+                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '27%' : printFormat === 'POS_55' ? '27%' : '22%', paddingRight: 0 }}>AMT</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {invoice.items.map((line, idx) => {
+                  {activeInvoice.items.map((line, idx) => {
                     const retQty = line.returnedQuantity ? Math.round(Number(line.returnedQuantity) * 1000) / 1000 : 0;
                     const hasRet = retQty > 0;
                     const activeQty = Math.max(0, Math.round((Number(line.quantity) - retQty) * 1000) / 1000);
@@ -376,7 +644,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                           {line.unitPrice.toFixed(2)}
                         </td>
 
-                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700 }}>
+                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700, paddingRight: printFormat === 'POS_48' ? 0 : printFormat === 'POS_55' ? 1 : 2 }}>
                           {hasDisc && line.originalTotal !== undefined && Math.abs(line.originalTotal - line.total) > 0.01 && (
                             <div style={{ fontSize: '0.62rem', textDecoration: 'line-through', color: '#777777', fontWeight: 400 }}>
                               {line.originalTotal.toFixed(2)}
@@ -394,21 +662,21 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <div style={{ borderBottom: '1px dashed #000000', margin: '6px 0' }} />
 
               {/* Totals Breakdown */}
-              <div style={{ fontSize: '0.74rem', lineHeight: 1.45 }}>
+              <div style={{ fontSize: printFormat === 'POS_48' ? '0.64rem' : printFormat === 'POS_55' ? '0.68rem' : '0.74rem', lineHeight: 1.45 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: '#333333', fontWeight: 600 }}>
                   <span>Total Qty:</span>
                   <span>{formatQty(totalQuantity)}{returnedQuantitySum > 0 ? ` (Ret: ${formatQty(returnedQuantitySum)})` : ''}</span>
                 </div>
-                {invoice.originalGrandTotal !== undefined && invoice.originalGrandTotal > 0 && invoice.originalGrandTotal !== invoice.grandTotal ? (
+                {activeInvoice.originalGrandTotal !== undefined && activeInvoice.originalGrandTotal > 0 && activeInvoice.originalGrandTotal !== activeInvoice.grandTotal ? (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666666' }}>
                     <span>Original Total:</span>
-                    <span>₹{Number(invoice.originalGrandTotal).toFixed(2)}</span>
+                    <span>₹{Number(activeInvoice.originalGrandTotal).toFixed(2)}</span>
                   </div>
                 ) : null}
-                {invoice.returnTotal !== undefined && invoice.returnTotal > 0 ? (
+                {activeInvoice.returnTotal !== undefined && activeInvoice.returnTotal > 0 ? (
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#b91c1c' }}>
                     <span>Less Returns:</span>
-                    <span>-₹{Number(invoice.returnTotal).toFixed(2)}</span>
+                    <span>-₹{Number(activeInvoice.returnTotal).toFixed(2)}</span>
                   </div>
                 ) : null}
                 {/* <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -430,16 +698,16 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 <div style={{ borderBottom: '1px dotted #dddddd', margin: '4px 0' }} />
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>Taxable Value:</span>
-                  <span>₹{invoice.subtotal.toFixed(2)}</span>
+                  <span>₹{activeInvoice.subtotal.toFixed(2)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>GST:</span>
-                  <span>₹{invoice.taxTotal.toFixed(2)}</span>
+                  <span>₹{activeInvoice.taxTotal.toFixed(2)}</span>
                 </div>
-                {invoice.roundOff !== 0 && (
+                {activeInvoice.roundOff !== 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#555555' }}>
                     <span>Round Off:</span>
-                    <span>{invoice.roundOff > 0 ? `+₹${invoice.roundOff.toFixed(2)}` : `-₹${Math.abs(invoice.roundOff).toFixed(2)}`}</span>
+                    <span>{activeInvoice.roundOff > 0 ? `+₹${activeInvoice.roundOff.toFixed(2)}` : `-₹${Math.abs(activeInvoice.roundOff).toFixed(2)}`}</span>
                   </div>
                 )}
               </div>
@@ -452,33 +720,33 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 margin: '6px 0',
                 display: 'flex', 
                 justifyContent: 'space-between', 
-                fontSize: '0.98rem', 
+                fontSize: printFormat === 'POS_48' ? '0.80rem' : printFormat === 'POS_55' ? '0.90rem' : '0.98rem', 
                 fontWeight: 900 
               }}>
                 <span>GRAND TOTAL:</span>
-                <span>₹{invoice.grandTotal.toFixed(2)}</span>
+                <span>₹{activeInvoice.grandTotal.toFixed(2)}</span>
               </div>
 
               {/* Settlement Info */}
-              <div style={{ fontSize: '0.73rem', lineHeight: 1.35 }}>
+              <div style={{ fontSize: printFormat === 'POS_48' ? '0.64rem' : printFormat === 'POS_55' ? '0.68rem' : '0.73rem', lineHeight: 1.35 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>Payment Mode:</span>
-                  <span style={{ fontWeight: 700 }}>{invoice.paymentMode}</span>
+                  <span style={{ fontWeight: 700 }}>{activeInvoice.paymentMode}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>Amount Paid:</span>
-                  <span>₹{invoice.paidAmount.toFixed(2)}</span>
+                  <span>₹{activeInvoice.paidAmount.toFixed(2)}</span>
                 </div>
-                {invoice.balanceAmount > 0 && (
+                {activeInvoice.balanceAmount > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#b91c1c' }}>
                     <span>Balance Due:</span>
-                    <span>₹{invoice.balanceAmount.toFixed(2)}</span>
+                    <span>₹{activeInvoice.balanceAmount.toFixed(2)}</span>
                   </div>
                 )}
               </div>
 
               {/* Footer Notice */}
-              <div style={{ borderTop: '1px dashed #000000', marginTop: 10, paddingTop: 6, textAlign: 'center', fontSize: '0.68rem' }}>
+              <div style={{ borderTop: '1px dashed #000000', marginTop: 10, paddingTop: 6, textAlign: 'center', fontSize: printFormat === 'POS_48' ? '0.58rem' : printFormat === 'POS_55' ? '0.60rem' : printFormat === 'POS_58' ? '0.62rem' : '0.68rem', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                 <p style={{ margin: 0, fontWeight: 800 }}>*** THANK YOU FOR SHOPPING WITH US! ***</p>
                 <p style={{ margin: '2px 0 0 0', color: '#555555' }}>{receiptFooter}</p>
               </div>
@@ -515,9 +783,9 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     <div style={{ display: 'inline-block', backgroundColor: 'var(--primary-50)', color: 'var(--primary-700)', padding: '4px 10px', borderRadius: 4, fontWeight: 700, fontSize: '0.85rem' }}>
                       TAX INVOICE
                     </div>
-                    <p style={{ fontSize: '0.85rem', fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: 6, margin: '4px 0 0 0' }}>{invoice.invoiceNumber}</p>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', margin: '2px 0 0 0' }}>Date: {formatInvoiceDate(invoice.date)}</p>
-                    {invoice.hasReturns && (
+                    <p style={{ fontSize: '0.85rem', fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: 6, margin: '4px 0 0 0' }}>{activeInvoice.invoiceNumber}</p>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--neutral-600)', margin: '2px 0 0 0' }}>Date: {formatInvoiceDate(activeInvoice.date)}</p>
+                    {activeInvoice.hasReturns && (
                       <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--danger-700)', margin: '2px 0 0 0' }}>
                         ⚠️ Has Item Returns
                       </p>
@@ -541,7 +809,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   </tr>
                 </thead>
                 <tbody>
-                  {invoice.items.map((line, idx) => {
+                  {activeInvoice.items.map((line, idx) => {
                     const retQty = line.returnedQuantity ? Math.round(Number(line.returnedQuantity) * 1000) / 1000 : 0;
                     const hasRet = retQty > 0;
                     const discPercent = Number(line.discountPercent || (line.discountType === 'PERCENT' ? line.discountValue : 0) || 0);
@@ -607,7 +875,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                       {returnedQuantitySum > 0 ? formatQty(returnedQuantitySum) : '-'}
                     </td>
                     <td colSpan={4}></td>
-                    <td style={{ padding: '7px 6px', textAlign: 'right' }}>₹{invoice.grandTotal.toFixed(2)}</td>
+                    <td style={{ padding: '7px 6px', textAlign: 'right' }}>₹{activeInvoice.grandTotal.toFixed(2)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -619,16 +887,16 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     <span>Total Qty:</span>
                     <span>{formatQty(totalQuantity)}</span>
                   </div>
-                  {invoice.originalGrandTotal !== undefined && invoice.originalGrandTotal > 0 && invoice.originalGrandTotal !== invoice.grandTotal ? (
+                  {activeInvoice.originalGrandTotal !== undefined && activeInvoice.originalGrandTotal > 0 && activeInvoice.originalGrandTotal !== activeInvoice.grandTotal ? (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: 'var(--neutral-600)' }}>
                       <span>Original Billed Total:</span>
-                      <span>₹{Number(invoice.originalGrandTotal).toFixed(2)}</span>
+                      <span>₹{Number(activeInvoice.originalGrandTotal).toFixed(2)}</span>
                     </div>
                   ) : null}
-                  {invoice.returnTotal !== undefined && invoice.returnTotal > 0 ? (
+                  {activeInvoice.returnTotal !== undefined && activeInvoice.returnTotal > 0 ? (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: 'var(--danger-700)', fontWeight: 700 }}>
                       <span>Less Returned Items:</span>
-                      <span>-₹{Number(invoice.returnTotal).toFixed(2)}</span>
+                      <span>-₹{Number(activeInvoice.returnTotal).toFixed(2)}</span>
                     </div>
                   ) : null}
                   {/* <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
@@ -650,34 +918,34 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   <div style={{ borderBottom: '1px dashed var(--neutral-300)', margin: '4px 0' }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
                     <span style={{ color: 'var(--neutral-600)' }}>Taxable Subtotal (Ex-Tax):</span>
-                    <span>₹{invoice.subtotal.toFixed(2)}</span>
+                    <span>₹{activeInvoice.subtotal.toFixed(2)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
                     <span style={{ color: 'var(--neutral-600)' }}>GST:</span>
-                    <span>₹{invoice.taxTotal.toFixed(2)}</span>
+                    <span>₹{activeInvoice.taxTotal.toFixed(2)}</span>
                   </div>
-                  {invoice.roundOff !== 0 && (
+                  {activeInvoice.roundOff !== 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', color: 'var(--neutral-500)' }}>
                       <span>Round Off:</span>
-                      <span>{invoice.roundOff > 0 ? `+₹${invoice.roundOff.toFixed(2)}` : `-₹${Math.abs(invoice.roundOff).toFixed(2)}`}</span>
+                      <span>{activeInvoice.roundOff > 0 ? `+₹${activeInvoice.roundOff.toFixed(2)}` : `-₹${Math.abs(activeInvoice.roundOff).toFixed(2)}`}</span>
                     </div>
                   )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '2px solid var(--neutral-900)', borderBottom: '2px solid var(--neutral-900)', marginTop: 4, fontWeight: 800, fontSize: '1rem' }}>
                     <span>Net Grand Total:</span>
-                    <span style={{ color: 'var(--primary-600)' }}>₹{invoice.grandTotal.toFixed(2)}</span>
+                    <span style={{ color: 'var(--primary-600)' }}>₹{activeInvoice.grandTotal.toFixed(2)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', marginTop: 4 }}>
                     <span style={{ color: 'var(--neutral-600)' }}>Payment Mode:</span>
-                    <span style={{ fontWeight: 700 }}>{invoice.paymentMode}</span>
+                    <span style={{ fontWeight: 700 }}>{activeInvoice.paymentMode}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem' }}>
                     <span style={{ color: 'var(--neutral-600)' }}>Paid:</span>
-                    <span>₹{invoice.paidAmount.toFixed(2)}</span>
+                    <span>₹{activeInvoice.paidAmount.toFixed(2)}</span>
                   </div>
-                  {invoice.balanceAmount > 0 && (
+                  {activeInvoice.balanceAmount > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.82rem', fontWeight: 700, color: 'var(--danger-600)' }}>
                       <span>Balance Due:</span>
-                      <span>₹{invoice.balanceAmount.toFixed(2)}</span>
+                      <span>₹{activeInvoice.balanceAmount.toFixed(2)}</span>
                     </div>
                   )}
                 </div>
@@ -695,6 +963,188 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
             </div>
           )}
         </div>
+        {/* Customer Phone Prompt for WhatsApp Share */}
+        {showPhonePrompt && (
+          <div 
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(15, 23, 42, 0.65)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100000,
+              padding: 16
+            }}
+            onClick={() => setShowPhonePrompt(false)}
+          >
+            <div 
+              style={{
+                maxWidth: 420,
+                width: '100%',
+                backgroundColor: '#ffffff',
+                borderRadius: 16,
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2)',
+                padding: '24px 20px',
+                border: '1px solid #e2e8f0',
+                position: 'relative'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: '50%', backgroundColor: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#16a34a' }}>
+                    <Share2 size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>Send via WhatsApp</h3>
+                    <p style={{ margin: 0, fontSize: '0.74rem', color: '#64748b' }}>Bill #{activeInvoice.invoiceNumber}</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPhonePrompt(false)}
+                  style={{
+                    border: 'none',
+                    background: '#f1f5f9',
+                    borderRadius: '50%',
+                    width: 28,
+                    height: 28,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    color: '#64748b'
+                  }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <p style={{ fontSize: '0.82rem', color: '#475569', marginBottom: 16, lineHeight: 1.45 }}>
+                Enter the customer's WhatsApp mobile number. QuickBill will link this invoice, save the phone, and auto-register them in your CRM if they are a new customer.
+              </p>
+
+              {phoneError && (
+                <div style={{ padding: '8px 12px', backgroundColor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: 8, color: '#b91c1c', fontSize: '0.78rem', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <AlertCircle size={15} />
+                  <span>{phoneError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleConfirmAttachAndShare}>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#334155', marginBottom: 6, textTransform: 'uppercase' }}>
+                    Customer Mobile Number *
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden', backgroundColor: '#ffffff' }}>
+                    <span style={{ padding: '8px 12px', backgroundColor: '#f8fafc', borderRight: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>
+                      +91
+                    </span>
+                    <input 
+                      type="tel"
+                      inputMode="numeric"
+                      autoFocus
+                      maxLength={14}
+                      value={phoneInput}
+                      onChange={(e) => setPhoneInput(e.target.value)}
+                      placeholder="98765 43210"
+                      style={{
+                        flex: 1,
+                        border: 'none',
+                        outline: 'none',
+                        padding: '10px 12px',
+                        fontSize: '0.95rem',
+                        fontWeight: 600,
+                        color: '#0f172a'
+                      }}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 18 }}>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#334155', marginBottom: 6, textTransform: 'uppercase' }}>
+                    Customer Name (Optional)
+                  </label>
+                  <input 
+                    type="text"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="e.g. Aarav Sharma"
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 8,
+                      padding: '9px 12px',
+                      fontSize: '0.85rem',
+                      fontWeight: 500,
+                      color: '#0f172a',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowPhonePrompt(false)}
+                    disabled={isAttaching}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      backgroundColor: '#ffffff',
+                      color: '#475569',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isAttaching}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 18px',
+                      borderRadius: 8,
+                      border: 'none',
+                      backgroundColor: '#16a34a',
+                      color: '#ffffff',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: isAttaching ? 'not-allowed' : 'pointer',
+                      boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)'
+                    }}
+                  >
+                    {isAttaching ? (
+                      <>
+                        <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
+                        <span>Saving &amp; Opening...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send size={15} />
+                        <span>Save &amp; Open WhatsApp</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
