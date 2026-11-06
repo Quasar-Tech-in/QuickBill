@@ -937,9 +937,9 @@ button:disabled:hover,
   }
 
   .receipt-pos-55 {
-    max-width: 38mm !important;
+    max-width: 42mm !important;
     width: 100% !important;
-    font-size: 6.2pt !important;
+    font-size: 6.5pt !important;
     padding: 0 !important;
   }
 
@@ -3135,9 +3135,9 @@ button:disabled:hover,
   }
 
   .receipt-pos-55 {
-    max-width: 38mm !important;
+    max-width: 42mm !important;
     width: 100% !important;
-    font-size: 6.2pt !important;
+    font-size: 6.5pt !important;
     padding: 0 !important;
   }
 
@@ -3172,6 +3172,13 @@ button:disabled:hover,
   .label-print-unit:last-child {
     page-break-after: auto !important;
     break-after: auto !important;
+  }
+
+  .label-unit-seznik-100x15 {
+    width: 100mm !important;
+    height: 15mm !important;
+    page-break-after: always !important;
+    break-after: always !important;
   }
 
   .label-print-grid {

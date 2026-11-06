@@ -89,6 +89,15 @@ const DEFAULT_RATTAIL_POSITIONS: LayoutPositions = {
   code: { x: 55, y: 48 },
 };
 
+const DEFAULT_SEZNIK_RATTAIL_POSITIONS: LayoutPositions = {
+  storeName: { x: 3, y: 16 },
+  productName: { x: 3, y: 46 },
+  price: { x: 3, y: 78 },
+  barcodeText: { x: 35, y: 36 },
+  sku: { x: 35, y: 72 },
+  code: { x: 50, y: 50 },
+};
+
 const DEFAULT_STACKED_POSITIONS: LayoutPositions = {
   storeName: { x: 50, y: 9 },
   productName: { x: 50, y: 22 },
@@ -138,7 +147,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   const [codeType, setCodeType] = useState<'BARCODE' | 'QR'>(initialCodeType);
   const [style, setStyle] = useState<'JEWELRY_RAT_TAIL' | 'STANDARD' | 'JEWELRY_STRING_TAG' | 'A4_SHEET'>('JEWELRY_RAT_TAIL');
   const [paperSize, setPaperSize] = useState<
-    'RAT_TAIL_76x12' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40'
+    'RAT_TAIL_76x12' | 'SEZNIK_100x15' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40'
   >('RAT_TAIL_76x12');
   const [arrangement, setArrangement] = useState<'DUAL_FLAP' | 'STACKED' | 'SIDE_BY_SIDE'>('DUAL_FLAP');
   const [codeScale, setCodeScale] = useState<number>(1.0); // 0.8, 1.0, 1.2, 1.4
@@ -175,12 +184,16 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   // Helper flags
   const isDumbbell = style === 'JEWELRY_STRING_TAG' || paperSize === 'DUMBBELL_70x12';
-  const isRatTail = (style === 'JEWELRY_RAT_TAIL' || paperSize === 'RAT_TAIL_76x12') && !isDumbbell;
+  const isSeznik = paperSize === 'SEZNIK_100x15';
+  const isRatTail = (style === 'JEWELRY_RAT_TAIL' || paperSize === 'RAT_TAIL_76x12' || isSeznik) && !isDumbbell;
 
   // Resolve default positions based on layout
   const resolveDefaultPositions = useCallback((curArr: string, curStyle: string, curPaper: string): LayoutPositions => {
     if (curStyle === 'JEWELRY_STRING_TAG' || curPaper === 'DUMBBELL_70x12') {
       return { ...DEFAULT_DUMBBELL_POSITIONS };
+    }
+    if (curPaper === 'SEZNIK_100x15') {
+      return { ...DEFAULT_SEZNIK_RATTAIL_POSITIONS };
     }
     if (curStyle === 'JEWELRY_RAT_TAIL' || curPaper === 'RAT_TAIL_76x12') {
       return { ...DEFAULT_RATTAIL_POSITIONS };
@@ -359,11 +372,11 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   const handleStyleSelect = (newStyle: 'JEWELRY_RAT_TAIL' | 'STANDARD' | 'JEWELRY_STRING_TAG' | 'A4_SHEET') => {
     setStyle(newStyle);
-    let newPaper: 'RAT_TAIL_76x12' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40' = paperSize;
+    let newPaper: 'RAT_TAIL_76x12' | 'SEZNIK_100x15' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40' = paperSize;
     let newArr: 'DUAL_FLAP' | 'STACKED' | 'SIDE_BY_SIDE' = arrangement;
 
     if (newStyle === 'JEWELRY_RAT_TAIL') {
-      newPaper = 'RAT_TAIL_76x12';
+      newPaper = paperSize === 'SEZNIK_100x15' ? 'SEZNIK_100x15' : 'RAT_TAIL_76x12';
       newArr = 'DUAL_FLAP';
     } else if (newStyle === 'JEWELRY_STRING_TAG') {
       newPaper = 'DUMBBELL_70x12';
@@ -392,7 +405,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     }
   };
 
-  const handlePaperSelect = (newPaper: 'RAT_TAIL_76x12' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40') => {
+  const handlePaperSelect = (newPaper: 'RAT_TAIL_76x12' | 'SEZNIK_100x15' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40') => {
     setPaperSize(newPaper);
     let newStyle = style;
     let newArr = arrangement;
@@ -402,7 +415,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       newArr = 'DUAL_FLAP';
       setStyle(newStyle);
       setArrangement(newArr);
-    } else if (newPaper === 'RAT_TAIL_76x12') {
+    } else if (newPaper === 'RAT_TAIL_76x12' || newPaper === 'SEZNIK_100x15') {
       newStyle = 'JEWELRY_RAT_TAIL';
       newArr = 'DUAL_FLAP';
       setStyle(newStyle);
@@ -599,7 +612,93 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       // Ensure vertical text baseline aligns with CSS translateY(-50%)
       ctx.textBaseline = 'middle';
 
-      if (isDumbbell) {
+      if (isSeznik) {
+        // High-res Seznik Jewellery Tag: 1000px x 150px (Flap 1: 320px, Flap 2: 320px, Tail: 360px)
+        canvas.width = 1000;
+        canvas.height = 150;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Flap 1 border (0 to 320px)
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(6, 6, 310, 138);
+
+        ctx.textAlign = 'left';
+        if (showStoreName) {
+          const sX = (pos.storeName.x / 100) * canvas.width;
+          const sY = (pos.storeName.y / 100) * canvas.height;
+          ctx.fillStyle = '#0f172a';
+          ctx.font = getCanvasFont('storeName', 14, true);
+          ctx.fillText(formatElementText('storeName', storeName || 'Store').substring(0, 22), sX, sY);
+        }
+        if (showProductName) {
+          const pX = (pos.productName.x / 100) * canvas.width;
+          const pY = (pos.productName.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e293b';
+          ctx.font = getCanvasFont('productName', 14, true);
+          ctx.fillText(formatElementText('productName', productName || 'Item').substring(0, 22), pX, pY);
+        }
+        if (showPrice) {
+          const prX = (pos.price.x / 100) * canvas.width;
+          const prY = (pos.price.y / 100) * canvas.height;
+          ctx.fillStyle = '#1e1b4b';
+          ctx.font = getCanvasFont('price', 19, true);
+          ctx.fillText(`₹${(price || 0).toFixed(2)}`, prX, prY);
+        }
+
+        // Dashed Seam / Fold Line at 320px
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = '#64748b';
+        ctx.beginPath();
+        ctx.moveTo(320, 4);
+        ctx.lineTo(320, 146);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Flap 2 border (320 to 640px)
+        ctx.strokeStyle = '#94a3b8';
+        ctx.strokeRect(324, 6, 310, 138);
+
+        if (rawDataUrl) {
+          const img = new Image();
+          await new Promise((res) => {
+            img.onload = res;
+            img.src = rawDataUrl;
+          });
+          const codeW = Math.round((codeType === 'QR' ? 100 : 130) * codeScale);
+          const codeH = Math.round((codeType === 'QR' ? 100 : 55) * codeScale);
+          const cX = (pos.code.x / 100) * canvas.width;
+          const cY = (pos.code.y / 100) * canvas.height;
+          ctx.drawImage(img, cX - codeW / 2, cY - codeH / 2, codeW, codeH);
+        }
+
+        ctx.textAlign = 'left';
+        const bX = (pos.barcodeText.x / 100) * canvas.width;
+        const bY = (pos.barcodeText.y / 100) * canvas.height;
+        ctx.fillStyle = '#0f172a';
+        ctx.font = getCanvasFont('barcodeText', 13, true, true);
+        ctx.fillText(formatElementText('barcodeText', effectiveBarcodeText).substring(0, 14), bX, bY);
+
+        if (showSku && sku) {
+          const skX = (pos.sku.x / 100) * canvas.width;
+          const skY = (pos.sku.y / 100) * canvas.height;
+          ctx.fillStyle = '#64748b';
+          ctx.font = getCanvasFont('sku', 12, false);
+          ctx.fillText(formatElementText('sku', `SKU:${sku.substring(0, 12)}`), skX, skY);
+        }
+
+        // Tail strap (640 to 1000px, 40px high in center: y = 55)
+        ctx.fillStyle = '#f8fafc';
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.fillRect(640, 55, 355, 40);
+        ctx.strokeRect(640, 55, 355, 40);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('SEZNIK JOSH TAIL STRAP (36mm)', 815, 78);
+
+      } else if (isDumbbell) {
         // High-res Dumbbell Sticker: 700px x 120px (Symmetrical 28mm Left Wing, 14mm Bridge, 28mm Right Wing)
         canvas.width = 700;
         canvas.height = 120;
@@ -921,7 +1020,10 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
       let w_mm = '50mm';
       let h_mm = '30mm';
-      if (isDumbbell) {
+      if (isSeznik) {
+        w_mm = '100mm';
+        h_mm = '15mm';
+      } else if (isDumbbell) {
         w_mm = '70mm';
         h_mm = '12mm';
       } else if (isRatTail) {
@@ -943,7 +1045,31 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
       // Construct Unit HTML matching user drag & drop coordinates
       const buildUnitHtml = () => {
-        if (isDumbbell) {
+        if (isSeznik) {
+          // Authentic Seznik Josh Jewellery Tag 100mm x 15mm (32mm Front Flap, 32mm Back Flap, 36mm Tail)
+          return `
+            <div class="label-unit-seznik-100x15" style="width:100mm;height:15mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
+              <!-- Background Guides -->
+              <div style="position:absolute;left:0;top:0;width:32mm;height:15mm;border:0.2mm solid #cbd5e1;border-right:0.3mm dashed #64748b;box-sizing:border-box;"></div>
+              <div style="position:absolute;left:32mm;top:0;width:32mm;height:15mm;border:0.2mm solid #cbd5e1;box-sizing:border-box;"></div>
+              <div style="position:absolute;left:64mm;top:5.5mm;width:36mm;height:4mm;border:0.2mm solid #cbd5e1;background:#f8fafc;box-sizing:border-box;"></div>
+
+              <!-- Custom Elements -->
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 7, true)}line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+
+              ${codeDataUrl ? `
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
+                  <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${7.5 * codeScale}mm` : `${10.5 * codeScale}mm`};max-width:30mm;object-fit:contain;" />
+                </div>
+              ` : ''}
+
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5.2, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14)))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 4.5, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 12)))}</div>` : ''}
+            </div>
+          `;
+        } else if (isDumbbell) {
           // Authentic Jewelry Dumbbell 70mm x 12mm
           return `
             <div style="width:70mm;height:12mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
@@ -1820,7 +1946,247 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               </div>
 
               {/* RENDERED CANVAS WORKBENCH */}
-              {isDumbbell ? (
+              {isSeznik ? (
+                /* AUTHENTIC SEZNIK JOSH JEWELRY TAG CANVAS (100mm x 15mm) */
+                <div style={{ width: '100%', maxWidth: 640, padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary-700)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      🏷️ SEZNIK Josh Tag (100 × 15 mm) • 32mm Front / 32mm Back / 36mm Tail
+                    </span>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>
+                      Drag items freely • Fold at 32mm crease
+                    </span>
+                  </div>
+                  <div 
+                    ref={canvasContainerRef}
+                    style={{
+                      width: '100%',
+                      height: 105,
+                      backgroundColor: '#ffffff',
+                      border: '1.5px solid var(--neutral-400)',
+                      borderRadius: 8,
+                      boxShadow: 'var(--shadow-sm)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      userSelect: 'none'
+                    }}
+                  >
+                    {/* FLAP 1: Front Face (0 to 32%) */}
+                    <div style={{
+                      width: '32%',
+                      height: '100%',
+                      borderRight: '1.5px dashed var(--neutral-400)',
+                      backgroundColor: '#ffffff',
+                      position: 'relative'
+                    }}>
+                      <div style={{ position: 'absolute', right: -12, top: 4, backgroundColor: 'var(--neutral-200)', color: 'var(--neutral-700)', fontSize: '0.54rem', fontWeight: 800, padding: '1px 3px', borderRadius: 3, zIndex: 2 }}>
+                        FOLD
+                      </div>
+                      <div style={{ position: 'absolute', left: 4, bottom: 2, fontSize: '0.52rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
+                        Front Face (32mm)
+                      </div>
+                    </div>
+
+                    {/* FLAP 2: Back Face (32% to 64%) */}
+                    <div style={{
+                      width: '32%',
+                      height: '100%',
+                      backgroundColor: '#ffffff',
+                      position: 'relative',
+                      borderRight: '1px solid var(--neutral-200)'
+                    }}>
+                      <div style={{ position: 'absolute', left: 6, bottom: 2, fontSize: '0.52rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
+                        Back Face (32mm)
+                      </div>
+                    </div>
+
+                    {/* TAIL STRAP: Looping strap (64% to 100%, 36mm) */}
+                    <div style={{
+                      width: '36%',
+                      height: '100%',
+                      backgroundColor: 'var(--neutral-50)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 8px',
+                      position: 'relative'
+                    }}>
+                      <div style={{
+                        width: '100%',
+                        height: 24,
+                        borderRadius: 4,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid var(--neutral-300)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.58rem',
+                        color: 'var(--neutral-500)',
+                        fontWeight: 700
+                      }}>
+                        Tail Strap (36mm)
+                      </div>
+                    </div>
+
+                    {/* DRAGGABLE ELEMENTS LAYER */}
+                    {showStoreName && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('storeName', e)}
+                        onClick={() => setSelectedElementId('storeName')}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.storeName?.x ?? 3}%`,
+                          top: `${elementPositions.storeName?.y ?? 16}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          color: 'var(--neutral-900)',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10,
+                          ...getElementStyleProps('storeName', 0.68, true)
+                        }}
+                      >
+                        {formatElementText('storeName', storeName || 'Store')}
+                      </div>
+                    )}
+
+                    {showProductName && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('productName', e)}
+                        onClick={() => setSelectedElementId('productName')}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.productName?.x ?? 3}%`,
+                          top: `${elementPositions.productName?.y ?? 46}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          color: 'var(--neutral-800)',
+                          maxWidth: 180,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10,
+                          ...getElementStyleProps('productName', 0.74, true)
+                        }}
+                      >
+                        {formatElementText('productName', productName)}
+                      </div>
+                    )}
+
+                    {showPrice && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('price', e)}
+                        onClick={() => setSelectedElementId('price')}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.price?.x ?? 3}%`,
+                          top: `${elementPositions.price?.y ?? 78}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          color: '#1e1b4b',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10,
+                          ...getElementStyleProps('price', 0.96, true)
+                        }}
+                      >
+                        ₹{Number(price || 0).toFixed(2)}
+                      </div>
+                    )}
+
+                    <div
+                      onPointerDown={(e) => handlePointerDown('code', e)}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.code?.x ?? 50}%`,
+                        top: `${elementPositions.code?.y ?? 50}%`,
+                        transform: `translate(-50%, -50%) scale(${codeScale})`,
+                        transformOrigin: 'center center',
+                        cursor: 'move',
+                        padding: '2px',
+                        borderRadius: 4,
+                        border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 'max-content',
+                        height: 'max-content',
+                        flexShrink: 0,
+                        whiteSpace: 'nowrap',
+                        zIndex: 10
+                      }}
+                    >
+                      <BarcodeRenderer
+                        ref={barcodeRendererRef}
+                        value={activePayload}
+                        codeType={codeType}
+                        width={codeType === 'BARCODE' ? 1.0 : undefined}
+                        height={codeType === 'BARCODE' ? 40 : 64}
+                        showText={false}
+                      />
+                    </div>
+
+                    <div
+                      onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                      onClick={() => setSelectedElementId('barcodeText')}
+                      style={{
+                        position: 'absolute',
+                        left: `${elementPositions.barcodeText?.x ?? 35}%`,
+                        top: `${elementPositions.barcodeText?.y ?? 36}%`,
+                        transform: 'translate(0, -50%)',
+                        cursor: 'move',
+                        padding: '2px 4px',
+                        borderRadius: 4,
+                        border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                        color: 'var(--neutral-900)',
+                        whiteSpace: 'nowrap',
+                        zIndex: 10,
+                        ...getElementStyleProps('barcodeText', 0.70, true, true)
+                      }}
+                    >
+                      {formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14))}
+                    </div>
+
+                    {showSku && sku && (
+                      <div
+                        onPointerDown={(e) => handlePointerDown('sku', e)}
+                        onClick={() => setSelectedElementId('sku')}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.sku?.x ?? 35}%`,
+                          top: `${elementPositions.sku?.y ?? 72}%`,
+                          transform: 'translate(0, -50%)',
+                          cursor: 'move',
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          color: 'var(--neutral-500)',
+                          whiteSpace: 'nowrap',
+                          zIndex: 10,
+                          ...getElementStyleProps('sku', 0.62, false)
+                        }}
+                      >
+                        {formatElementText('sku', `SKU: ${sku}`)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : isDumbbell ? (
                 /* AUTHENTIC JEWELRY DUMBBELL CANVAS (70mm x 12mm Symmetrical) */
                 <div style={{ width: '100%', maxWidth: 580, padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div 
@@ -2917,6 +3283,23 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 >
                   <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>76 x 12 mm</div>
                   <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Rat-Tail Roll</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handlePaperSelect('SEZNIK_100x15')}
+                  style={{
+                    padding: '8px 6px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1.5px solid ${paperSize === 'SEZNIK_100x15' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'SEZNIK_100x15' ? 'var(--primary-50)' : '#ffffff',
+                    color: paperSize === 'SEZNIK_100x15' ? 'var(--primary-700)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>100 x 15 mm</div>
+                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Seznik Josh Tag</div>
                 </button>
 
                 <button

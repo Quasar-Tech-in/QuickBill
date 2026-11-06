@@ -422,6 +422,188 @@ class LabelService:
         return buffer.getvalue()
 
     @staticmethod
+    def generate_seznik_jewelry_tag(
+        config: LabelPrintConfig, store_name: str
+    ) -> bytes:
+        """
+        Generates 100mm x 15mm Seznik Jewellery Rat-Tail Tag PDF (Dual Foldable Flaps + Right Tail).
+        Matches physical Seznik 14.3mm x 100mm jewelry roll labels:
+        - Flap 1 (0mm to 32mm): Store Header, Item Name, Sale Price, MRP
+        - Fold Crease (32mm): Dashed fold boundary
+        - Flap 2 (32mm to 64mm): 2D QR Code or 1D Barcode, Public Code, SKU
+        - Tail (64mm to 100mm): 36mm narrow looping strap
+        """
+        buffer = BytesIO()
+        width, height = 100 * mm, 15 * mm
+        c = canvas.Canvas(buffer, pagesize=(width, height))
+
+        display_store = config.store_name or store_name or "QuickBill Jewelers"
+        is_qr = config.code_type == CodeType.QR
+
+        if is_qr:
+            code_payload = f"ITEM:{config.public_item_id}" if config.public_item_id else (config.barcode or config.sku or "ITM-01")
+            raw_code = (config.public_item_id or config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+        else:
+            code_payload = (config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+            raw_code = code_payload
+
+        cp = config.custom_positions or {}
+        use_custom = bool(cp)
+        scale = getattr(config, 'code_scale', 1.0) or 1.0
+        try:
+            scale = max(0.3, min(2.5, float(scale)))
+        except (ValueError, TypeError):
+            scale = 1.0
+
+        for _ in range(config.quantity):
+            # --- FLAP 1 (Left Wing: 0mm to 32mm) ---
+            c.setLineWidth(0.2)
+            c.setStrokeColorRGB(0.85, 0.85, 0.85)
+            c.rect(0.5 * mm, 0.5 * mm, 31 * mm, 14 * mm)
+
+            if use_custom:
+                if config.show_store_name and "storeName" in cp:
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 6, True, display_store[:20], config.element_styles)
+                    c.setFont(fn, fs)
+                    sx = (cp["storeName"]["x"] / 100.0) * width
+                    sy = ((100.0 - cp["storeName"]["y"]) / 100.0) * height
+                    c.drawString(sx, sy - 1.2 * mm, txt)
+                elif config.show_store_name:
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 6, True, display_store[:20], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawString(2 * mm, 11 * mm, txt)
+
+                if "productName" in cp:
+                    fn, fs, txt = LabelService._resolve_font_and_text("productName", 6, False, config.item_name[:22], config.element_styles)
+                    c.setFont(fn, fs)
+                    px = (cp["productName"]["x"] / 100.0) * width
+                    py = ((100.0 - cp["productName"]["y"]) / 100.0) * height
+                    c.drawString(px, py - 1.2 * mm, txt)
+                else:
+                    fn, fs, txt = LabelService._resolve_font_and_text("productName", 6, False, config.item_name[:22], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawString(2 * mm, 7.5 * mm, txt)
+
+                if config.show_price and config.sale_price:
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 8, True, f"Rs. {config.sale_price:,.2f}", config.element_styles)
+                    c.setFont(fn, fs)
+                    if "price" in cp:
+                        prx = (cp["price"]["x"] / 100.0) * width
+                        pry = ((100.0 - cp["price"]["y"]) / 100.0) * height
+                        c.drawString(prx, pry - 1.2 * mm, txt)
+                    else:
+                        c.drawString(2 * mm, 2.5 * mm, txt)
+            else:
+                if config.show_store_name:
+                    c.setFont("Helvetica-Bold", 6)
+                    c.drawString(2 * mm, 11 * mm, display_store[:20])
+
+                c.setFont("Helvetica", 6)
+                c.drawString(2 * mm, 7.5 * mm, config.item_name[:22])
+
+                if config.show_price and config.sale_price:
+                    c.setFont("Helvetica-Bold", 8)
+                    c.drawString(2 * mm, 2.5 * mm, f"Rs. {config.sale_price:,.2f}")
+
+            # --- FOLD CREASE / SEAM (32mm) ---
+            c.setLineWidth(0.3)
+            c.setStrokeColorRGB(0.65, 0.65, 0.65)
+            c.setDash(1, 1)
+            c.line(32 * mm, 0.5 * mm, 32 * mm, 14.5 * mm)
+            c.setDash()
+
+            # --- FLAP 2 (Middle Wing: 32mm to 64mm) ---
+            c.setLineWidth(0.2)
+            c.setStrokeColorRGB(0.85, 0.85, 0.85)
+            c.rect(32.5 * mm, 0.5 * mm, 31 * mm, 14 * mm)
+
+            if use_custom:
+                if is_qr:
+                    qr_size = min(12 * mm, max(5 * mm, 10 * mm * scale))
+                    if "code" in cp:
+                        cx = (cp["code"]["x"] / 100.0) * width - (qr_size / 2)
+                        cy = ((100.0 - cp["code"]["y"]) / 100.0) * height - (qr_size / 2)
+                        LabelService._draw_qr(c, code_payload, cx, cy, qr_size)
+                    else:
+                        LabelService._draw_qr(c, code_payload, 34 * mm, 2.5 * mm, qr_size)
+
+                    if "barcodeText" in cp:
+                        bx = (cp["barcodeText"]["x"] / 100.0) * width
+                        by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.5, True, raw_code[:14], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(bx, by - 1.2 * mm, txt)
+                    else:
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.5, True, raw_code[:14], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(46 * mm, 9.5 * mm, txt)
+
+                    if config.show_sku and config.sku:
+                        fn, fs, txt = LabelService._resolve_font_and_text("sku", 5, False, f"SKU:{config.sku[:12]}", config.element_styles)
+                        c.setFont(fn, fs)
+                        if "sku" in cp:
+                            skx = (cp["sku"]["x"] / 100.0) * width
+                            sky = ((100.0 - cp["sku"]["y"]) / 100.0) * height
+                            c.drawString(skx, sky - 1.2 * mm, txt)
+                        else:
+                            c.drawString(46 * mm, 4.5 * mm, txt)
+                else:
+                    bc_h = min(10 * mm, max(4 * mm, 7 * mm * scale))
+                    bw = max(0.18, 0.26 * scale)
+                    if "code" in cp:
+                        cx = (cp["code"]["x"] / 100.0) * width - (14 * mm * scale)
+                        cy = ((100.0 - cp["code"]["y"]) / 100.0) * height - (bc_h / 2)
+                    else:
+                        cx, cy = 34 * mm, 5.5 * mm
+                    try:
+                        bc = code128.Code128(raw_code, barHeight=bc_h, barWidth=bw)
+                        bc.drawOn(c, cx, cy)
+                    except Exception:
+                        c.setFont("Helvetica", 5.5)
+                        c.drawString(cx, cy, raw_code)
+
+                    if "barcodeText" in cp:
+                        bx = (cp["barcodeText"]["x"] / 100.0) * width
+                        by = ((100.0 - cp["barcodeText"]["y"]) / 100.0) * height
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.2, False, raw_code[:16], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(bx, by - 1.2 * mm, txt)
+                    else:
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.2, False, raw_code[:16], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawString(34 * mm, 1.8 * mm, txt)
+            else:
+                if is_qr:
+                    qr_size = 10 * mm
+                    LabelService._draw_qr(c, code_payload, 34 * mm, 2.5 * mm, qr_size)
+                    c.setFont("Helvetica-Bold", 5.5)
+                    c.drawString(46 * mm, 9.5 * mm, raw_code[:14])
+                    if config.show_sku and config.sku:
+                        c.setFont("Helvetica", 5)
+                        c.drawString(46 * mm, 4.5 * mm, f"SKU:{config.sku[:12]}")
+                else:
+                    try:
+                        bc = code128.Code128(raw_code, barHeight=7 * mm, barWidth=0.26)
+                        bc.drawOn(c, 34 * mm, 5.5 * mm)
+                        c.setFont("Helvetica", 5.2)
+                        c.drawString(34 * mm, 1.8 * mm, raw_code[:16])
+                    except Exception:
+                        c.setFont("Helvetica", 5.5)
+                        c.drawString(34 * mm, 5.5 * mm, raw_code)
+
+            # --- TAIL STRAP (Right Wing: 64mm to 100mm) ---
+            tail_y = (15 * mm - 4 * mm) / 2
+            c.setLineWidth(0.3)
+            c.setStrokeColorRGB(0.7, 0.7, 0.7)
+            c.rect(64 * mm, tail_y, 35.5 * mm, 4 * mm)
+
+            c.showPage()
+
+        c.save()
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    @staticmethod
     def generate_jewelry_dumbbell_tag(
         config: LabelPrintConfig, store_name: str
     ) -> bytes:

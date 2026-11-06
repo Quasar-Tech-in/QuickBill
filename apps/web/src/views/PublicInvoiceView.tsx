@@ -598,19 +598,19 @@ export const PublicInvoiceView: React.FC = () => {
                           </div>
                         )}
                       </td>
-                      <td style={{ padding: '8px 4px', textAlign: 'center', color: '#334155' }}>
+                      <td style={{ padding: '8px 4px', textAlign: 'center', color: '#334155', whiteSpace: 'nowrap' }}>
                         {retQty > 0 ? `${formatQty(activeQty)}/${formatQty(qty)}` : formatQty(qty)}
                       </td>
-                      <td style={{ padding: '8px 4px', textAlign: 'right', color: '#334155' }}>
+                      <td style={{ padding: '8px 4px', textAlign: 'right', color: '#334155', whiteSpace: 'nowrap' }}>
                         {unitPrice.toFixed(2)}
                       </td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                      <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
                         {hasDisc && origTotal > lineTotal && Math.abs(origTotal - lineTotal) > 0.01 && (
-                          <div style={{ fontSize: '0.70rem', textDecoration: 'line-through', color: '#888888', fontWeight: 400 }}>
+                          <div style={{ fontSize: '0.70rem', textDecoration: 'line-through', color: '#888888', fontWeight: 400, whiteSpace: 'nowrap' }}>
                             {origTotal.toFixed(2)}
                           </div>
                         )}
-                        <div>{lineTotal.toFixed(2)}</div>
+                        <div style={{ whiteSpace: 'nowrap' }}>{lineTotal.toFixed(2)}</div>
                       </td>
                     </tr>
                   );
