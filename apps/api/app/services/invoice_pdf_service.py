@@ -14,15 +14,18 @@ hashlib.md5 = _safe_md5
 from reportlab.lib.pagesizes import A4, mm
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
+from app.core.pdf_fonts import register_pdf_unicode_fonts
 
 
 class InvoicePdfService:
     @staticmethod
-    def _prepare_metrics(sale: Dict[str, Any]) -> Dict[str, Any]:
+    def _prepare_metrics(sale: Dict[str, Any], currency_symbol: Optional[str] = None) -> Dict[str, Any]:
         """
         Extracts and normalizes invoice line items, discounts, returns,
         subtotals, taxes, and settlement amounts with full parity to the POS Billing Engine.
         """
+        if currency_symbol is None:
+            _, _, _, currency_symbol = register_pdf_unicode_fonts()
         raw_items = sale.get("items", []) or []
         items: List[Dict[str, Any]] = []
         total_qty = Decimal("0")
@@ -61,9 +64,9 @@ class InvoicePdfService:
             if is_100_free:
                 disc_label = "Disc: 100% OFF (FREE)"
             elif disc_type == "FLAT" or disc_pct == Decimal("0"):
-                disc_label = f"Disc: -Rs.{disc_amt:.2f}"
+                disc_label = f"Disc: -{currency_symbol}{disc_amt:.2f}"
             else:
-                disc_label = f"Disc: {disc_pct:g}% (-Rs.{disc_amt:.2f})"
+                disc_label = f"Disc: {disc_pct:g}% (-{currency_symbol}{disc_amt:.2f})"
 
             computed_line_discounts += disc_amt
             total_qty += qty
@@ -136,8 +139,9 @@ class InvoicePdfService:
         Generates a professional tax invoice PDF using ReportLab.
         Supports standard A4 and compact thermal roll format.
         """
+        reg_font, bold_font, italic_font, curr_sym = register_pdf_unicode_fonts()
         buf = io.BytesIO()
-        metrics = InvoicePdfService._prepare_metrics(sale_data)
+        metrics = InvoicePdfService._prepare_metrics(sale_data, currency_symbol=curr_sym)
 
         if format_type.upper() == "THERMAL":
             # 80mm thermal receipt height dynamically calculated
@@ -146,18 +150,27 @@ class InvoicePdfService:
             page_h = max(190, 110 + (items_count * 15) + 90) * mm
             page_w = 80 * mm
             c = canvas.Canvas(buf, pagesize=(page_w, page_h))
-            InvoicePdfService._render_thermal(c, sale_data, tenant_data, metrics, page_w, page_h)
+            InvoicePdfService._render_thermal(c, sale_data, tenant_data, metrics, page_w, page_h, reg_font, bold_font, italic_font, curr_sym)
         else:
             # Standard A4 Tax Invoice
             c = canvas.Canvas(buf, pagesize=A4)
-            InvoicePdfService._render_a4(c, sale_data, tenant_data, metrics)
+            InvoicePdfService._render_a4(c, sale_data, tenant_data, metrics, reg_font, bold_font, italic_font, curr_sym)
 
         c.save()
         buf.seek(0)
         return buf.getvalue()
 
     @staticmethod
-    def _render_a4(c: canvas.Canvas, sale: Dict[str, Any], tenant: Optional[Dict[str, Any]], m_data: Dict[str, Any]):
+    def _render_a4(
+        c: canvas.Canvas,
+        sale: Dict[str, Any],
+        tenant: Optional[Dict[str, Any]],
+        m_data: Dict[str, Any],
+        reg_font: str = "Helvetica",
+        bold_font: str = "Helvetica-Bold",
+        italic_font: str = "Helvetica-Oblique",
+        curr_sym: str = "₹",
+    ):
         w, h = A4
         m = 15 * mm  # Margin
 
@@ -175,14 +188,14 @@ class InvoicePdfService:
         c.rect(m, h - 38 * mm, w - 2 * m, 28 * mm, fill=1, stroke=0)
 
         c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 15)
+        c.setFont(bold_font, 15)
         c.drawString(m + 5 * mm, h - 18 * mm, store_name.upper())
 
-        c.setFont("Helvetica-Oblique", 8)
+        c.setFont(italic_font, 8)
         if store_tagline:
             c.drawString(m + 5 * mm, h - 23 * mm, store_tagline)
 
-        c.setFont("Helvetica", 8)
+        c.setFont(reg_font, 8)
         header_sub = []
         if branch_name:
             header_sub.append(branch_name)
@@ -198,9 +211,9 @@ class InvoicePdfService:
             c.drawString(m + 5 * mm, h - 33 * mm, " | ".join(header_sub[2:]))
 
         # Title on right
-        c.setFont("Helvetica-Bold", 14)
+        c.setFont(bold_font, 14)
         c.drawRightString(w - m - 5 * mm, h - 20 * mm, "TAX INVOICE")
-        c.setFont("Helvetica", 8.5)
+        c.setFont(reg_font, 8.5)
         c.drawRightString(w - m - 5 * mm, h - 26 * mm, "ORIGINAL FOR RECIPIENT")
 
         # Invoice Metadata Box
@@ -212,13 +225,13 @@ class InvoicePdfService:
 
         c.setFillColor(colors.HexColor("#0f172a"))
         # Left: Bill To
-        c.setFont("Helvetica-Bold", 9)
+        c.setFont(bold_font, 9)
         c.drawString(m + 4 * mm, box_top - 6 * mm, "BILLED TO (CUSTOMER):")
         
         cust_name = sale.get("consumerName") or sale.get("partyNameSnapshot") or "Walk-in Customer"
         cust_phone = sale.get("consumerPhone") or sale.get("partyPhoneSnapshot") or ""
         
-        c.setFont("Helvetica", 9)
+        c.setFont(reg_font, 9)
         c.drawString(m + 4 * mm, box_top - 12 * mm, f"Name: {cust_name}")
         if cust_phone:
             c.drawString(m + 4 * mm, box_top - 17 * mm, f"Mobile: {cust_phone}")
@@ -233,12 +246,12 @@ class InvoicePdfService:
                 inv_date = datetime.now()
         date_str = inv_date.strftime("%d-%b-%Y %I:%M %p") if isinstance(inv_date, datetime) else str(inv_date)
 
-        c.setFont("Helvetica-Bold", 9)
+        c.setFont(bold_font, 9)
         c.drawRightString(w - m - 60 * mm, box_top - 6 * mm, "Invoice No:")
         c.drawRightString(w - m - 60 * mm, box_top - 12 * mm, "Invoice Date:")
         c.drawRightString(w - m - 60 * mm, box_top - 17 * mm, "Payment Mode:")
 
-        c.setFont("Helvetica", 9)
+        c.setFont(reg_font, 9)
         c.drawString(w - m - 56 * mm, box_top - 6 * mm, inv_no)
         c.drawString(w - m - 56 * mm, box_top - 12 * mm, date_str)
         c.drawString(w - m - 56 * mm, box_top - 17 * mm, m_data["payment_mode"])
@@ -249,7 +262,7 @@ class InvoicePdfService:
         c.rect(m, table_top - 7 * mm, w - 2 * m, 7 * mm, fill=1, stroke=0)
 
         c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont(bold_font, 8)
         c.drawString(m + 3 * mm, table_top - 5 * mm, "S.N")
         c.drawString(m + 14 * mm, table_top - 5 * mm, "ITEM DESCRIPTION")
         c.drawRightString(m + 110 * mm, table_top - 5 * mm, "QTY")
@@ -274,7 +287,7 @@ class InvoicePdfService:
                 c.rect(m, y - 2 * mm, w - 2 * m, row_h, fill=1, stroke=0)
 
             c.setFillColor(colors.HexColor("#1e293b"))
-            c.setFont("Helvetica", 8)
+            c.setFont(reg_font, 8)
             c.drawString(m + 3 * mm, y, str(idx))
             
             name = it["name"]
@@ -285,18 +298,18 @@ class InvoicePdfService:
             # Sub-badges for discount and returns
             sub_y = y - 3.5 * mm
             if it["has_discount"]:
-                c.setFont("Helvetica-Bold", 6.8)
+                c.setFont(bold_font, 6.8)
                 c.setFillColor(colors.HexColor("#047857"))
                 c.drawString(m + 14 * mm, sub_y, it["discount_label"])
             if it["returned_quantity"] > 0:
-                c.setFont("Helvetica-Bold", 6.8)
+                c.setFont(bold_font, 6.8)
                 c.setFillColor(colors.HexColor("#b91c1c"))
                 reason_tag = "DEFECTIVE" if it.get("return_reason") == "DEFECTIVE_DAMAGED" else "RETURN"
                 ret_text = f"[RET: {it['returned_quantity']:g} {reason_tag}]"
                 c.drawString(m + 55 * mm, sub_y, ret_text)
 
             c.setFillColor(colors.HexColor("#1e293b"))
-            c.setFont("Helvetica", 8)
+            c.setFont(reg_font, 8)
 
             qty_str = f"{it['active_quantity']:g}/{it['quantity']:g}" if it["returned_quantity"] > 0 else f"{it['quantity']:g}"
             c.drawRightString(m + 110 * mm, y, qty_str)
@@ -311,12 +324,12 @@ class InvoicePdfService:
                 c.drawRightString(m + 158 * mm, y, "-")
 
             c.setFillColor(colors.HexColor("#0f172a"))
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont(bold_font, 8)
             c.drawRightString(w - m - 4 * mm, y, f"{it['line_total']:.2f}")
 
             # If discounted, show crossed out / original total above or next
             if it["has_discount"] and it["orig_total"] > it["line_total"]:
-                c.setFont("Helvetica", 6.5)
+                c.setFont(reg_font, 6.5)
                 c.setFillColor(colors.HexColor("#64748b"))
                 c.drawRightString(w - m - 4 * mm, sub_y, f"({it['orig_total']:.2f})")
 
@@ -332,7 +345,7 @@ class InvoicePdfService:
         sum_x = w - m - sum_w
         sum_y = max(y - 4 * mm, 62 * mm)
 
-        c.setFont("Helvetica", 8)
+        c.setFont(reg_font, 8)
         c.setFillColor(colors.HexColor("#334155"))
 
         # Total Qty
@@ -344,16 +357,16 @@ class InvoicePdfService:
         # Original Total
         if m_data["orig_grand_total"] > 0 and m_data["orig_grand_total"] != m_data["grand_total"]:
             c.drawString(sum_x, sum_y, "Original Total:")
-            c.drawRightString(w - m - 4 * mm, sum_y, f"Rs. {m_data['orig_grand_total']:.2f}")
+            c.drawRightString(w - m - 4 * mm, sum_y, f"{curr_sym}{m_data['orig_grand_total']:.2f}")
             sum_y -= 4.5 * mm
 
         # Less Returns
         if m_data["return_total"] > 0:
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont(bold_font, 8)
             c.setFillColor(colors.HexColor("#b91c1c"))
             c.drawString(sum_x, sum_y, "Less Returns:")
-            c.drawRightString(w - m - 4 * mm, sum_y, f"-Rs. {m_data['return_total']:.2f}")
-            c.setFont("Helvetica", 8)
+            c.drawRightString(w - m - 4 * mm, sum_y, f"-{curr_sym}{m_data['return_total']:.2f}")
+            c.setFont(reg_font, 8)
             c.setFillColor(colors.HexColor("#334155"))
             sum_y -= 4.5 * mm
 
@@ -361,35 +374,35 @@ class InvoicePdfService:
         if m_data["item_discounts_total"] > 0:
             c.setFillColor(colors.HexColor("#047857"))
             c.drawString(sum_x, sum_y, "Item Discounts:")
-            c.drawRightString(w - m - 4 * mm, sum_y, f"-Rs. {m_data['item_discounts_total']:.2f}")
+            c.drawRightString(w - m - 4 * mm, sum_y, f"-{curr_sym}{m_data['item_discounts_total']:.2f}")
             c.setFillColor(colors.HexColor("#334155"))
             sum_y -= 4.5 * mm
 
         # Order Discount
         if m_data["order_discount"] > 0:
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont(bold_font, 8)
             c.setFillColor(colors.HexColor("#047857"))
             c.drawString(sum_x, sum_y, "Order Discount:")
-            c.drawRightString(w - m - 4 * mm, sum_y, f"-Rs. {m_data['order_discount']:.2f}")
-            c.setFont("Helvetica", 8)
+            c.drawRightString(w - m - 4 * mm, sum_y, f"-{curr_sym}{m_data['order_discount']:.2f}")
+            c.setFont(reg_font, 8)
             c.setFillColor(colors.HexColor("#334155"))
             sum_y -= 4.5 * mm
 
         # Taxable Value
         c.drawString(sum_x, sum_y, "Taxable Value:")
-        c.drawRightString(w - m - 4 * mm, sum_y, f"Rs. {m_data['subtotal']:.2f}")
+        c.drawRightString(w - m - 4 * mm, sum_y, f"{curr_sym}{m_data['subtotal']:.2f}")
         sum_y -= 4.5 * mm
 
         # GST / Tax
         c.drawString(sum_x, sum_y, "GST / Tax:")
-        c.drawRightString(w - m - 4 * mm, sum_y, f"Rs. {m_data['tax_total']:.2f}")
+        c.drawRightString(w - m - 4 * mm, sum_y, f"{curr_sym}{m_data['tax_total']:.2f}")
         sum_y -= 4.5 * mm
 
         # Round Off
         if m_data["round_off"] != 0:
             c.drawString(sum_x, sum_y, "Round Off:")
             sign = "+" if m_data["round_off"] > 0 else "-"
-            c.drawRightString(w - m - 4 * mm, sum_y, f"{sign}Rs. {abs(m_data['round_off']):.2f}")
+            c.drawRightString(w - m - 4 * mm, sum_y, f"{sign}{curr_sym}{abs(m_data['round_off']):.2f}")
             sum_y -= 4.5 * mm
 
         # Grand Total Bar
@@ -397,33 +410,44 @@ class InvoicePdfService:
         c.setFillColor(colors.HexColor("#0f172a"))
         c.rect(sum_x - 2 * mm, sum_y - 2 * mm, sum_w + 2 * mm, 7 * mm, fill=1, stroke=0)
         c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 9.5)
+        c.setFont(bold_font, 9.5)
         c.drawString(sum_x + 2 * mm, sum_y + 0.5 * mm, "GRAND TOTAL:")
-        c.drawRightString(w - m - 4 * mm, sum_y + 0.5 * mm, f"Rs. {m_data['grand_total']:.2f}")
+        c.drawRightString(w - m - 4 * mm, sum_y + 0.5 * mm, f"{curr_sym}{m_data['grand_total']:.2f}")
 
         # Settlement Info
         sum_y -= 6 * mm
         c.setFillColor(colors.HexColor("#334155"))
-        c.setFont("Helvetica", 8)
+        c.setFont(reg_font, 8)
         c.drawString(sum_x, sum_y, "Paid Amount:")
-        c.drawRightString(w - m - 4 * mm, sum_y, f"Rs. {m_data['paid_amount']:.2f}")
+        c.drawRightString(w - m - 4 * mm, sum_y, f"{curr_sym}{m_data['paid_amount']:.2f}")
 
         if m_data["balance_due"] > 0:
             sum_y -= 4.5 * mm
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont(bold_font, 8)
             c.setFillColor(colors.HexColor("#dc2626"))
             c.drawString(sum_x, sum_y, "Balance Due:")
-            c.drawRightString(w - m - 4 * mm, sum_y, f"Rs. {m_data['balance_due']:.2f}")
+            c.drawRightString(w - m - 4 * mm, sum_y, f"{curr_sym}{m_data['balance_due']:.2f}")
 
         # Footer Notice
-        c.setFont("Helvetica", 8)
+        c.setFont(reg_font, 8)
         c.setFillColor(colors.HexColor("#64748b"))
         c.drawString(m, 18 * mm, receipt_footer)
         c.drawString(m, 14 * mm, "*** THANK YOU FOR SHOPPING WITH US! ***")
         c.drawRightString(w - m, 14 * mm, "Authorised Signatory")
 
     @staticmethod
-    def _render_thermal(c: canvas.Canvas, sale: Dict[str, Any], tenant: Optional[Dict[str, Any]], m_data: Dict[str, Any], w: float, h: float):
+    def _render_thermal(
+        c: canvas.Canvas,
+        sale: Dict[str, Any],
+        tenant: Optional[Dict[str, Any]],
+        m_data: Dict[str, Any],
+        w: float,
+        h: float,
+        reg_font: str = "Helvetica",
+        bold_font: str = "Helvetica-Bold",
+        italic_font: str = "Helvetica-Oblique",
+        curr_sym: str = "₹",
+    ):
         m = 3 * mm
         y = h - 7 * mm
 
@@ -436,32 +460,32 @@ class InvoicePdfService:
         receipt_footer = (tenant.get("receiptFooterNote") if tenant else None) or "Thank you for shopping with us please visit again."
 
         # Header
-        c.setFont("Helvetica-Bold", 11)
+        c.setFont(bold_font, 11)
         c.drawCentredString(w / 2, y, store_name.upper())
 
         if store_tagline:
             y -= 3.5 * mm
-            c.setFont("Helvetica-Oblique", 7)
+            c.setFont(italic_font, 7)
             c.drawCentredString(w / 2, y, store_tagline)
 
         if branch_name:
             y -= 3.5 * mm
-            c.setFont("Helvetica-Bold", 7.5)
+            c.setFont(bold_font, 7.5)
             c.drawCentredString(w / 2, y, branch_name)
 
         if store_address:
             y -= 3.5 * mm
-            c.setFont("Helvetica", 6.5)
+            c.setFont(reg_font, 6.5)
             c.drawCentredString(w / 2, y, store_address[:35])
 
         if store_phone:
             y -= 3.2 * mm
-            c.setFont("Helvetica", 6.5)
+            c.setFont(reg_font, 6.5)
             c.drawCentredString(w / 2, y, f"Tel: {store_phone}")
 
         if store_gstin:
             y -= 3.2 * mm
-            c.setFont("Helvetica-Bold", 6.5)
+            c.setFont(bold_font, 6.5)
             c.drawCentredString(w / 2, y, f"GSTIN: {store_gstin}")
 
         y -= 3.5 * mm
@@ -472,7 +496,7 @@ class InvoicePdfService:
 
         # Receipt Number & Date Strip
         y -= 3.5 * mm
-        c.setFont("Helvetica-Bold", 7)
+        c.setFont(bold_font, 7)
         c.drawString(m, y, f"Receipt: {sale.get('invoiceNumber', 'N/A')}")
         inv_date = sale.get("createdAt") or sale.get("date") or datetime.now()
         if isinstance(inv_date, str):
@@ -488,7 +512,7 @@ class InvoicePdfService:
         cust_phone = sale.get("consumerPhone") or sale.get("partyPhoneSnapshot")
         if cust_name or cust_phone:
             y -= 3.2 * mm
-            c.setFont("Helvetica", 6.5)
+            c.setFont(reg_font, 6.5)
             c.drawString(m, y, f"Cust: {cust_name or 'Walk-in'}")
             if cust_phone:
                 c.drawRightString(w - m, y, f"Ph: {cust_phone}")
@@ -500,14 +524,14 @@ class InvoicePdfService:
 
         # Items Header Table
         y -= 3.5 * mm
-        c.setFont("Helvetica-Bold", 7)
+        c.setFont(bold_font, 7)
         c.drawString(m, y, "ITEM")
         c.drawRightString(m + 32 * mm, y, "QTY")
         c.drawRightString(m + 48 * mm, y, "PRICE")
         c.drawRightString(w - m, y, "AMT")
 
         # Items Rows
-        c.setFont("Helvetica", 6.5)
+        c.setFont(reg_font, 6.5)
         for it in m_data["items"]:
             y -= 3.5 * mm
             name = it["name"]
@@ -528,7 +552,7 @@ class InvoicePdfService:
             # Discount / Return sub-line
             if it["has_discount"] or it["returned_quantity"] > 0:
                 y -= 2.8 * mm
-                c.setFont("Helvetica-Bold", 5.8)
+                c.setFont(bold_font, 5.8)
                 sub_tags = []
                 if it["has_discount"]:
                     sub_tags.append(it["discount_label"])
@@ -536,9 +560,9 @@ class InvoicePdfService:
                     sub_tags.append(f"[RET: {it['returned_quantity']:g}]")
                 c.drawString(m + 2 * mm, y, " ".join(sub_tags))
                 if it["has_discount"] and it["orig_total"] > it["line_total"]:
-                    c.setFont("Helvetica", 5.8)
+                    c.setFont(reg_font, 5.8)
                     c.drawRightString(w - m, y, f"({it['orig_total']:.2f})")
-                c.setFont("Helvetica", 6.5)
+                c.setFont(reg_font, 6.5)
 
         # Totals Breakdown
         y -= 3.5 * mm
@@ -546,7 +570,7 @@ class InvoicePdfService:
         c.line(m, y, w - m, y)
         c.setDash()
 
-        c.setFont("Helvetica", 6.5)
+        c.setFont(reg_font, 6.5)
         y -= 3.2 * mm
         tot_qty_label = f"{m_data['total_qty']:g}" + (f" (Ret: {m_data['ret_qty_sum']:g})" if m_data['ret_qty_sum'] > 0 else "")
         c.drawString(m, y, "Total Qty:")
@@ -555,59 +579,59 @@ class InvoicePdfService:
         if m_data["orig_grand_total"] > 0 and m_data["orig_grand_total"] != m_data["grand_total"]:
             y -= 3.2 * mm
             c.drawString(m, y, "Original Total:")
-            c.drawRightString(w - m, y, f"Rs. {m_data['orig_grand_total']:.2f}")
+            c.drawRightString(w - m, y, f"{curr_sym}{m_data['orig_grand_total']:.2f}")
 
         if m_data["return_total"] > 0:
             y -= 3.2 * mm
             c.drawString(m, y, "Less Returns:")
-            c.drawRightString(w - m, y, f"-Rs. {m_data['return_total']:.2f}")
+            c.drawRightString(w - m, y, f"-{curr_sym}{m_data['return_total']:.2f}")
 
         if m_data["item_discounts_total"] > 0:
             y -= 3.2 * mm
             c.drawString(m, y, "Item Discounts:")
-            c.drawRightString(w - m, y, f"-Rs. {m_data['item_discounts_total']:.2f}")
+            c.drawRightString(w - m, y, f"-{curr_sym}{m_data['item_discounts_total']:.2f}")
 
         if m_data["order_discount"] > 0:
             y -= 3.2 * mm
             c.drawString(m, y, "Order Discount:")
-            c.drawRightString(w - m, y, f"-Rs. {m_data['order_discount']:.2f}")
+            c.drawRightString(w - m, y, f"-{curr_sym}{m_data['order_discount']:.2f}")
 
         y -= 3.2 * mm
         c.drawString(m, y, "Taxable Value:")
-        c.drawRightString(w - m, y, f"Rs. {m_data['subtotal']:.2f}")
+        c.drawRightString(w - m, y, f"{curr_sym}{m_data['subtotal']:.2f}")
 
         y -= 3.2 * mm
         c.drawString(m, y, "GST:")
-        c.drawRightString(w - m, y, f"Rs. {m_data['tax_total']:.2f}")
+        c.drawRightString(w - m, y, f"{curr_sym}{m_data['tax_total']:.2f}")
 
         if m_data["round_off"] != 0:
             y -= 3.2 * mm
             sign = "+" if m_data["round_off"] > 0 else "-"
             c.drawString(m, y, "Round Off:")
-            c.drawRightString(w - m, y, f"{sign}Rs. {abs(m_data['round_off']):.2f}")
+            c.drawRightString(w - m, y, f"{sign}{curr_sym}{abs(m_data['round_off']):.2f}")
 
         # Grand Total Bar
         y -= 4 * mm
         c.setLineWidth(1)
         c.line(m, y, w - m, y)
         y -= 3.5 * mm
-        c.setFont("Helvetica-Bold", 8.5)
+        c.setFont(bold_font, 8.5)
         c.drawString(m, y, "GRAND TOTAL:")
-        c.drawRightString(w - m, y, f"Rs. {m_data['grand_total']:.2f}")
+        c.drawRightString(w - m, y, f"{curr_sym}{m_data['grand_total']:.2f}")
         y -= 1.5 * mm
         c.line(m, y, w - m, y)
 
         # Payment Mode & Settlement
         y -= 3.5 * mm
-        c.setFont("Helvetica", 6.5)
+        c.setFont(reg_font, 6.5)
         c.drawString(m, y, f"Payment Mode: {m_data['payment_mode']}")
-        c.drawRightString(w - m, y, f"Paid: Rs. {m_data['paid_amount']:.2f}")
+        c.drawRightString(w - m, y, f"Paid: {curr_sym}{m_data['paid_amount']:.2f}")
 
         if m_data["balance_due"] > 0:
             y -= 3.2 * mm
-            c.setFont("Helvetica-Bold", 6.5)
+            c.setFont(bold_font, 6.5)
             c.drawString(m, y, "Balance Due:")
-            c.drawRightString(w - m, y, f"Rs. {m_data['balance_due']:.2f}")
+            c.drawRightString(w - m, y, f"{curr_sym}{m_data['balance_due']:.2f}")
 
         # Footer
         y -= 5 * mm
@@ -616,9 +640,9 @@ class InvoicePdfService:
         c.setDash()
 
         y -= 3.5 * mm
-        c.setFont("Helvetica-Bold", 6.5)
+        c.setFont(bold_font, 6.5)
         c.drawCentredString(w / 2, y, "*** THANK YOU FOR SHOPPING WITH US! ***")
 
         y -= 3.2 * mm
-        c.setFont("Helvetica", 6)
+        c.setFont(reg_font, 6)
         c.drawCentredString(w / 2, y, receipt_footer[:40])

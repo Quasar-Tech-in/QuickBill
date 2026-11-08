@@ -1057,7 +1057,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <!-- Custom Elements -->
               ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
               ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 7, true)}line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 7, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
 
               ${codeDataUrl ? `
                 <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
@@ -1081,7 +1081,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <!-- Draggable / Custom Positioned Elements -->
               ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
               ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 6.5, true)}line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 6.5, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
               
               ${codeDataUrl ? `
                 <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
@@ -1105,7 +1105,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <!-- Custom Elements -->
               ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
               ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 6.5, true)}line-height:1;">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 6.5, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
 
               ${codeDataUrl ? `
                 <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
@@ -1129,7 +1129,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 6, true)}">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
               ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 6, true)}">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
               ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 5, false)}color:#444;">SKU: ${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 7.5, true)}">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 7.5, true)}">₹${Number(price || 0).toFixed(2)}</div>` : ''}
             </div>
           `;
         } else {
@@ -1145,7 +1145,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               ` : ''}
               <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
               ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 5.5, false)}">SKU:${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-100%,-50%);${getPrintInlineCss('price', 7, true)}">Rs. ${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-100%,-50%);${getPrintInlineCss('price', 7, true)}">₹${Number(price || 0).toFixed(2)}</div>` : ''}
             </div>
           `;
         }

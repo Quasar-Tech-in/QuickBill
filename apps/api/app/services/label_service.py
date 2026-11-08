@@ -15,6 +15,7 @@ from reportlab.graphics.shapes import Drawing
 from reportlab.lib.pagesizes import A4, mm
 from reportlab.pdfgen import canvas
 from app.schemas.label import LabelPrintConfig, LabelStyle, PaperSize, CodeType
+from app.core.pdf_fonts import register_pdf_unicode_fonts
 
 class LabelService:
 
@@ -55,15 +56,24 @@ class LabelService:
 
         font_size = max(2.5, min(24.0, base_size * size_multiplier))
 
-        family = "Courier" if is_monospace else "Helvetica"
-        if bold and italic:
-            font_name = f"{family}-BoldOblique"
-        elif bold:
-            font_name = f"{family}-Bold"
-        elif italic:
-            font_name = f"{family}-Oblique"
+        reg_font, bold_font, italic_font, _ = register_pdf_unicode_fonts()
+        if is_monospace:
+            family = "Courier"
+            if bold and italic:
+                font_name = f"{family}-BoldOblique"
+            elif bold:
+                font_name = f"{family}-Bold"
+            elif italic:
+                font_name = f"{family}-Oblique"
+            else:
+                font_name = family
         else:
-            font_name = family
+            if bold:
+                font_name = bold_font
+            elif italic:
+                font_name = italic_font
+            else:
+                font_name = reg_font
 
         final_text = text.upper() if uppercase else text
         return font_name, font_size, final_text
@@ -186,15 +196,17 @@ class LabelService:
                         c.drawString(2.5 * mm, 2.5 * mm, f"SKU: {config.sku[:12]}")
 
                 if config.show_price and config.sale_price:
-                    c.setFont("Helvetica-Bold", 8)
+                    reg_font, bold_font, _, curr_sym = register_pdf_unicode_fonts()
+                    c.setFont(bold_font, 8)
                     if "price" in cp:
                         prx = (cp["price"]["x"] / 100.0) * width
                         pry = ((100.0 - cp["price"]["y"]) / 100.0) * height
-                        c.drawString(prx, pry - 1.5 * mm, f"Rs. {config.sale_price:,.2f}")
+                        c.drawString(prx, pry - 1.5 * mm, f"{curr_sym}{config.sale_price:,.2f}")
                     else:
-                        c.drawRightString(width - (2.5 * mm), 2.5 * mm, f"Rs. {config.sale_price:,.2f}")
+                        c.drawRightString(width - (2.5 * mm), 2.5 * mm, f"{curr_sym}{config.sale_price:,.2f}")
             else:
                 # Standard Default Layout (with full typography style support)
+                reg_font, bold_font, _, curr_sym = register_pdf_unicode_fonts()
                 if config.show_store_name:
                     fn, fs, txt = LabelService._resolve_font_and_text("storeName", 7 if height >= 30 * mm else 6, True, display_store[:28], config.element_styles)
                     c.setFont(fn, fs)
@@ -229,7 +241,7 @@ class LabelService:
                     c.drawString(2.5 * mm, 2.5 * mm, txt)
 
                 if config.show_price and config.sale_price:
-                    fn, fs, txt = LabelService._resolve_font_and_text("price", 8, True, f"Rs. {config.sale_price:,.2f}", config.element_styles)
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 8, True, f"{curr_sym}{config.sale_price:,.2f}", config.element_styles)
                     c.setFont(fn, fs)
                     c.drawRightString(width - (2.5 * mm), 2.5 * mm, txt)
 
@@ -303,7 +315,8 @@ class LabelService:
                     c.drawString(1.5 * mm, 5.8 * mm, txt)
 
                 if config.show_price and config.sale_price:
-                    fn, fs, txt = LabelService._resolve_font_and_text("price", 7, True, f"Rs. {config.sale_price:,.2f}", config.element_styles)
+                    reg_font, bold_font, _, curr_sym = register_pdf_unicode_fonts()
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 7, True, f"{curr_sym}{config.sale_price:,.2f}", config.element_styles)
                     c.setFont(fn, fs)
                     if "price" in cp:
                         prx = (cp["price"]["x"] / 100.0) * width
@@ -312,16 +325,17 @@ class LabelService:
                     else:
                         c.drawString(1.5 * mm, 2 * mm, txt)
             else:
+                reg_font, bold_font, _, curr_sym = register_pdf_unicode_fonts()
                 if config.show_store_name:
-                    c.setFont("Helvetica-Bold", 5)
+                    c.setFont(bold_font, 5)
                     c.drawString(1.5 * mm, 8.8 * mm, display_store[:16])
 
-                c.setFont("Helvetica", 5)
+                c.setFont(reg_font, 5)
                 c.drawString(1.5 * mm, 5.8 * mm, config.item_name[:18])
 
                 if config.show_price and config.sale_price:
-                    c.setFont("Helvetica-Bold", 7)
-                    c.drawString(1.5 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
+                    c.setFont(bold_font, 7)
+                    c.drawString(1.5 * mm, 2 * mm, f"{curr_sym}{config.sale_price:,.2f}")
 
             # --- FOLD CREASE / SEAM (26mm) ---
             c.setLineWidth(0.3)
@@ -485,7 +499,8 @@ class LabelService:
                     c.drawString(2 * mm, 7.5 * mm, txt)
 
                 if config.show_price and config.sale_price:
-                    fn, fs, txt = LabelService._resolve_font_and_text("price", 8, True, f"Rs. {config.sale_price:,.2f}", config.element_styles)
+                    reg_font, bold_font, _, curr_sym = register_pdf_unicode_fonts()
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 8, True, f"{curr_sym}{config.sale_price:,.2f}", config.element_styles)
                     c.setFont(fn, fs)
                     if "price" in cp:
                         prx = (cp["price"]["x"] / 100.0) * width
@@ -494,16 +509,17 @@ class LabelService:
                     else:
                         c.drawString(2 * mm, 2.5 * mm, txt)
             else:
+                reg_font, bold_font, _, curr_sym = register_pdf_unicode_fonts()
                 if config.show_store_name:
-                    c.setFont("Helvetica-Bold", 6)
+                    c.setFont(bold_font, 6)
                     c.drawString(2 * mm, 11 * mm, display_store[:20])
 
-                c.setFont("Helvetica", 6)
+                c.setFont(reg_font, 6)
                 c.drawString(2 * mm, 7.5 * mm, config.item_name[:22])
 
                 if config.show_price and config.sale_price:
-                    c.setFont("Helvetica-Bold", 8)
-                    c.drawString(2 * mm, 2.5 * mm, f"Rs. {config.sale_price:,.2f}")
+                    c.setFont(bold_font, 8)
+                    c.drawString(2 * mm, 2.5 * mm, f"{curr_sym}{config.sale_price:,.2f}")
 
             # --- FOLD CREASE / SEAM (32mm) ---
             c.setLineWidth(0.3)
@@ -659,7 +675,8 @@ class LabelService:
                     c.drawString(2 * mm, 5.5 * mm, txt)
 
                 if config.show_price and config.sale_price:
-                    fn, fs, txt = LabelService._resolve_font_and_text("price", 7, True, f"Rs. {config.sale_price:,.2f}", config.element_styles)
+                    reg_font, bold_font, _, curr_sym = register_pdf_unicode_fonts()
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 7, True, f"{curr_sym}{config.sale_price:,.2f}", config.element_styles)
                     c.setFont(fn, fs)
                     if "price" in cp:
                         prx = (cp["price"]["x"] / 100.0) * width
@@ -668,16 +685,17 @@ class LabelService:
                     else:
                         c.drawString(2 * mm, 2 * mm, txt)
             else:
+                reg_font, bold_font, _, curr_sym = register_pdf_unicode_fonts()
                 if config.show_store_name:
-                    c.setFont("Helvetica-Bold", 5.5)
+                    c.setFont(bold_font, 5.5)
                     c.drawString(2 * mm, 8.5 * mm, display_store[:18])
 
-                c.setFont("Helvetica", 5.5)
+                c.setFont(reg_font, 5.5)
                 c.drawString(2 * mm, 5.5 * mm, config.item_name[:20])
 
                 if config.show_price and config.sale_price:
-                    c.setFont("Helvetica-Bold", 7)
-                    c.drawString(2 * mm, 2 * mm, f"Rs. {config.sale_price:,.2f}")
+                    c.setFont(bold_font, 7)
+                    c.drawString(2 * mm, 2 * mm, f"{curr_sym}{config.sale_price:,.2f}")
 
             # --- MIDDLE BRIDGE MARKER (28mm to 42mm) ---
             c.setLineWidth(0.3)
@@ -847,8 +865,9 @@ class LabelService:
                     c.drawCentredString(cx, cell_y + (8 * mm), raw_code)
 
             if cfg.show_price and cfg.sale_price:
-                c.setFont("Helvetica-Bold", 8)
-                c.drawCentredString(cx, cell_y + (2 * mm), f"Rs. {cfg.sale_price:,.2f}")
+                _, bold_font, _, curr_sym = register_pdf_unicode_fonts()
+                c.setFont(bold_font, 8)
+                c.drawCentredString(cx, cell_y + (2 * mm), f"{curr_sym}{cfg.sale_price:,.2f}")
 
             index += 1
 
