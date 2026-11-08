@@ -137,6 +137,10 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
   const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({});
   // Item-level discount editor state
   const [editingDiscountItemId, setEditingDiscountItemId] = useState<string | null>(null);
+  // Recently added / updated item ID for instant confirmation highlight
+  const [recentlyAddedItemId, setRecentlyAddedItemId] = useState<string | null>(null);
+  const recentlyAddedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cartItemsContainerRef = useRef<HTMLDivElement>(null);
 
   // Mobile POS Tab State ('CATALOG' vs 'CART')
   const [mobilePosTab, setMobilePosTab] = useState<'CATALOG' | 'CART'>('CATALOG');
@@ -590,6 +594,22 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
       return next;
     });
 
+    // Trigger visual confirmation highlight for the added/updated product
+    if (recentlyAddedTimeoutRef.current) {
+      clearTimeout(recentlyAddedTimeoutRef.current);
+    }
+    setRecentlyAddedItemId(item.id);
+    recentlyAddedTimeoutRef.current = setTimeout(() => {
+      setRecentlyAddedItemId(null);
+    }, 2000);
+
+    // Auto-scroll cart container to the top so biller immediately sees the newly added product
+    setTimeout(() => {
+      if (cartItemsContainerRef.current) {
+        cartItemsContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }, 40);
+
     updateCart((prevCart) => {
       const existingIdx = prevCart.findIndex(c => isSameItem(c.item, item));
       if (existingIdx >= 0) {
@@ -600,8 +620,10 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           ? Number((currentQty + 1).toFixed(3))
           : currentQty + 1;
         const lineUnitPrice = Number(existingLine.unitPrice || price);
-        nextCart[existingIdx] = calculateCartLine(existingLine, newQty, lineUnitPrice);
-        return nextCart;
+        const updatedLine = calculateCartLine(existingLine, newQty, lineUnitPrice);
+        // Move updated line to the top of the cart so biller instantly confirms it
+        const remainingCart = nextCart.filter((_, idx) => idx !== existingIdx);
+        return [updatedLine, ...remainingCart];
       } else {
         const initialLine: CartItem = {
           item,
@@ -617,8 +639,8 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           allowParts: !!item.allowParts,
         };
         return [
-          ...prevCart,
           calculateCartLine(initialLine, 1, price, itemDiscountType, itemDiscountVal),
+          ...prevCart,
         ];
       }
     });
@@ -2104,7 +2126,11 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
           </div>
 
           {/* Cart Items List with Independent Scroll */}
-          <div className="pos-cart-items" style={{ padding: '10px 12px', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div 
+            ref={cartItemsContainerRef}
+            className="pos-cart-items" 
+            style={{ padding: '10px 12px', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 8 }}
+          >
             
             {/* Active Draft Banner */}
             {activeStagedOrderId && (() => {
@@ -2142,20 +2168,21 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
               </div>
             ) : (
               cart.map((line) => {
+                const isRecentlyAdded = recentlyAddedItemId === line.item.id;
                 return (
                   <div 
                     key={line.item.id} 
                     className="pos-cart-card"
                     style={{
-                      backgroundColor: '#ffffff',
+                      backgroundColor: isRecentlyAdded ? '#f0fdf4' : '#ffffff',
                       borderRadius: 10,
-                      border: '1px solid #e2e8f0',
-                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                      border: isRecentlyAdded ? '1.5px solid #10b981' : '1px solid #e2e8f0',
+                      boxShadow: isRecentlyAdded ? '0 0 0 2px rgba(16, 185, 129, 0.25), 0 2px 6px rgba(0, 0, 0, 0.06)' : '0 1px 3px rgba(0, 0, 0, 0.04)',
                       padding: '10px 12px',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 8,
-                      transition: 'all 0.15s ease',
+                      transition: 'all 0.25s ease',
                     }}
                   >
                     {/* Top Row: Product Name on Left & Quantity Stepper on Top-Right */}
@@ -2165,6 +2192,23 @@ export const PosBillingView: React.FC<PosBillingViewProps> = ({ onInvoiceCreated
                         <h5 style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0f172a', margin: 0, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35 }}>
                           {line.item.name}
                         </h5>
+                        {isRecentlyAdded && (
+                          <span style={{
+                            fontSize: '0.62rem',
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                            backgroundColor: '#dcfce7',
+                            color: '#15803d',
+                            fontWeight: 700,
+                            border: '1px solid #86efac',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            whiteSpace: 'nowrap'
+                          }}>
+                            <Check size={10} strokeWidth={3} /> Added to Cart
+                          </span>
+                        )}
                         {line.item.allowParts && (
                           <span style={{
                             fontSize: '0.62rem',
