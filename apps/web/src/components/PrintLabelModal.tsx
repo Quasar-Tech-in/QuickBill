@@ -24,6 +24,7 @@ import {
   AlignCenter,
   Move,
   RotateCcw,
+  RotateCw,
   Grid,
   LayoutGrid
 } from 'lucide-react';
@@ -56,16 +57,18 @@ export interface ElementStyleConfig {
   bold: boolean;      // true / false
   italic: boolean;    // true / false
   uppercase: boolean; // true / false
+  rotation?: number;  // 0, 90, 180, 270 (degrees)
 }
 
 export type LayoutStyles = Record<string, ElementStyleConfig>;
 
 export const DEFAULT_ELEMENT_STYLES: LayoutStyles = {
-  storeName: { size: 1.0, bold: true, italic: false, uppercase: false },
-  productName: { size: 1.0, bold: true, italic: false, uppercase: false },
-  price: { size: 1.0, bold: true, italic: false, uppercase: false },
-  barcodeText: { size: 1.0, bold: true, italic: false, uppercase: false },
-  sku: { size: 1.0, bold: false, italic: false, uppercase: false },
+  storeName: { size: 1.0, bold: true, italic: false, uppercase: false, rotation: 0 },
+  productName: { size: 1.0, bold: true, italic: false, uppercase: false, rotation: 0 },
+  price: { size: 1.0, bold: true, italic: false, uppercase: false, rotation: 0 },
+  barcodeText: { size: 1.0, bold: true, italic: false, uppercase: false, rotation: 0 },
+  sku: { size: 1.0, bold: false, italic: false, uppercase: false, rotation: 0 },
+  code: { size: 1.0, bold: false, italic: false, uppercase: false, rotation: 0 },
 };
 
 
@@ -164,8 +167,8 @@ const DEFAULT_SEZNIK_PORTRAIT_POSITIONS: LayoutPositions = {
   productName: { x: 50, y: 16 },
   price: { x: 50, y: 26 },
   code: { x: 50, y: 44 },
-  barcodeText: { x: 50, y: 55 },
-  sku: { x: 50, y: 61 },
+  barcodeText: { x: 50, y: 53 },
+  sku: { x: 50, y: 58 },
 };
 
 const DEFAULT_A4_POSITIONS: LayoutPositions = {
@@ -234,10 +237,30 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   // Cached positions dictionary for every template
   const [positionsByTemplate, setPositionsByTemplate] = useState<Record<string, LayoutPositions>>({});
-  // Selected Element for Typography & Style Inspector
-  const [selectedElementId, setSelectedElementId] = useState<'productName' | 'price' | 'storeName' | 'barcodeText' | 'sku'>('productName');
+  // Selected Element for Typography & Style Inspector (includes code for scaling & rotation)
+  const [selectedElementId, setSelectedElementId] = useState<'productName' | 'price' | 'storeName' | 'barcodeText' | 'sku' | 'code'>('productName');
   const [elementStyles, setElementStyles] = useState<LayoutStyles>(DEFAULT_ELEMENT_STYLES);
   const [stylesByTemplate, setStylesByTemplate] = useState<Record<string, LayoutStyles>>({});
+
+  // Hardware Printer Feed Offsets (in mm) for margin calibration
+  const [printOffsetX_mm, setPrintOffsetX_mm] = useState<number>(() => {
+    try { return parseFloat(localStorage.getItem('qb_label_hardware_offset_x') || '0') || 0; } catch { return 0; }
+  });
+  const [printOffsetY_mm, setPrintOffsetY_mm] = useState<number>(() => {
+    try { return parseFloat(localStorage.getItem('qb_label_hardware_offset_y') || '0') || 0; } catch { return 0; }
+  });
+
+  const handleOffsetXChange = (val: number) => {
+    const clamped = Math.round(Math.max(-10, Math.min(10, val)) * 10) / 10;
+    setPrintOffsetX_mm(clamped);
+    try { localStorage.setItem('qb_label_hardware_offset_x', String(clamped)); } catch {}
+  };
+
+  const handleOffsetYChange = (val: number) => {
+    const clamped = Math.round(Math.max(-10, Math.min(10, val)) * 10) / 10;
+    setPrintOffsetY_mm(clamped);
+    try { localStorage.setItem('qb_label_hardware_offset_y', String(clamped)); } catch {}
+  };
 
   // Active element positions
   const [elementPositions, setElementPositions] = useState<LayoutPositions>(DEFAULT_RATTAIL_POSITIONS);
@@ -350,7 +373,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     elemId: string,
     partial: Partial<ElementStyleConfig>
   ) => {
-    const current = elementStyles[elemId] || DEFAULT_ELEMENT_STYLES[elemId] || { size: 1.0, bold: true, italic: false, uppercase: false };
+    const current = elementStyles[elemId] || DEFAULT_ELEMENT_STYLES[elemId] || { size: 1.0, bold: true, italic: false, uppercase: false, rotation: 0 };
     const updated: ElementStyleConfig = {
       ...current,
       ...partial,
@@ -365,14 +388,33 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   // Reset typography style for a specific label element
   const handleResetElementStyle = (elemId: string) => {
-    const defaultVal = DEFAULT_ELEMENT_STYLES[elemId] || { size: 1.0, bold: true, italic: false, uppercase: false };
+    const defaultVal = DEFAULT_ELEMENT_STYLES[elemId] || { size: 1.0, bold: true, italic: false, uppercase: false, rotation: 0 };
     const nextStyles: LayoutStyles = {
       ...elementStyles,
       [elemId]: defaultVal,
     };
     setElementStyles(nextStyles);
     saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, nextStyles, orientation);
-    setCacheNotification(`Reset typography for ${elemId}`);
+    setCacheNotification(`Reset style for ${elemId}`);
+    setTimeout(() => setCacheNotification(null), 1500);
+  };
+
+  // Rotate all elements by 90 degrees clockwise (0° -> 90° -> 180° -> 270° -> 0°)
+  const handleRotateAll = () => {
+    const curRot = elementStyles['productName']?.rotation || 0;
+    const nextRot = (curRot + 90) % 360;
+    const nextStyles: LayoutStyles = { ...elementStyles };
+    const elementKeys = ['storeName', 'productName', 'price', 'barcodeText', 'sku', 'code'];
+    elementKeys.forEach((key) => {
+      const cur = nextStyles[key] || DEFAULT_ELEMENT_STYLES[key] || { size: 1.0, bold: true, italic: false, uppercase: false, rotation: 0 };
+      nextStyles[key] = {
+        ...cur,
+        rotation: nextRot,
+      };
+    });
+    setElementStyles(nextStyles);
+    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, nextStyles, orientation);
+    setCacheNotification(`Rotated all elements to ${nextRot}°`);
     setTimeout(() => setCacheNotification(null), 1500);
   };
 
@@ -581,7 +623,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     e.preventDefault();
     e.stopPropagation();
     setActiveDragId(id);
-    if (id !== 'code' && (id === 'productName' || id === 'price' || id === 'storeName' || id === 'barcodeText' || id === 'sku')) {
+    if (id === 'productName' || id === 'price' || id === 'storeName' || id === 'barcodeText' || id === 'sku' || id === 'code') {
       setSelectedElementId(id);
     }
 
@@ -644,7 +686,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   // Helper for computing live canvas style properties
   const getElementStyleProps = (id: string, baseRem: number, defaultBold: boolean, isMonospace = false) => {
-    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false };
+    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false, rotation: 0 };
     return {
       fontSize: `${(baseRem * (cfg.size || 1.0)).toFixed(3)}rem`,
       fontWeight: cfg.bold ? 800 : 400,
@@ -658,7 +700,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   // Helper for computing 2D canvas font string in 300 DPI image generation
   const getCanvasFont = (id: string, basePx: number, defaultBold: boolean, isMonospace = false) => {
-    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false };
+    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false, rotation: 0 };
     const fontPx = Math.max(8, Math.round(basePx * (cfg.size || 1.0)));
     const fontStyle = cfg.italic ? 'italic ' : '';
     const fontWeight = cfg.bold ? 'bold ' : 'normal ';
@@ -668,7 +710,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   // Helper for inline CSS string in isolated print HTML
   const getPrintInlineCss = (id: string, basePt: number, defaultBold: boolean, isMonospace = false) => {
-    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false };
+    const cfg = elementStyles[id] || DEFAULT_ELEMENT_STYLES[id] || { size: 1.0, bold: defaultBold, italic: false, uppercase: false, rotation: 0 };
     const pt = Math.max(3, Number((basePt * (cfg.size || 1.0)).toFixed(2)));
     const weight = cfg.bold ? 'bold' : 'normal';
     const style = cfg.italic ? 'italic' : 'normal';
@@ -1252,41 +1294,41 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           const barH = paperSize === 'A4_GRID_65' ? 6.0 : paperSize === 'A4_GRID_40' ? 7.5 : 9.5;
           return `
             <div class="label-unit-a4" style="width:${grid.labelW_mm}mm;height:${grid.labelH_mm}mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;border:0.15mm dashed #cbd5e1;padding:1mm;font-family:Arial,Helvetica,sans-serif;color:#000000;">
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('storeName', paperSize === 'A4_GRID_65' ? 5.2 : 6, true)}white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('productName', paperSize === 'A4_GRID_65' ? 5.5 : 6.5, true)}white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.storeName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('storeName', paperSize === 'A4_GRID_65' ? 5.2 : 6, true)}white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.productName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('productName', paperSize === 'A4_GRID_65' ? 5.5 : 6.5, true)}white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
               ${codeDataUrl ? `
-                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.code?.rotation || 0}deg);transform-origin:center center;display:flex;align-items:center;justify-content:center;">
                   <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${barH * codeScale}mm` : `${qrH * codeScale}mm`};max-width:${grid.labelW_mm - 6}mm;object-fit:contain;" />
                 </div>
               ` : ''}
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('barcodeText', paperSize === 'A4_GRID_65' ? 4.5 : 5, true, true)}white-space:nowrap;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('price', paperSize === 'A4_GRID_65' ? 5.8 : 7, true)}">₹${Number(price || 0).toFixed(2)}</div>` : ''}
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('sku', paperSize === 'A4_GRID_65' ? 4.2 : 5, false)}color:#333;">SKU:${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('barcodeText', paperSize === 'A4_GRID_65' ? 4.5 : 5, true, true)}white-space:nowrap;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.price?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('price', paperSize === 'A4_GRID_65' ? 5.8 : 7, true)}">₹${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.sku?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('sku', paperSize === 'A4_GRID_65' ? 4.2 : 5, false)}color:#333;">SKU:${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
             </div>
           `;
         } else if (isSeznik) {
           if (orientation === 'PORTRAIT') {
             // Authentic Seznik Portrait Tag 14.3mm x 100mm (32mm Top Flap, 32mm Middle Flap, 36mm Tail)
             return `
-              <div class="label-unit-seznik-portrait" style="width:14.3mm;height:100mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
+              <div class="label-unit-seznik-portrait" style="width:${isSeznik3Up ? '14mm' : '14.3mm'};height:100mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
                 <!-- Background Guides -->
-                <div style="position:absolute;left:0;top:0;width:14.3mm;height:32mm;border:0.2mm solid #cbd5e1;border-bottom:0.3mm dashed #64748b;box-sizing:border-box;"></div>
-                <div style="position:absolute;left:0;top:32mm;width:14.3mm;height:32mm;border:0.2mm solid #cbd5e1;box-sizing:border-box;"></div>
+                <div style="position:absolute;left:0;top:0;width:100%;height:32mm;border:0.2mm solid #cbd5e1;border-bottom:0.3mm dashed #64748b;box-sizing:border-box;"></div>
+                <div style="position:absolute;left:0;top:32mm;width:100%;height:32mm;border:0.2mm solid #cbd5e1;box-sizing:border-box;"></div>
                 <div style="position:absolute;left:5.15mm;top:64mm;width:4mm;height:36mm;border:0.2mm solid #cbd5e1;background:#f8fafc;box-sizing:border-box;"></div>
 
-                <!-- Custom Elements in Portrait -->
-                ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('storeName', 5.2, true)}line-height:1;white-space:nowrap;text-align:center;width:100%;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
-                ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('productName', 5.5, true)}line-height:1;white-space:nowrap;text-align:center;width:100%;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
-                ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('price', 6.8, true)}line-height:1;text-align:center;width:100%;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
+                <!-- Custom Elements in Portrait with rotation support -->
+                ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.storeName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('storeName', 5.2, true)}line-height:1;white-space:nowrap;text-align:center;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+                ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.productName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('productName', 5.5, true)}line-height:1;white-space:nowrap;text-align:center;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+                ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.price?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('price', 6.8, true)}line-height:1;text-align:center;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
 
                 ${codeDataUrl ? `
-                  <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;width:100%;">
+                  <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.code?.rotation || 0}deg);transform-origin:center center;display:flex;align-items:center;justify-content:center;">
                     <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${6.5 * codeScale}mm` : `${10.0 * codeScale}mm`};max-width:13.5mm;object-fit:contain;" />
                   </div>
                 ` : ''}
 
-                <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('barcodeText', 4.8, true, true)}line-height:1;text-align:center;width:100%;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14)))}</div>
-                ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('sku', 4.4, false)}color:#333;line-height:1;text-align:center;width:100%;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 12)))}</div>` : ''}
+                <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('barcodeText', 4.8, true, true)}line-height:1;text-align:center;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14)))}</div>
+                ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.sku?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('sku', 4.4, false)}color:#333;line-height:1;text-align:center;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 12)))}</div>` : ''}
               </div>
             `;
           }
@@ -1300,18 +1342,18 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style="position:absolute;left:64mm;top:5.5mm;width:36mm;height:4mm;border:0.2mm solid #cbd5e1;background:#f8fafc;box-sizing:border-box;"></div>
 
               <!-- Custom Elements in Landscape -->
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 7, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%) rotate(${elementStyles.storeName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('storeName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%) rotate(${elementStyles.productName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('productName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%) rotate(${elementStyles.price?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('price', 7, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
 
               ${codeDataUrl ? `
-                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.code?.rotation || 0}deg);transform-origin:center center;display:flex;align-items:center;justify-content:center;">
                   <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${7.5 * codeScale}mm` : `${10.5 * codeScale}mm`};max-width:30mm;object-fit:contain;" />
                 </div>
               ` : ''}
 
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5.2, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14)))}</div>
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 4.5, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 12)))}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('barcodeText', 5.2, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14)))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%) rotate(${elementStyles.sku?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('sku', 4.5, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 12)))}</div>` : ''}
             </div>
           `;
         } else if (isDumbbell) {
@@ -1324,18 +1366,18 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style="position:absolute;left:42mm;top:0;width:28mm;height:12mm;border:0.2mm solid #cbd5e1;border-left:0.3mm dashed #64748b;box-sizing:border-box;"></div>
 
               <!-- Draggable / Custom Positioned Elements -->
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 6.5, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%) rotate(${elementStyles.storeName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('storeName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%) rotate(${elementStyles.productName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('productName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%) rotate(${elementStyles.price?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('price', 6.5, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
               
               ${codeDataUrl ? `
-                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.code?.rotation || 0}deg);transform-origin:center center;display:flex;align-items:center;justify-content:center;">
                   <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${5.5 * codeScale}mm` : `${8.5 * codeScale}mm`};max-width:25mm;object-fit:contain;" />
                 </div>
               ` : ''}
               
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 12)))}</div>
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 4, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 10)))}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 12)))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%) rotate(${elementStyles.sku?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('sku', 4, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 10)))}</div>` : ''}
             </div>
           `;
         } else if (isRatTail || arrangement === 'DUAL_FLAP') {
@@ -1348,49 +1390,49 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style="position:absolute;left:52mm;top:4.5mm;width:24mm;height:3mm;border:0.2mm solid #cbd5e1;background:#f8fafc;box-sizing:border-box;"></div>
 
               <!-- Custom Elements -->
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 6.5, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%) rotate(${elementStyles.storeName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('storeName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%) rotate(${elementStyles.productName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('productName', 5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%) rotate(${elementStyles.price?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('price', 6.5, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
 
               ${codeDataUrl ? `
-                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.code?.rotation || 0}deg);transform-origin:center center;display:flex;align-items:center;justify-content:center;">
                   <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${6.5 * codeScale}mm` : `${9.5 * codeScale}mm`};max-width:24mm;object-fit:contain;" />
                 </div>
               ` : ''}
 
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 12)))}</div>
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 4, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 10)))}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(0,-50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('barcodeText', 5, true, true)}line-height:1;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 12)))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%) rotate(${elementStyles.sku?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('sku', 4, false)}color:#333;line-height:1;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 10)))}</div>` : ''}
             </div>
           `;
         } else if (arrangement === 'SIDE_BY_SIDE') {
           return `
             <div style="width:${w_mm};height:${h_mm};position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;border:0.3mm solid #cbd5e1;padding:1mm;font-family:Arial,Helvetica,sans-serif;color:#000000;">
               ${codeDataUrl ? `
-                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);">
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.code?.rotation || 0}deg);transform-origin:center center;">
                   <img src="${codeDataUrl}" style="max-height:${parseFloat(h_mm) * 0.7 * codeScale}mm;max-width:30mm;object-fit:contain;" />
                 </div>
               ` : ''}
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 6, true)}">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 6, true)}">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 5, false)}color:#444;">SKU: ${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 7.5, true)}">₹${Number(price || 0).toFixed(2)}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('barcodeText', 5, true, true)}">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%) rotate(${elementStyles.storeName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('storeName', 6, true)}">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%) rotate(${elementStyles.productName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('productName', 6, true)}">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%) rotate(${elementStyles.sku?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('sku', 5, false)}color:#444;">SKU: ${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%) rotate(${elementStyles.price?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('price', 7.5, true)}">₹${Number(price || 0).toFixed(2)}</div>` : ''}
             </div>
           `;
         } else {
           // Standard Stacked Layout
           return `
             <div style="width:${w_mm};height:${h_mm};position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;border:0.3mm solid #cbd5e1;padding:1mm;font-family:Arial,Helvetica,sans-serif;color:#000000;">
-              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('storeName', 6, true)}white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
-              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('productName', 6.5, true)}white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.storeName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('storeName', 6, true)}white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.productName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('productName', 6.5, true)}white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
               ${codeDataUrl ? `
-                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);">
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.code?.rotation || 0}deg);transform-origin:center center;">
                   <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${7 * codeScale}mm` : `${13 * codeScale}mm`};max-width:40mm;object-fit:contain;" />
                 </div>
               ` : ''}
-              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('barcodeText', 5, true, true)}">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
-              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%);${getPrintInlineCss('sku', 5.5, false)}">SKU:${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
-              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-100%,-50%);${getPrintInlineCss('price', 7, true)}">₹${Number(price || 0).toFixed(2)}</div>` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('barcodeText', 5, true, true)}">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(0,-50%) rotate(${elementStyles.sku?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('sku', 5.5, false)}">SKU:${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-100%,-50%) rotate(${elementStyles.price?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('price', 7, true)}">₹${Number(price || 0).toFixed(2)}</div>` : ''}
             </div>
           `;
         }
@@ -1428,20 +1470,20 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           bodyHtml += `</div>`;
         }
       } else if (isSeznik3Up) {
-        // 3-Across Seznik Reel (48mm x 100mm feed, 3 columns side by side)
+        // 3-Across Seznik Reel (48mm x 100mm feed, 3 columns side by side with calibrated side padding and gap)
         const cols = 3;
         const totalRows = Math.ceil(printQty / cols);
         let curIndex = 0;
         for (let r = 0; r < totalRows; r++) {
           bodyHtml += `
-            <div style="width:48mm;height:100mm;page-break-after:always;display:flex;flex-direction:row;justify-content:space-between;box-sizing:border-box;margin:0 auto;overflow:hidden;background:#ffffff;">
+            <div style="width:48mm;height:100mm;page-break-after:always;display:flex;flex-direction:row;padding:${printOffsetY_mm}mm 0 0 ${2.0 + printOffsetX_mm}mm;gap:1.5mm;box-sizing:border-box;margin:0 auto;overflow:hidden;background:#ffffff;">
           `;
           for (let c = 0; c < cols; c++) {
             if (curIndex < printQty) {
               bodyHtml += singleLabelHtml;
               curIndex++;
             } else {
-              bodyHtml += `<div style="width:14.3mm;height:100mm;box-sizing:border-box;"></div>`;
+              bodyHtml += `<div style="width:14mm;height:100mm;box-sizing:border-box;"></div>`;
             }
           }
           bodyHtml += `</div>`;
@@ -1554,6 +1596,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         codeScale,
         elementStyles,
         customBarcodeText: effectiveBarcodeText,
+        printOffsetX: printOffsetX_mm,
+        printOffsetY: printOffsetY_mm,
       };
 
       const response = await apiClient.post('/labels/custom-pdf', payload, {
@@ -2048,6 +2092,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   { id: 'storeName', label: 'Store' },
                   { id: 'barcodeText', label: 'Code Text' },
                   { id: 'sku', label: 'SKU' },
+                  { id: 'code', label: 'QR / Barcode' },
                 ].map((item) => {
                   const isSelected = selectedElementId === item.id;
                   return (
@@ -2074,45 +2119,52 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               </div>
 
               {/* Live Real-Time Content Input for Selected Element */}
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, backgroundColor: 'var(--neutral-50)', padding: '2px 8px', borderRadius: 4, border: '1.5px solid var(--primary-400)', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--primary-700)', whiteSpace: 'nowrap' }}>
-                  {selectedElementId === 'productName' ? 'Item Name:' : selectedElementId === 'price' ? 'Price (₹):' : selectedElementId === 'storeName' ? 'Store:' : selectedElementId === 'barcodeText' ? 'Code Text:' : 'SKU:'}
-                </span>
-                <input
-                  type={selectedElementId === 'price' ? 'number' : 'text'}
-                  value={
-                    selectedElementId === 'productName'
-                      ? productName
-                      : selectedElementId === 'price'
-                      ? price
-                      : selectedElementId === 'storeName'
-                      ? storeName
-                      : selectedElementId === 'barcodeText'
-                      ? (customBarcodeText !== '' ? customBarcodeText : barcodeValue)
-                      : sku
-                  }
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (selectedElementId === 'productName') setProductName(val);
-                    else if (selectedElementId === 'price') setPrice(parseFloat(val) || 0);
-                    else if (selectedElementId === 'storeName') setStoreName(val);
-                    else if (selectedElementId === 'barcodeText') setCustomBarcodeText(val);
-                    else if (selectedElementId === 'sku') setSku(val);
-                  }}
-                  placeholder="Type to edit in real time..."
-                  style={{
-                    padding: '2px 6px',
-                    fontSize: '0.74rem',
-                    fontWeight: 600,
-                    border: '1px solid var(--neutral-300)',
-                    borderRadius: 3,
-                    minWidth: 150,
-                    maxWidth: 220,
-                    backgroundColor: '#ffffff',
-                    color: 'var(--neutral-900)'
-                  }}
-                />
-              </div>
+              {selectedElementId === 'code' ? (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, backgroundColor: 'var(--neutral-50)', padding: '3px 10px', borderRadius: 4, border: '1.5px solid var(--primary-400)', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--primary-700)' }}>Code Symbology:</span>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--neutral-800)' }}>{codeType === 'QR' ? '2D QR Code' : '1D Barcode'}</span>
+                </div>
+              ) : (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, backgroundColor: 'var(--neutral-50)', padding: '2px 8px', borderRadius: 4, border: '1.5px solid var(--primary-400)', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--primary-700)', whiteSpace: 'nowrap' }}>
+                    {selectedElementId === 'productName' ? 'Item Name:' : selectedElementId === 'price' ? 'Price (₹):' : selectedElementId === 'storeName' ? 'Store:' : selectedElementId === 'barcodeText' ? 'Code Text:' : 'SKU:'}
+                  </span>
+                  <input
+                    type={selectedElementId === 'price' ? 'number' : 'text'}
+                    value={
+                      selectedElementId === 'productName'
+                        ? productName
+                        : selectedElementId === 'price'
+                        ? price
+                        : selectedElementId === 'storeName'
+                        ? storeName
+                        : selectedElementId === 'barcodeText'
+                        ? (customBarcodeText !== '' ? customBarcodeText : barcodeValue)
+                        : sku
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (selectedElementId === 'productName') setProductName(val);
+                      else if (selectedElementId === 'price') setPrice(parseFloat(val) || 0);
+                      else if (selectedElementId === 'storeName') setStoreName(val);
+                      else if (selectedElementId === 'barcodeText') setCustomBarcodeText(val);
+                      else if (selectedElementId === 'sku') setSku(val);
+                    }}
+                    placeholder="Type to edit in real time..."
+                    style={{
+                      padding: '2px 6px',
+                      fontSize: '0.74rem',
+                      fontWeight: 600,
+                      border: '1px solid var(--neutral-300)',
+                      borderRadius: 3,
+                      minWidth: 150,
+                      maxWidth: 220,
+                      backgroundColor: '#ffffff',
+                      color: 'var(--neutral-900)'
+                    }}
+                  />
+                </div>
+              )}
 
               {/* Style Controls for Selected Element */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -2231,6 +2283,56 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   AA
                 </button>
 
+                {/* 90° Element Rotation Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const curRot = elementStyles[selectedElementId]?.rotation || 0;
+                    const nextRot = (curRot + 90) % 360;
+                    handleUpdateElementStyle(selectedElementId, { rotation: nextRot });
+                  }}
+                  style={{
+                    padding: '2px 7px',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    borderRadius: 4,
+                    border: `1px solid ${(elementStyles[selectedElementId]?.rotation || 0) !== 0 ? 'var(--primary-500)' : 'var(--neutral-300)'}`,
+                    backgroundColor: (elementStyles[selectedElementId]?.rotation || 0) !== 0 ? 'var(--primary-100)' : '#ffffff',
+                    color: (elementStyles[selectedElementId]?.rotation || 0) !== 0 ? 'var(--primary-800)' : 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3
+                  }}
+                  title="Rotate selected element 90° clockwise (0°, 90°, 180°, 270°)"
+                >
+                  <RotateCw size={11} />
+                  <span>{elementStyles[selectedElementId]?.rotation || 0}°</span>
+                </button>
+
+                {/* Rotate All 90° Button */}
+                <button
+                  type="button"
+                  onClick={handleRotateAll}
+                  style={{
+                    padding: '2px 7px',
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    borderRadius: 4,
+                    border: '1px solid var(--neutral-300)',
+                    backgroundColor: '#ffffff',
+                    color: 'var(--neutral-700)',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3
+                  }}
+                  title="Rotate all text, barcode, and QR elements by 90° clockwise"
+                >
+                  <RotateCw size={11} color="var(--primary-600)" />
+                  <span>Rotate All</span>
+                </button>
+
                 {/* Reset Element Style */}
                 <button
                   type="button"
@@ -2242,6 +2344,105 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   <RotateCcw size={10} />
                   <span>Reset</span>
                 </button>
+              </div>
+            </div>
+
+            {/* HARDWARE PRINTER FEED & MARGIN CALIBRATION */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 8,
+                backgroundColor: '#f8fafc',
+                border: '1px solid var(--neutral-200)',
+                borderRadius: 'var(--radius-md)',
+                padding: '5px 10px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Sliders size={12} color="var(--primary-600)" />
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--neutral-700)' }}>
+                  Hardware Feed Calibration:
+                </span>
+                <span style={{ fontSize: '0.62rem', color: 'var(--neutral-500)' }}>
+                  (Calibrate printer roll margin to prevent sticker clipping)
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                {/* X Offset */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Offset X:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleOffsetXChange(printOffsetX_mm - 0.5)}
+                    style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
+                    title="Shift print left by 0.5mm"
+                  >
+                    -
+                  </button>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 44, textAlign: 'center' }}>
+                    {printOffsetX_mm > 0 ? `+${printOffsetX_mm.toFixed(1)}` : printOffsetX_mm.toFixed(1)} mm
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleOffsetXChange(printOffsetX_mm + 0.5)}
+                    style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
+                    title="Shift print right by 0.5mm"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {/* Y Offset */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Offset Y:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleOffsetYChange(printOffsetY_mm - 0.5)}
+                    style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
+                    title="Shift print up by 0.5mm"
+                  >
+                    -
+                  </button>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 44, textAlign: 'center' }}>
+                    {printOffsetY_mm > 0 ? `+${printOffsetY_mm.toFixed(1)}` : printOffsetY_mm.toFixed(1)} mm
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleOffsetYChange(printOffsetY_mm + 0.5)}
+                    style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
+                    title="Shift print down by 0.5mm"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {/* Reset Offsets */}
+                {(printOffsetX_mm !== 0 || printOffsetY_mm !== 0) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleOffsetXChange(0);
+                      handleOffsetYChange(0);
+                    }}
+                    style={{
+                      padding: '1px 6px',
+                      fontSize: '0.62rem',
+                      fontWeight: 700,
+                      border: '1px solid var(--neutral-300)',
+                      borderRadius: 3,
+                      backgroundColor: '#ffffff',
+                      color: 'var(--neutral-600)',
+                      cursor: 'pointer'
+                    }}
+                    title="Reset margins to 0.0mm"
+                  >
+                    Reset Margin
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2383,7 +2584,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                                 position: 'absolute',
                                 left: `${elementPositions.storeName?.x ?? 50}%`,
                                 top: `${elementPositions.storeName?.y ?? 7}%`,
-                                transform: 'translate(-50%, -50%)',
+                                transform: `translate(-50%, -50%) rotate(${elementStyles.storeName?.rotation || 0}deg)`,
+                                transformOrigin: 'center center',
                                 cursor: 'move',
                                 padding: '2px 4px',
                                 borderRadius: 4,
@@ -2411,7 +2613,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                                 position: 'absolute',
                                 left: `${elementPositions.productName?.x ?? 50}%`,
                                 top: `${elementPositions.productName?.y ?? 16}%`,
-                                transform: 'translate(-50%, -50%)',
+                                transform: `translate(-50%, -50%) rotate(${elementStyles.productName?.rotation || 0}deg)`,
+                                transformOrigin: 'center center',
                                 cursor: 'move',
                                 padding: '2px 4px',
                                 borderRadius: 4,
@@ -2439,7 +2642,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                                 position: 'absolute',
                                 left: `${elementPositions.price?.x ?? 50}%`,
                                 top: `${elementPositions.price?.y ?? 26}%`,
-                                transform: 'translate(-50%, -50%)',
+                                transform: `translate(-50%, -50%) rotate(${elementStyles.price?.rotation || 0}deg)`,
+                                transformOrigin: 'center center',
                                 cursor: 'move',
                                 padding: '2px 4px',
                                 borderRadius: 4,
@@ -2458,16 +2662,17 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
                           <div
                             onPointerDown={(e) => handlePointerDown('code', e)}
+                            onClick={() => setSelectedElementId('code')}
                             style={{
                               position: 'absolute',
                               left: `${elementPositions.code?.x ?? 50}%`,
                               top: `${elementPositions.code?.y ?? 44}%`,
-                              transform: `translate(-50%, -50%) scale(${codeScale})`,
+                              transform: `translate(-50%, -50%) scale(${codeScale}) rotate(${elementStyles.code?.rotation || 0}deg)`,
                               transformOrigin: 'center center',
                               cursor: 'move',
                               padding: '2px',
                               borderRadius: 4,
-                              border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                              border: activeDragId === 'code' || selectedElementId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                               backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
                               display: 'flex',
                               alignItems: 'center',
@@ -2495,8 +2700,9 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                             style={{
                               position: 'absolute',
                               left: `${elementPositions.barcodeText?.x ?? 50}%`,
-                              top: `${elementPositions.barcodeText?.y ?? 55}%`,
-                              transform: 'translate(-50%, -50%)',
+                              top: `${elementPositions.barcodeText?.y ?? 53}%`,
+                              transform: `translate(-50%, -50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg)`,
+                              transformOrigin: 'center center',
                               cursor: 'move',
                               padding: '2px 4px',
                               borderRadius: 4,
@@ -2519,8 +2725,9 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                               style={{
                                 position: 'absolute',
                                 left: `${elementPositions.sku?.x ?? 50}%`,
-                                top: `${elementPositions.sku?.y ?? 61}%`,
-                                transform: 'translate(-50%, -50%)',
+                                top: `${elementPositions.sku?.y ?? 58}%`,
+                                transform: `translate(-50%, -50%) rotate(${elementStyles.sku?.rotation || 0}deg)`,
+                                transformOrigin: 'center center',
                                 cursor: 'move',
                                 padding: '2px 4px',
                                 borderRadius: 4,
@@ -2675,7 +2882,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                             position: 'absolute',
                             left: `${elementPositions.storeName?.x ?? 3}%`,
                             top: `${elementPositions.storeName?.y ?? 16}%`,
-                            transform: 'translate(0, -50%)',
+                            transform: `translate(0, -50%) rotate(${elementStyles.storeName?.rotation || 0}deg)`,
+                            transformOrigin: 'center center',
                             cursor: 'move',
                             padding: '2px 4px',
                             borderRadius: 4,
@@ -2699,7 +2907,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                             position: 'absolute',
                             left: `${elementPositions.productName?.x ?? 3}%`,
                             top: `${elementPositions.productName?.y ?? 46}%`,
-                            transform: 'translate(0, -50%)',
+                            transform: `translate(0, -50%) rotate(${elementStyles.productName?.rotation || 0}deg)`,
+                            transformOrigin: 'center center',
                             cursor: 'move',
                             padding: '2px 4px',
                             borderRadius: 4,
@@ -2726,7 +2935,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                             position: 'absolute',
                             left: `${elementPositions.price?.x ?? 3}%`,
                             top: `${elementPositions.price?.y ?? 78}%`,
-                            transform: 'translate(0, -50%)',
+                            transform: `translate(0, -50%) rotate(${elementStyles.price?.rotation || 0}deg)`,
+                            transformOrigin: 'center center',
                             cursor: 'move',
                             padding: '2px 4px',
                             borderRadius: 4,
@@ -2744,16 +2954,17 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
                       <div
                         onPointerDown={(e) => handlePointerDown('code', e)}
+                        onClick={() => setSelectedElementId('code')}
                         style={{
                           position: 'absolute',
                           left: `${elementPositions.code?.x ?? 50}%`,
                           top: `${elementPositions.code?.y ?? 50}%`,
-                          transform: `translate(-50%, -50%) scale(${codeScale})`,
+                          transform: `translate(-50%, -50%) scale(${codeScale}) rotate(${elementStyles.code?.rotation || 0}deg)`,
                           transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px',
                           borderRadius: 4,
-                          border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          border: activeDragId === 'code' || selectedElementId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                           backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
                           display: 'flex',
                           alignItems: 'center',
@@ -2782,7 +2993,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           position: 'absolute',
                           left: `${elementPositions.barcodeText?.x ?? 35}%`,
                           top: `${elementPositions.barcodeText?.y ?? 36}%`,
-                          transform: 'translate(0, -50%)',
+                          transform: `translate(0, -50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg)`,
+                          transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
@@ -2805,7 +3017,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                             position: 'absolute',
                             left: `${elementPositions.sku?.x ?? 35}%`,
                             top: `${elementPositions.sku?.y ?? 72}%`,
-                            transform: 'translate(0, -50%)',
+                            transform: `translate(0, -50%) rotate(${elementStyles.sku?.rotation || 0}deg)`,
+                            transformOrigin: 'center center',
                             cursor: 'move',
                             padding: '2px 4px',
                             borderRadius: 4,
@@ -2945,7 +3158,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           position: 'absolute',
                           left: `${elementPositions.storeName?.x ?? 5}%`,
                           top: `${elementPositions.storeName?.y ?? 14}%`,
-                          transform: 'translate(0, -50%)',
+                          transform: `translate(0, -50%) rotate(${elementStyles.storeName?.rotation || 0}deg)`,
+                          transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
@@ -2970,7 +3184,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           position: 'absolute',
                           left: `${elementPositions.productName?.x ?? 5}%`,
                           top: `${elementPositions.productName?.y ?? 44}%`,
-                          transform: 'translate(0, -50%)',
+                          transform: `translate(0, -50%) rotate(${elementStyles.productName?.rotation || 0}deg)`,
+                          transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
@@ -2998,7 +3213,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           position: 'absolute',
                           left: `${elementPositions.price?.x ?? 5}%`,
                           top: `${elementPositions.price?.y ?? 76}%`,
-                          transform: 'translate(0, -50%)',
+                          transform: `translate(0, -50%) rotate(${elementStyles.price?.rotation || 0}deg)`,
+                          transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
@@ -3017,16 +3233,17 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     {/* 4. Barcode / QR Code Graphic */}
                     <div
                       onPointerDown={(e) => handlePointerDown('code', e)}
+                      onClick={() => setSelectedElementId('code')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.code?.x ?? 82}%`,
                         top: `${elementPositions.code?.y ?? 48}%`,
-                        transform: `translate(-50%, -50%) scale(${codeScale})`,
+                        transform: `translate(-50%, -50%) scale(${codeScale}) rotate(${elementStyles.code?.rotation || 0}deg)`,
                         transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px',
                         borderRadius: 4,
-                        border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        border: activeDragId === 'code' || selectedElementId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
                         display: 'flex',
                         alignItems: 'center',
@@ -3056,7 +3273,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.barcodeText?.x ?? 64}%`,
                         top: `${elementPositions.barcodeText?.y ?? 36}%`,
-                        transform: 'translate(0, -50%)',
+                        transform: `translate(0, -50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         borderRadius: 4,
@@ -3080,7 +3298,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           position: 'absolute',
                           left: `${elementPositions.sku?.x ?? 64}%`,
                           top: `${elementPositions.sku?.y ?? 72}%`,
-                          transform: 'translate(0, -50%)',
+                          transform: `translate(0, -50%) rotate(${elementStyles.sku?.rotation || 0}deg)`,
+                          transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
@@ -3176,7 +3395,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           position: 'absolute',
                           left: `${elementPositions.storeName?.x ?? 4}%`,
                           top: `${elementPositions.storeName?.y ?? 14}%`,
-                          transform: 'translate(0, -50%)',
+                          transform: `translate(0, -50%) rotate(${elementStyles.storeName?.rotation || 0}deg)`,
+                          transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
@@ -3200,7 +3420,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           position: 'absolute',
                           left: `${elementPositions.productName?.x ?? 4}%`,
                           top: `${elementPositions.productName?.y ?? 44}%`,
-                          transform: 'translate(0, -50%)',
+                          transform: `translate(0, -50%) rotate(${elementStyles.productName?.rotation || 0}deg)`,
+                          transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
@@ -3227,7 +3448,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           position: 'absolute',
                           left: `${elementPositions.price?.x ?? 4}%`,
                           top: `${elementPositions.price?.y ?? 76}%`,
-                          transform: 'translate(0, -50%)',
+                          transform: `translate(0, -50%) rotate(${elementStyles.price?.rotation || 0}deg)`,
+                          transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
@@ -3245,16 +3467,17 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
                     <div
                       onPointerDown={(e) => handlePointerDown('code', e)}
+                      onClick={() => setSelectedElementId('code')}
                       style={{
                         position: 'absolute',
                         left: `${elementPositions.code?.x ?? 55}%`,
                         top: `${elementPositions.code?.y ?? 48}%`,
-                        transform: `translate(-50%, -50%) scale(${codeScale})`,
+                        transform: `translate(-50%, -50%) scale(${codeScale}) rotate(${elementStyles.code?.rotation || 0}deg)`,
                         transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px',
                         borderRadius: 4,
-                        border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                        border: activeDragId === 'code' || selectedElementId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                         backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
                         display: 'flex',
                         alignItems: 'center',
@@ -3283,7 +3506,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.barcodeText?.x ?? 38}%`,
                         top: `${elementPositions.barcodeText?.y ?? 36}%`,
-                        transform: 'translate(0, -50%)',
+                        transform: `translate(0, -50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         borderRadius: 4,
@@ -3306,7 +3530,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                           position: 'absolute',
                           left: `${elementPositions.sku?.x ?? 38}%`,
                           top: `${elementPositions.sku?.y ?? 72}%`,
-                          transform: 'translate(0, -50%)',
+                          transform: `translate(0, -50%) rotate(${elementStyles.sku?.rotation || 0}deg)`,
+                          transformOrigin: 'center center',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
@@ -3369,7 +3594,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                               position: 'absolute',
                               left: `${elementPositions.storeName?.x ?? 50}%`,
                               top: `${elementPositions.storeName?.y ?? 12}%`,
-                              transform: 'translate(-50%, -50%)',
+                              transform: `translate(-50%, -50%) rotate(${elementStyles.storeName?.rotation || 0}deg)`,
+                              transformOrigin: 'center center',
                               cursor: 'move',
                               padding: '2px 4px',
                               color: 'var(--neutral-900)',
@@ -3395,7 +3621,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                               position: 'absolute',
                               left: `${elementPositions.productName?.x ?? 50}%`,
                               top: `${elementPositions.productName?.y ?? 26}%`,
-                              transform: 'translate(-50%, -50%)',
+                              transform: `translate(-50%, -50%) rotate(${elementStyles.productName?.rotation || 0}deg)`,
+                              transformOrigin: 'center center',
                               cursor: 'move',
                               padding: '2px 4px',
                               color: 'var(--neutral-800)',
@@ -3415,15 +3642,16 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
                         <div
                           onPointerDown={(e) => handlePointerDown('code', e)}
+                          onClick={() => setSelectedElementId('code')}
                           style={{
                             position: 'absolute',
                             left: `${elementPositions.code?.x ?? 50}%`,
                             top: `${elementPositions.code?.y ?? 52}%`,
-                            transform: `translate(-50%, -50%) scale(${codeScale})`,
+                            transform: `translate(-50%, -50%) scale(${codeScale}) rotate(${elementStyles.code?.rotation || 0}deg)`,
                             transformOrigin: 'center center',
                             cursor: 'move',
                             padding: 2,
-                            border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                            border: activeDragId === 'code' || selectedElementId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                             backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
                             display: 'flex',
                             alignItems: 'center',
@@ -3452,7 +3680,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                             position: 'absolute',
                             left: `${elementPositions.barcodeText?.x ?? 50}%`,
                             top: `${elementPositions.barcodeText?.y ?? 74}%`,
-                            transform: 'translate(-50%, -50%)',
+                            transform: `translate(-50%, -50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg)`,
+                            transformOrigin: 'center center',
                             cursor: 'move',
                             padding: '1px 4px',
                             color: 'var(--neutral-700)',
@@ -3473,7 +3702,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                               position: 'absolute',
                               left: `${elementPositions.price?.x ?? 50}%`,
                               top: `${elementPositions.price?.y ?? 88}%`,
-                              transform: 'translate(-50%, -50%)',
+                              transform: `translate(-50%, -50%) rotate(${elementStyles.price?.rotation || 0}deg)`,
+                              transformOrigin: 'center center',
                               cursor: 'move',
                               padding: '1px 4px',
                               color: '#1e1b4b',
@@ -3495,7 +3725,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                               position: 'absolute',
                               left: `${elementPositions.sku?.x ?? 88}%`,
                               top: `${elementPositions.sku?.y ?? 88}%`,
-                              transform: 'translate(-50%, -50%)',
+                              transform: `translate(-50%, -50%) rotate(${elementStyles.sku?.rotation || 0}deg)`,
+                              transformOrigin: 'center center',
                               cursor: 'move',
                               padding: '1px 3px',
                               color: 'var(--neutral-600)',
@@ -3577,11 +3808,11 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                       position: 'absolute',
                       left: `${elementPositions.code?.x ?? 24}%`,
                       top: `${elementPositions.code?.y ?? 42}%`,
-                      transform: `translate(-50%, -50%) scale(${codeScale})`,
+                      transform: `translate(-50%, -50%) scale(${codeScale}) rotate(${elementStyles.code?.rotation || 0}deg)`,
                       transformOrigin: 'center center',
                       cursor: 'move',
                       padding: 2,
-                      border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                      border: activeDragId === 'code' || selectedElementId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                       backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
                       display: 'flex',
                       alignItems: 'center',
@@ -3610,7 +3841,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                       position: 'absolute',
                       left: `${elementPositions.barcodeText?.x ?? 24}%`,
                       top: `${elementPositions.barcodeText?.y ?? 82}%`,
-                      transform: 'translate(-50%, -50%)',
+                      transform: `translate(-50%, -50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg)`,
+                      transformOrigin: 'center center',
                       cursor: 'move',
                       padding: '2px 4px',
                       color: 'var(--neutral-700)',
@@ -3631,7 +3863,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.storeName?.x ?? 56}%`,
                         top: `${elementPositions.storeName?.y ?? 14}%`,
-                        transform: 'translate(0, -50%)',
+                        transform: `translate(0, -50%) rotate(${elementStyles.storeName?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         color: 'var(--neutral-900)',
@@ -3653,7 +3886,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.productName?.x ?? 56}%`,
                         top: `${elementPositions.productName?.y ?? 36}%`,
-                        transform: 'translate(0, -50%)',
+                        transform: `translate(0, -50%) rotate(${elementStyles.productName?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         color: 'var(--neutral-800)',
@@ -3679,7 +3913,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.sku?.x ?? 56}%`,
                         top: `${elementPositions.sku?.y ?? 62}%`,
-                        transform: 'translate(0, -50%)',
+                        transform: `translate(0, -50%) rotate(${elementStyles.sku?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         color: 'var(--neutral-500)',
@@ -3701,7 +3936,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.price?.x ?? 56}%`,
                         top: `${elementPositions.price?.y ?? 86}%`,
-                        transform: 'translate(0, -50%)',
+                        transform: `translate(0, -50%) rotate(${elementStyles.price?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         color: '#1e1b4b',
@@ -3740,7 +3976,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.storeName?.x ?? 50}%`,
                         top: `${elementPositions.storeName?.y ?? 9}%`,
-                        transform: 'translate(-50%, -50%)',
+                        transform: `translate(-50%, -50%) rotate(${elementStyles.storeName?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         color: 'var(--neutral-900)',
@@ -3763,7 +4000,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.productName?.x ?? 50}%`,
                         top: `${elementPositions.productName?.y ?? 22}%`,
-                        transform: 'translate(-50%, -50%)',
+                        transform: `translate(-50%, -50%) rotate(${elementStyles.productName?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         color: 'var(--neutral-800)',
@@ -3783,15 +4021,16 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
                   <div
                     onPointerDown={(e) => handlePointerDown('code', e)}
+                    onClick={() => setSelectedElementId('code')}
                     style={{
                       position: 'absolute',
                       left: `${elementPositions.code?.x ?? 50}%`,
                       top: `${elementPositions.code?.y ?? 52}%`,
-                      transform: `translate(-50%, -50%) scale(${codeScale})`,
+                      transform: `translate(-50%, -50%) scale(${codeScale}) rotate(${elementStyles.code?.rotation || 0}deg)`,
                       transformOrigin: 'center center',
                       cursor: 'move',
                       padding: 2,
-                      border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                      border: activeDragId === 'code' || selectedElementId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
                       backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
                       display: 'flex',
                       alignItems: 'center',
@@ -3820,7 +4059,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                       position: 'absolute',
                       left: `${elementPositions.barcodeText?.x ?? 50}%`,
                       top: `${elementPositions.barcodeText?.y ?? 74}%`,
-                      transform: 'translate(-50%, -50%)',
+                      transform: `translate(-50%, -50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg)`,
+                      transformOrigin: 'center center',
                       cursor: 'move',
                       padding: '2px 4px',
                       color: 'var(--neutral-700)',
@@ -3841,7 +4081,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.sku?.x ?? 15}%`,
                         top: `${elementPositions.sku?.y ?? 91}%`,
-                        transform: 'translate(0, -50%)',
+                        transform: `translate(0, -50%) rotate(${elementStyles.sku?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         color: 'var(--neutral-600)',
@@ -3863,7 +4104,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         position: 'absolute',
                         left: `${elementPositions.price?.x ?? 85}%`,
                         top: `${elementPositions.price?.y ?? 91}%`,
-                        transform: 'translate(-100%, -50%)',
+                        transform: `translate(-100%, -50%) rotate(${elementStyles.price?.rotation || 0}deg)`,
+                        transformOrigin: 'center center',
                         cursor: 'move',
                         padding: '2px 4px',
                         color: '#1e1b4b',

@@ -79,6 +79,42 @@ class LabelService:
         return font_name, font_size, final_text
 
     @staticmethod
+    def _get_element_rotation(elem_id: str, element_styles: Optional[dict] = None) -> int:
+        if not element_styles or not isinstance(element_styles, dict):
+            return 0
+        style = element_styles.get(elem_id, {})
+        if isinstance(style, dict):
+            try:
+                return int(style.get("rotation", 0)) % 360
+            except (ValueError, TypeError):
+                return 0
+        return 0
+
+    @staticmethod
+    def _draw_text_with_rotation(
+        c: canvas.Canvas,
+        x: float,
+        y: float,
+        text: str,
+        font_name: str,
+        font_size: float,
+        rotation: int = 0,
+        align: str = "center",
+    ) -> None:
+        c.saveState()
+        c.setFont(font_name, font_size)
+        c.translate(x, y)
+        if rotation:
+            c.rotate(rotation)
+        if align == "center":
+            c.drawCentredString(0, -font_size * 0.35, text)
+        elif align == "right":
+            c.drawRightString(0, -font_size * 0.35, text)
+        else:
+            c.drawString(0, -font_size * 0.35, text)
+        c.restoreState()
+
+    @staticmethod
     def generate_single_thermal_50x30(
         config: LabelPrintConfig, store_name: str
     ) -> bytes:
@@ -497,134 +533,138 @@ class LabelService:
                 # Custom Drag & Drop coordinates relative to strip bounding box
                 if config.show_store_name and "storeName" in cp:
                     fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5.2, True, display_store[:16], config.element_styles)
-                    c.setFont(fn, fs)
                     sx = x0 + (cp["storeName"]["x"] / 100.0) * strip_width
                     sy = y0 + ((100.0 - cp["storeName"]["y"]) / 100.0) * strip_height
-                    c.drawCentredString(sx, sy - 1.2 * mm, txt)
+                    rot = LabelService._get_element_rotation("storeName", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, sx, sy, txt, fn, fs, rot)
                 elif config.show_store_name:
                     fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5.2, True, display_store[:16], config.element_styles)
-                    c.setFont(fn, fs)
-                    c.drawCentredString(cx, y0 + 94.0 * mm, txt)
+                    rot = LabelService._get_element_rotation("storeName", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, cx, y0 + 94.0 * mm, txt, fn, fs, rot)
 
                 if "productName" in cp:
                     fn, fs, txt = LabelService._resolve_font_and_text("productName", 5.5, True, config.item_name[:16], config.element_styles)
-                    c.setFont(fn, fs)
                     px = x0 + (cp["productName"]["x"] / 100.0) * strip_width
                     py = y0 + ((100.0 - cp["productName"]["y"]) / 100.0) * strip_height
-                    c.drawCentredString(px, py - 1.2 * mm, txt)
+                    rot = LabelService._get_element_rotation("productName", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, px, py, txt, fn, fs, rot)
                 else:
                     fn, fs, txt = LabelService._resolve_font_and_text("productName", 5.5, True, config.item_name[:16], config.element_styles)
-                    c.setFont(fn, fs)
-                    c.drawCentredString(cx, y0 + 85.0 * mm, txt)
+                    rot = LabelService._get_element_rotation("productName", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, cx, y0 + 85.0 * mm, txt, fn, fs, rot)
 
                 if config.show_price and config.sale_price:
                     _, _, _, curr_sym = register_pdf_unicode_fonts()
                     price_val = f"{curr_sym}{config.sale_price:,.0f}" if config.sale_price == int(config.sale_price) else f"{curr_sym}{config.sale_price:,.2f}"
                     fn, fs, txt = LabelService._resolve_font_and_text("price", 6.8, True, price_val, config.element_styles)
-                    c.setFont(fn, fs)
-                    if "price" in cp:
-                        prx = x0 + (cp["price"]["x"] / 100.0) * strip_width
-                        pry = y0 + ((100.0 - cp["price"]["y"]) / 100.0) * strip_height
-                        c.drawCentredString(prx, pry - 1.2 * mm, txt)
-                    else:
-                        c.drawCentredString(cx, y0 + 74.5 * mm, txt)
+                    prx = x0 + (cp["price"]["x"] / 100.0) * strip_width if "price" in cp else cx
+                    pry = y0 + ((100.0 - cp["price"]["y"]) / 100.0) * strip_height if "price" in cp else (y0 + 74.5 * mm)
+                    rot = LabelService._get_element_rotation("price", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, prx, pry, txt, fn, fs, rot)
 
                 # Flap 2: Code, Text & SKU
+                code_rot = LabelService._get_element_rotation("code", config.element_styles)
                 if is_qr:
                     qr_size = min(12.5 * mm, max(6.0 * mm, 10.0 * mm * scale))
                     if "code" in cp:
-                        qx = x0 + (cp["code"]["x"] / 100.0) * strip_width - (qr_size / 2.0)
-                        qy = y0 + ((100.0 - cp["code"]["y"]) / 100.0) * strip_height - (qr_size / 2.0)
-                        LabelService._draw_qr(c, code_payload, qx, qy, qr_size)
+                        qx = x0 + (cp["code"]["x"] / 100.0) * strip_width
+                        qy = y0 + ((100.0 - cp["code"]["y"]) / 100.0) * strip_height
                     else:
-                        LabelService._draw_qr(c, code_payload, cx - (qr_size / 2.0), y0 + 51.5 * mm - (qr_size / 2.0), qr_size)
+                        qx = cx
+                        qy = y0 + 51.5 * mm
 
-                    if "barcodeText" in cp:
-                        bx = x0 + (cp["barcodeText"]["x"] / 100.0) * strip_width
-                        by = y0 + ((100.0 - cp["barcodeText"]["y"]) / 100.0) * strip_height
-                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
-                        c.setFont(fn, fs)
-                        c.drawCentredString(bx, by - 1.2 * mm, txt)
+                    if code_rot:
+                        c.saveState()
+                        c.translate(qx, qy)
+                        c.rotate(code_rot)
+                        LabelService._draw_qr(c, code_payload, -qr_size / 2.0, -qr_size / 2.0, qr_size)
+                        c.restoreState()
                     else:
-                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
-                        c.setFont(fn, fs)
-                        c.drawCentredString(cx, y0 + 44.0 * mm, txt)
+                        LabelService._draw_qr(c, code_payload, qx - (qr_size / 2.0), qy - (qr_size / 2.0), qr_size)
+
+                    fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
+                    bx = x0 + (cp["barcodeText"]["x"] / 100.0) * strip_width if "barcodeText" in cp else cx
+                    by = y0 + ((100.0 - cp["barcodeText"]["y"]) / 100.0) * strip_height if "barcodeText" in cp else (y0 + 44.0 * mm)
+                    rot = LabelService._get_element_rotation("barcodeText", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, bx, by, txt, fn, fs, rot)
 
                     if config.show_sku and config.sku:
                         fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.4, False, f"SKU:{config.sku[:12]}", config.element_styles)
-                        c.setFont(fn, fs)
-                        if "sku" in cp:
-                            skx = x0 + (cp["sku"]["x"] / 100.0) * strip_width
-                            sky = y0 + ((100.0 - cp["sku"]["y"]) / 100.0) * strip_height
-                            c.drawCentredString(skx, sky - 1.2 * mm, txt)
-                        else:
-                            c.drawCentredString(cx, y0 + 39.5 * mm, txt)
+                        skx = x0 + (cp["sku"]["x"] / 100.0) * strip_width if "sku" in cp else cx
+                        sky = y0 + ((100.0 - cp["sku"]["y"]) / 100.0) * strip_height if "sku" in cp else (y0 + 39.5 * mm)
+                        rot = LabelService._get_element_rotation("sku", config.element_styles)
+                        LabelService._draw_text_with_rotation(c, skx, sky, txt, fn, fs, rot)
                 else:
                     # 1D Barcode: Auto-fit within 13.0 mm width
                     num_modules = max(35, len(raw_code) * 11 + 35)
                     bar_w = min(0.24, max(0.11, (12.5 * mm / (num_modules * 72.0 / 25.4))))
                     bc_h = min(9.0 * mm, max(4.5 * mm, 6.5 * mm * scale))
                     approx_bc_width = num_modules * bar_w * (25.4 / 72.0)
-                    bc_x = cx - (approx_bc_width / 2.0)
-                    bc_y = y0 + 50.0 * mm
-                    if "code" in cp:
-                        bc_x = x0 + (cp["code"]["x"] / 100.0) * strip_width - (approx_bc_width / 2.0)
-                        bc_y = y0 + ((100.0 - cp["code"]["y"]) / 100.0) * strip_height - (bc_h / 2.0)
+                    bc_x = x0 + (cp["code"]["x"] / 100.0) * strip_width if "code" in cp else cx
+                    bc_y = y0 + ((100.0 - cp["code"]["y"]) / 100.0) * strip_height if "code" in cp else (y0 + 50.0 * mm)
+
+                    c.saveState()
+                    c.translate(bc_x, bc_y)
+                    if code_rot:
+                        c.rotate(code_rot)
                     try:
                         bc = code128.Code128(raw_code, barHeight=bc_h, barWidth=bar_w)
-                        bc.drawOn(c, bc_x, bc_y)
+                        bc.drawOn(c, -approx_bc_width / 2.0, -bc_h / 2.0)
                     except Exception:
                         c.setFont("Helvetica-Bold", 4.8)
-                        c.drawCentredString(cx, bc_y + 2 * mm, raw_code)
+                        c.drawCentredString(0, -2.4, raw_code)
+                    c.restoreState()
 
-                    if "barcodeText" in cp:
-                        bx = x0 + (cp["barcodeText"]["x"] / 100.0) * strip_width
-                        by = y0 + ((100.0 - cp["barcodeText"]["y"]) / 100.0) * strip_height
-                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
-                        c.setFont(fn, fs)
-                        c.drawCentredString(bx, by - 1.2 * mm, txt)
-                    else:
-                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
-                        c.setFont(fn, fs)
-                        c.drawCentredString(cx, y0 + 44.0 * mm, txt)
+                    fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
+                    bx = x0 + (cp["barcodeText"]["x"] / 100.0) * strip_width if "barcodeText" in cp else cx
+                    by = y0 + ((100.0 - cp["barcodeText"]["y"]) / 100.0) * strip_height if "barcodeText" in cp else (y0 + 44.0 * mm)
+                    rot = LabelService._get_element_rotation("barcodeText", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, bx, by, txt, fn, fs, rot)
 
                     if config.show_sku and config.sku:
                         fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.4, False, f"SKU:{config.sku[:12]}", config.element_styles)
-                        c.setFont(fn, fs)
-                        if "sku" in cp:
-                            skx = x0 + (cp["sku"]["x"] / 100.0) * strip_width
-                            sky = y0 + ((100.0 - cp["sku"]["y"]) / 100.0) * strip_height
-                            c.drawCentredString(skx, sky - 1.2 * mm, txt)
-                        else:
-                            c.drawCentredString(cx, y0 + 39.5 * mm, txt)
+                        skx = x0 + (cp["sku"]["x"] / 100.0) * strip_width if "sku" in cp else cx
+                        sky = y0 + ((100.0 - cp["sku"]["y"]) / 100.0) * strip_height if "sku" in cp else (y0 + 39.5 * mm)
+                        rot = LabelService._get_element_rotation("sku", config.element_styles)
+                        LabelService._draw_text_with_rotation(c, skx, sky, txt, fn, fs, rot)
             else:
                 # Default clean Portrait alignment
                 _, bold_font, _, curr_sym = register_pdf_unicode_fonts()
                 if config.show_store_name:
                     fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5.2, True, display_store[:16], config.element_styles)
-                    c.setFont(fn, fs)
-                    c.drawCentredString(cx, y0 + 94.0 * mm, txt)
+                    rot = LabelService._get_element_rotation("storeName", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, cx, y0 + 94.0 * mm, txt, fn, fs, rot)
 
                 fn, fs, txt = LabelService._resolve_font_and_text("productName", 5.5, True, config.item_name[:16], config.element_styles)
-                c.setFont(fn, fs)
-                c.drawCentredString(cx, y0 + 85.0 * mm, txt)
+                rot = LabelService._get_element_rotation("productName", config.element_styles)
+                LabelService._draw_text_with_rotation(c, cx, y0 + 85.0 * mm, txt, fn, fs, rot)
 
                 if config.show_price and config.sale_price:
                     price_val = f"{curr_sym}{config.sale_price:,.0f}" if config.sale_price == int(config.sale_price) else f"{curr_sym}{config.sale_price:,.2f}"
                     fn, fs, txt = LabelService._resolve_font_and_text("price", 6.8, True, price_val, config.element_styles)
-                    c.setFont(fn, fs)
-                    c.drawCentredString(cx, y0 + 74.5 * mm, txt)
+                    rot = LabelService._get_element_rotation("price", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, cx, y0 + 74.5 * mm, txt, fn, fs, rot)
 
+                code_rot = LabelService._get_element_rotation("code", config.element_styles)
                 if is_qr:
                     qr_size = min(12.5 * mm, max(6.0 * mm, 10.0 * mm * scale))
-                    LabelService._draw_qr(c, code_payload, cx - (qr_size / 2.0), y0 + 51.5 * mm - (qr_size / 2.0), qr_size)
+                    if code_rot:
+                        c.saveState()
+                        c.translate(cx, y0 + 51.5 * mm)
+                        c.rotate(code_rot)
+                        LabelService._draw_qr(c, code_payload, -qr_size / 2.0, -qr_size / 2.0, qr_size)
+                        c.restoreState()
+                    else:
+                        LabelService._draw_qr(c, code_payload, cx - (qr_size / 2.0), y0 + 51.5 * mm - (qr_size / 2.0), qr_size)
+
                     fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
-                    c.setFont(fn, fs)
-                    c.drawCentredString(cx, y0 + 44.0 * mm, txt)
+                    rot = LabelService._get_element_rotation("barcodeText", config.element_styles)
+                    LabelService._draw_text_with_rotation(c, cx, y0 + 44.0 * mm, txt, fn, fs, rot)
+
                     if config.show_sku and config.sku:
                         fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.4, False, f"SKU:{config.sku[:12]}", config.element_styles)
-                        c.setFont(fn, fs)
-                        c.drawCentredString(cx, y0 + 39.5 * mm, txt)
+                        rot = LabelService._get_element_rotation("sku", config.element_styles)
+                        LabelService._draw_text_with_rotation(c, cx, y0 + 39.5 * mm, txt, fn, fs, rot)
                 else:
                     num_modules = max(35, len(raw_code) * 11 + 35)
                     bar_w = min(0.24, max(0.11, (12.5 * mm / (num_modules * 72.0 / 25.4))))
@@ -743,8 +783,10 @@ class LabelService:
 
         orientation = getattr(config, 'orientation', LabelOrientation.PORTRAIT) or LabelOrientation.PORTRAIT
 
-        col_width = 14.3 * mm
-        col_offsets = [1.0 * mm, 16.85 * mm, 32.7 * mm]
+        off_x = float(getattr(config, 'print_offset_x', 0.0) or 0.0) * mm
+        off_y = float(getattr(config, 'print_offset_y', 0.0) or 0.0) * mm
+        col_width = 14.0 * mm
+        col_offsets = [2.0 * mm + off_x, 18.0 * mm + off_x, 34.0 * mm + off_x]
         labels_across = 3
         total_quantity = config.quantity
         total_rows = (total_quantity + labels_across - 1) // labels_across
@@ -754,7 +796,7 @@ class LabelService:
             for col_idx in range(labels_across):
                 if printed < total_quantity:
                     x0 = col_offsets[col_idx]
-                    y0 = 0.0 * mm
+                    y0 = 0.0 * mm + off_y
                     LabelService._draw_seznik_tag_strip(
                         c=c,
                         config=config,

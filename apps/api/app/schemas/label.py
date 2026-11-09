@@ -55,6 +55,8 @@ class LabelPrintConfig(BaseSchema):
     custom_barcode_text: Optional[str] = Field(default=None, alias="customBarcodeText")
     orientation: LabelOrientation = Field(default=LabelOrientation.PORTRAIT)
     labels_across: int = Field(default=3, ge=1, le=5, alias="labelsAcross")
+    print_offset_x: Optional[float] = Field(default=0.0, alias="printOffsetX")
+    print_offset_y: Optional[float] = Field(default=0.0, alias="printOffsetY")
 
 class BatchLabelPrintRequest(BaseSchema):
     items: List[LabelPrintConfig]
