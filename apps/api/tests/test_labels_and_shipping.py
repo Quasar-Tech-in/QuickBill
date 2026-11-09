@@ -62,6 +62,51 @@ async def test_generate_jewelry_dumbbell_tag_pdf(auth_headers):
         assert len(response.content) > 100
 
 @pytest.mark.asyncio
+async def test_generate_seznik_3up_jewelry_tag_pdf_portrait(auth_headers):
+    payload = {
+        "itemName": "24K Diamond Ring",
+        "sku": "JW-RING-3UP",
+        "salePrice": 30520.0,
+        "paperSize": "SEZNIK_3UP_100x15",
+        "style": "JEWELRY_RAT_TAIL",
+        "orientation": "PORTRAIT",
+        "codeType": "BARCODE",
+        "quantity": 5,
+        "showPrice": True,
+        "showStoreName": True,
+        "storeName": "Seznik Jewelers"
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/v1/labels/custom-pdf", json=payload, headers=auth_headers)
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert "Seznik_3UP_Jewelry_Tag" in response.headers["content-disposition"]
+        assert len(response.content) > 200
+
+@pytest.mark.asyncio
+async def test_generate_seznik_3up_jewelry_tag_pdf_landscape(auth_headers):
+    payload = {
+        "itemName": "Gold Bangle 22K",
+        "sku": "JW-BANGLE-3UP",
+        "salePrice": 45000.0,
+        "paperSize": "SEZNIK_3UP_100x15",
+        "style": "JEWELRY_RAT_TAIL",
+        "orientation": "LANDSCAPE",
+        "codeType": "QR",
+        "quantity": 3,
+        "showPrice": True,
+        "showStoreName": True,
+        "storeName": "Seznik Jewelers"
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/v1/labels/custom-pdf", json=payload, headers=auth_headers)
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert len(response.content) > 200
+
+@pytest.mark.asyncio
 async def test_generate_jewelry_rattail_tag_pdf(auth_headers):
     payload = {
         "itemName": "Solitaire Diamond Pendant",

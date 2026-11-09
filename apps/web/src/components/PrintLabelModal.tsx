@@ -24,7 +24,8 @@ import {
   AlignCenter,
   Move,
   RotateCcw,
-  Grid
+  Grid,
+  LayoutGrid
 } from 'lucide-react';
 import { apiClient, store } from '../services/store';
 import { BarcodeRenderer, BarcodeRendererRef } from './BarcodeRenderer';
@@ -70,6 +71,64 @@ export const DEFAULT_ELEMENT_STYLES: LayoutStyles = {
 
 const CACHE_KEY = 'qb_label_studio_design_v2';
 
+export type PaperSizeType =
+  | 'RAT_TAIL_76x12'
+  | 'SEZNIK_100x15'
+  | 'SEZNIK_3UP_100x15'
+  | 'THERMAL_50x30'
+  | 'THERMAL_40x40'
+  | 'THERMAL_38x25'
+  | 'DUMBBELL_70x12'
+  | 'A4_GRID_24'
+  | 'A4_GRID_40'
+  | 'A4_GRID_65';
+
+export type LabelOrientationType = 'PORTRAIT' | 'LANDSCAPE';
+
+export interface A4GridDefinition {
+  cols: number;
+  rows: number;
+  totalSlots: number;
+  labelW_mm: number;
+  labelH_mm: number;
+  marginH_mm: number;
+  marginV_mm: number;
+  name: string;
+}
+
+export const A4_GRID_CONFIG: Record<string, A4GridDefinition> = {
+  A4_GRID_24: {
+    cols: 3,
+    rows: 8,
+    totalSlots: 24,
+    labelW_mm: 64.0,
+    labelH_mm: 33.9,
+    marginH_mm: 9.0,
+    marginV_mm: 12.9,
+    name: 'A4 24-Up (3x8)'
+  },
+  A4_GRID_40: {
+    cols: 4,
+    rows: 10,
+    totalSlots: 40,
+    labelW_mm: 48.5,
+    labelH_mm: 25.4,
+    marginH_mm: 8.0,
+    marginV_mm: 21.5,
+    name: 'A4 40-Up (4x10)'
+  },
+  A4_GRID_65: {
+    cols: 5,
+    rows: 13,
+    totalSlots: 65,
+    labelW_mm: 38.1,
+    labelH_mm: 21.2,
+    marginH_mm: 9.75,
+    marginV_mm: 10.7,
+    name: 'A4 65-Up (5x13)'
+  }
+};
+
 // Default coordinate templates for each physical layout
 const DEFAULT_DUMBBELL_POSITIONS: LayoutPositions = {
   storeName: { x: 5, y: 14 },
@@ -96,6 +155,26 @@ const DEFAULT_SEZNIK_RATTAIL_POSITIONS: LayoutPositions = {
   barcodeText: { x: 35, y: 36 },
   sku: { x: 35, y: 72 },
   code: { x: 50, y: 50 },
+};
+
+// Seznik Portrait layout (vertical 14.3mm strip as shown on Amazon reel)
+// Centered horizontally across the 14.3mm width, stacked down the 100mm strip
+const DEFAULT_SEZNIK_PORTRAIT_POSITIONS: LayoutPositions = {
+  storeName: { x: 50, y: 7 },
+  productName: { x: 50, y: 16 },
+  price: { x: 50, y: 26 },
+  code: { x: 50, y: 44 },
+  barcodeText: { x: 50, y: 55 },
+  sku: { x: 50, y: 61 },
+};
+
+const DEFAULT_A4_POSITIONS: LayoutPositions = {
+  storeName: { x: 50, y: 12 },
+  productName: { x: 50, y: 28 },
+  code: { x: 50, y: 56 },
+  barcodeText: { x: 50, y: 76 },
+  price: { x: 50, y: 88 },
+  sku: { x: 88, y: 88 },
 };
 
 const DEFAULT_STACKED_POSITIONS: LayoutPositions = {
@@ -146,12 +225,12 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   // Formatting & Arrangement States
   const [codeType, setCodeType] = useState<'BARCODE' | 'QR'>(initialCodeType);
   const [style, setStyle] = useState<'JEWELRY_RAT_TAIL' | 'STANDARD' | 'JEWELRY_STRING_TAG' | 'A4_SHEET'>('JEWELRY_RAT_TAIL');
-  const [paperSize, setPaperSize] = useState<
-    'RAT_TAIL_76x12' | 'SEZNIK_100x15' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40'
-  >('RAT_TAIL_76x12');
+  const [paperSize, setPaperSize] = useState<PaperSizeType>('RAT_TAIL_76x12');
+  const [orientation, setOrientation] = useState<LabelOrientationType>('PORTRAIT');
   const [arrangement, setArrangement] = useState<'DUAL_FLAP' | 'STACKED' | 'SIDE_BY_SIDE'>('DUAL_FLAP');
   const [codeScale, setCodeScale] = useState<number>(1.0); // 0.8, 1.0, 1.2, 1.4
-  const [quantity, setQuantity] = useState(defaultStockCount || 10);
+  const [quantity, setQuantity] = useState<number | ''>(defaultStockCount || 10);
+  const effectiveQuantity = Math.max(1, typeof quantity === 'number' && !isNaN(quantity) ? quantity : (parseInt(String(quantity), 10) || 1));
 
   // Cached positions dictionary for every template
   const [positionsByTemplate, setPositionsByTemplate] = useState<Record<string, LayoutPositions>>({});
@@ -159,7 +238,6 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   const [selectedElementId, setSelectedElementId] = useState<'productName' | 'price' | 'storeName' | 'barcodeText' | 'sku'>('productName');
   const [elementStyles, setElementStyles] = useState<LayoutStyles>(DEFAULT_ELEMENT_STYLES);
   const [stylesByTemplate, setStylesByTemplate] = useState<Record<string, LayoutStyles>>({});
-
 
   // Active element positions
   const [elementPositions, setElementPositions] = useState<LayoutPositions>(DEFAULT_RATTAIL_POSITIONS);
@@ -184,15 +262,25 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   // Helper flags
   const isDumbbell = style === 'JEWELRY_STRING_TAG' || paperSize === 'DUMBBELL_70x12';
-  const isSeznik = paperSize === 'SEZNIK_100x15';
+  const isSeznik3Up = paperSize === 'SEZNIK_3UP_100x15';
+  const isSeznik = paperSize === 'SEZNIK_100x15' || isSeznik3Up;
   const isRatTail = (style === 'JEWELRY_RAT_TAIL' || paperSize === 'RAT_TAIL_76x12' || isSeznik) && !isDumbbell;
+  const isA4 = paperSize === 'A4_GRID_24' || paperSize === 'A4_GRID_40' || paperSize === 'A4_GRID_65' || style === 'A4_SHEET';
+  const [startOffsetSlot, setStartOffsetSlot] = useState<number>(1);
+  const activeA4Grid = A4_GRID_CONFIG[paperSize] || A4_GRID_CONFIG['A4_GRID_24'];
 
-  // Resolve default positions based on layout
-  const resolveDefaultPositions = useCallback((curArr: string, curStyle: string, curPaper: string): LayoutPositions => {
+  // Resolve default positions based on layout and orientation
+  const resolveDefaultPositions = useCallback((curArr: string, curStyle: string, curPaper: string, curOrientation = orientation): LayoutPositions => {
+    if (curPaper.startsWith('A4_') || curStyle === 'A4_SHEET') {
+      return { ...DEFAULT_A4_POSITIONS };
+    }
     if (curStyle === 'JEWELRY_STRING_TAG' || curPaper === 'DUMBBELL_70x12') {
       return { ...DEFAULT_DUMBBELL_POSITIONS };
     }
-    if (curPaper === 'SEZNIK_100x15') {
+    if (curPaper === 'SEZNIK_100x15' || curPaper === 'SEZNIK_3UP_100x15') {
+      if (curOrientation === 'PORTRAIT') {
+        return { ...DEFAULT_SEZNIK_PORTRAIT_POSITIONS };
+      }
       return { ...DEFAULT_SEZNIK_RATTAIL_POSITIONS };
     }
     if (curStyle === 'JEWELRY_RAT_TAIL' || curPaper === 'RAT_TAIL_76x12') {
@@ -202,7 +290,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       return { ...DEFAULT_SIDEBYSIDE_POSITIONS };
     }
     return { ...DEFAULT_STACKED_POSITIONS };
-  }, []);
+  }, [orientation]);
 
   // Save current design state to localStorage cache
   const saveDesignToCache = useCallback((
@@ -213,19 +301,22 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     curCodeType = codeType,
     curCodeScale = codeScale,
     curSnap = dragSnapToGrid,
-    curStyles: LayoutStyles = elementStyles
+    curStyles: LayoutStyles = elementStyles,
+    curOrientation = orientation
   ) => {
     try {
-      const templateKey = curPaper;
+      const templateKey = `${curPaper}_${curOrientation}`;
       const updatedPositionsByTemplate = {
         ...positionsByTemplate,
         [templateKey]: newPositions,
+        [curPaper]: newPositions,
       };
       setPositionsByTemplate(updatedPositionsByTemplate);
 
       const updatedStylesByTemplate = {
         ...stylesByTemplate,
         [templateKey]: curStyles,
+        [curPaper]: curStyles,
       };
       setStylesByTemplate(updatedStylesByTemplate);
 
@@ -234,6 +325,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         lastUpdated: Date.now(),
         style: curStyle,
         paperSize: curPaper,
+        orientation: curOrientation,
         arrangement: curArr,
         codeType: curCodeType,
         codeScale: curCodeScale,
@@ -251,7 +343,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     } catch (err) {
       console.warn('Failed to cache label design:', err);
     }
-  }, [positionsByTemplate, stylesByTemplate, elementStyles, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, showProductName, showPrice, showSku, showStoreName]);
+  }, [positionsByTemplate, stylesByTemplate, elementStyles, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, showProductName, showPrice, showSku, showStoreName, orientation]);
 
   // Update typography style for a specific label element
   const handleUpdateElementStyle = (
@@ -268,7 +360,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       [elemId]: updated,
     };
     setElementStyles(nextStyles);
-    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, nextStyles);
+    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, nextStyles, orientation);
   };
 
   // Reset typography style for a specific label element
@@ -279,7 +371,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       [elemId]: defaultVal,
     };
     setElementStyles(nextStyles);
-    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, nextStyles);
+    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, nextStyles, orientation);
     setCacheNotification(`Reset typography for ${elemId}`);
     setTimeout(() => setCacheNotification(null), 1500);
   };
@@ -288,7 +380,23 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   const handleUpdateCodeScale = (newScale: number) => {
     const clamped = Math.round(Math.max(0.3, Math.min(2.5, newScale)) * 100) / 100;
     setCodeScale(clamped);
-    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, clamped);
+    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, clamped, dragSnapToGrid, elementStyles, orientation);
+  };
+
+  // Switch label orientation (Portrait vs Landscape)
+  const handleOrientationSelect = (newOrientation: LabelOrientationType) => {
+    setOrientation(newOrientation);
+    const templateKey = `${paperSize}_${newOrientation}`;
+    const cachedPositions = positionsByTemplate[templateKey];
+    if (cachedPositions) {
+      setElementPositions(cachedPositions);
+      setIsCustomLayout(true);
+    } else {
+      const defaults = resolveDefaultPositions(arrangement, style, paperSize, newOrientation);
+      setElementPositions(defaults);
+      setIsCustomLayout(false);
+      saveDesignToCache(defaults, paperSize, style, arrangement, codeType, codeScale, dragSnapToGrid, elementStyles, newOrientation);
+    }
   };
 
   // Load cached template & design on open
@@ -308,6 +416,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         if (cached && typeof cached === 'object') {
           if (cached.style) setStyle(cached.style);
           if (cached.paperSize) setPaperSize(cached.paperSize);
+          if (cached.orientation) setOrientation(cached.orientation);
           if (cached.arrangement) setArrangement(cached.arrangement);
           if (cached.codeType) setCodeType(cached.codeType);
           if (cached.codeScale) setCodeScale(cached.codeScale);
@@ -318,10 +427,15 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           if (typeof cached.showStoreName === 'boolean') setShowStoreName(cached.showStoreName);
           if (typeof cached.customBarcodeText === 'string') setCustomBarcodeText(cached.customBarcodeText);
 
-          const templateKey = cached.paperSize || paperSize;
+          const curOrient = cached.orientation || orientation;
+          const templateKey = `${cached.paperSize || paperSize}_${curOrient}`;
+          const fallbackKey = cached.paperSize || paperSize;
           if (cached.stylesByTemplate && cached.stylesByTemplate[templateKey]) {
             setStylesByTemplate(cached.stylesByTemplate);
             setElementStyles(cached.stylesByTemplate[templateKey]);
+          } else if (cached.stylesByTemplate && cached.stylesByTemplate[fallbackKey]) {
+            setStylesByTemplate(cached.stylesByTemplate);
+            setElementStyles(cached.stylesByTemplate[fallbackKey]);
           } else if (cached.elementStyles) {
             setElementStyles(cached.elementStyles);
           }
@@ -333,6 +447,13 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
             setCacheNotification('Loaded saved design & typography');
             setTimeout(() => setCacheNotification(null), 2500);
             return;
+          } else if (cached.positionsByTemplate && cached.positionsByTemplate[fallbackKey]) {
+            setPositionsByTemplate(cached.positionsByTemplate);
+            setElementPositions(cached.positionsByTemplate[fallbackKey]);
+            setIsCustomLayout(true);
+            setCacheNotification('Loaded saved design & typography');
+            setTimeout(() => setCacheNotification(null), 2500);
+            return;
           }
         }
       }
@@ -340,22 +461,27 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       console.warn('Failed to parse cached label design:', e);
     }
 
+    // Sync print quantity with actual item stock if provided
+    if (defaultStockCount !== undefined && defaultStockCount > 0) {
+      setQuantity(defaultStockCount);
+    }
+
     // Fallback to default positions if no cache
-    const defaults = resolveDefaultPositions(arrangement, style, paperSize);
+    const defaults = resolveDefaultPositions(arrangement, style, paperSize, orientation);
     setElementPositions(defaults);
     setIsCustomLayout(false);
-  }, [isOpen, itemName, itemPrice, itemSku, propStoreName, initialCodeType, resolveDefaultPositions]);
+  }, [isOpen, itemName, itemPrice, itemSku, propStoreName, initialCodeType, defaultStockCount, resolveDefaultPositions, orientation]);
 
   // Reset layout and typography to default preset
-  const resetLayout = useCallback((targetArr = arrangement, targetStyle = style, targetPaper = paperSize) => {
-    const defaults = resolveDefaultPositions(targetArr, targetStyle, targetPaper);
+  const resetLayout = useCallback((targetArr = arrangement, targetStyle = style, targetPaper = paperSize, targetOrientation = orientation) => {
+    const defaults = resolveDefaultPositions(targetArr, targetStyle, targetPaper, targetOrientation);
     setElementPositions(defaults);
     setElementStyles(DEFAULT_ELEMENT_STYLES);
     setIsCustomLayout(false);
-    saveDesignToCache(defaults, targetPaper, targetStyle, targetArr, codeType, codeScale, dragSnapToGrid, DEFAULT_ELEMENT_STYLES);
+    saveDesignToCache(defaults, targetPaper, targetStyle, targetArr, codeType, codeScale, dragSnapToGrid, DEFAULT_ELEMENT_STYLES, targetOrientation);
     setCacheNotification('Layout & typography reset to default');
     setTimeout(() => setCacheNotification(null), 2000);
-  }, [arrangement, style, paperSize, codeType, codeScale, dragSnapToGrid, resolveDefaultPositions, saveDesignToCache]);
+  }, [arrangement, style, paperSize, orientation, codeType, codeScale, dragSnapToGrid, resolveDefaultPositions, saveDesignToCache]);
 
   const barcodeRendererRef = useRef<BarcodeRendererRef | null>(null);
 
@@ -370,81 +496,65 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleStyleSelect = (newStyle: 'JEWELRY_RAT_TAIL' | 'STANDARD' | 'JEWELRY_STRING_TAG' | 'A4_SHEET') => {
-    setStyle(newStyle);
-    let newPaper: 'RAT_TAIL_76x12' | 'SEZNIK_100x15' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40' = paperSize;
-    let newArr: 'DUAL_FLAP' | 'STACKED' | 'SIDE_BY_SIDE' = arrangement;
+  const handleSelectPreset = (newPaper: PaperSizeType) => {
+    setPaperSize(newPaper);
+    let newStyle: 'JEWELRY_RAT_TAIL' | 'STANDARD' | 'JEWELRY_STRING_TAG' | 'A4_SHEET' = 'STANDARD';
+    let newArr: 'DUAL_FLAP' | 'STACKED' | 'SIDE_BY_SIDE' = 'STACKED';
+    let newOrient: LabelOrientationType = orientation;
 
-    if (newStyle === 'JEWELRY_RAT_TAIL') {
-      newPaper = paperSize === 'SEZNIK_100x15' ? 'SEZNIK_100x15' : 'RAT_TAIL_76x12';
+    if (newPaper === 'SEZNIK_3UP_100x15') {
+      newStyle = 'JEWELRY_RAT_TAIL';
       newArr = 'DUAL_FLAP';
-    } else if (newStyle === 'JEWELRY_STRING_TAG') {
-      newPaper = 'DUMBBELL_70x12';
+      newOrient = 'PORTRAIT';
+    } else if (newPaper === 'SEZNIK_100x15') {
+      newStyle = 'JEWELRY_RAT_TAIL';
       newArr = 'DUAL_FLAP';
-    } else if (newStyle === 'A4_SHEET') {
-      newPaper = 'A4_GRID_24';
+    } else if (newPaper === 'DUMBBELL_70x12') {
+      newStyle = 'JEWELRY_STRING_TAG';
+      newArr = 'DUAL_FLAP';
+    } else if (newPaper === 'RAT_TAIL_76x12') {
+      newStyle = 'JEWELRY_RAT_TAIL';
+      newArr = 'DUAL_FLAP';
+    } else if (newPaper.startsWith('A4_')) {
+      newStyle = 'A4_SHEET';
       newArr = 'STACKED';
-    } else if (newStyle === 'STANDARD') {
-      newPaper = 'THERMAL_50x30';
-      newArr = 'STACKED';
+    } else {
+      newStyle = 'STANDARD';
+      newArr = arrangement === 'SIDE_BY_SIDE' ? 'SIDE_BY_SIDE' : 'STACKED';
     }
 
-    setPaperSize(newPaper);
+    setStyle(newStyle);
     setArrangement(newArr);
+    setOrientation(newOrient);
 
-    // Check if custom positions exist for this paper in cache
-    const cachedPositions = positionsByTemplate[newPaper];
+    const templateKey = `${newPaper}_${newOrient}`;
+    const cachedPositions = positionsByTemplate[templateKey] || positionsByTemplate[newPaper];
     if (cachedPositions) {
       setElementPositions(cachedPositions);
       setIsCustomLayout(true);
     } else {
-      const defaults = resolveDefaultPositions(newArr, newStyle, newPaper);
+      const defaults = resolveDefaultPositions(newArr, newStyle, newPaper, newOrient);
       setElementPositions(defaults);
       setIsCustomLayout(false);
-      saveDesignToCache(defaults, newPaper, newStyle, newArr);
+      saveDesignToCache(defaults, newPaper, newStyle, newArr, codeType, codeScale, dragSnapToGrid, elementStyles, newOrient);
     }
   };
 
-  const handlePaperSelect = (newPaper: 'RAT_TAIL_76x12' | 'SEZNIK_100x15' | 'THERMAL_50x30' | 'THERMAL_40x40' | 'THERMAL_38x25' | 'DUMBBELL_70x12' | 'A4_GRID_24' | 'A4_GRID_40') => {
-    setPaperSize(newPaper);
-    let newStyle = style;
-    let newArr = arrangement;
+  const handlePaperSelect = handleSelectPreset;
 
-    if (newPaper === 'DUMBBELL_70x12') {
-      newStyle = 'JEWELRY_STRING_TAG';
-      newArr = 'DUAL_FLAP';
-      setStyle(newStyle);
-      setArrangement(newArr);
-    } else if (newPaper === 'RAT_TAIL_76x12' || newPaper === 'SEZNIK_100x15') {
-      newStyle = 'JEWELRY_RAT_TAIL';
-      newArr = 'DUAL_FLAP';
-      setStyle(newStyle);
-      setArrangement(newArr);
-    } else if (newPaper === 'A4_GRID_24' || newPaper === 'A4_GRID_40') {
-      newStyle = 'A4_SHEET';
-      newArr = 'STACKED';
-      setStyle(newStyle);
-      setArrangement(newArr);
-    }
-
-    const cachedPositions = positionsByTemplate[newPaper];
-    if (cachedPositions) {
-      setElementPositions(cachedPositions);
-      setIsCustomLayout(true);
-    } else {
-      const defaults = resolveDefaultPositions(newArr, newStyle, newPaper);
-      setElementPositions(defaults);
-      setIsCustomLayout(false);
-      saveDesignToCache(defaults, newPaper, newStyle, newArr);
-    }
+  const handleStyleSelect = (newStyle: 'JEWELRY_RAT_TAIL' | 'STANDARD' | 'JEWELRY_STRING_TAG' | 'A4_SHEET') => {
+    if (newStyle === 'JEWELRY_RAT_TAIL') handleSelectPreset('RAT_TAIL_76x12');
+    else if (newStyle === 'JEWELRY_STRING_TAG') handleSelectPreset('DUMBBELL_70x12');
+    else if (newStyle === 'A4_SHEET') handleSelectPreset('A4_GRID_24');
+    else handleSelectPreset('THERMAL_50x30');
   };
 
   const handleArrangementSelect = (newArr: 'DUAL_FLAP' | 'STACKED' | 'SIDE_BY_SIDE') => {
     setArrangement(newArr);
-    const defaults = resolveDefaultPositions(newArr, style, paperSize);
+    const defaults = resolveDefaultPositions(newArr, style, paperSize, orientation);
     setElementPositions(defaults);
     setIsCustomLayout(false);
-    saveDesignToCache(defaults, paperSize, style, newArr);
+    saveDesignToCache(defaults, paperSize, style, newArr, codeType, codeScale, dragSnapToGrid, elementStyles, orientation);
   };
 
   const handleCopyPayload = async () => {
@@ -606,13 +716,95 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
       const safeName = (productName || 'Product').replace(/[^a-zA-Z0-9_-]/g, '_');
       // Merge with default positions to guarantee every element has valid coordinates
-      const defaultPos = resolveDefaultPositions(arrangement, style, paperSize);
+      const defaultPos = resolveDefaultPositions(arrangement, style, paperSize, orientation);
       const pos: LayoutPositions = { ...defaultPos, ...elementPositions };
 
       // Ensure vertical text baseline aligns with CSS translateY(-50%)
       ctx.textBaseline = 'middle';
 
-      if (isSeznik) {
+      if (isSeznik && orientation === 'PORTRAIT') {
+        // High-res Portrait Seznik Jewellery Tag: 150px x 1000px
+        canvas.width = isSeznik3Up ? 480 : 150;
+        canvas.height = 1000;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const stripCols = isSeznik3Up ? [10, 170, 330] : [0];
+        const sW = 140;
+
+        for (const colX of stripCols) {
+          // Flap 1 (0 to 320px)
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(colX + 2, 4, sW - 4, 314);
+
+          // Fold crease at 320px
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = '#64748b';
+          ctx.beginPath();
+          ctx.moveTo(colX + 2, 320);
+          ctx.lineTo(colX + sW - 2, 320);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Flap 2 (320 to 640px)
+          ctx.strokeStyle = '#94a3b8';
+          ctx.strokeRect(colX + 2, 324, sW - 4, 314);
+
+          // Tail strap (640 to 1000px, 40px wide in center)
+          ctx.fillStyle = '#f8fafc';
+          ctx.strokeStyle = '#cbd5e1';
+          const tX = colX + (sW - 40) / 2;
+          ctx.fillRect(tX, 642, 40, 354);
+          ctx.strokeRect(tX, 642, 40, 354);
+
+          ctx.textAlign = 'center';
+          const midX = colX + sW / 2;
+
+          if (showStoreName) {
+            const sY = (pos.storeName.y / 100) * canvas.height;
+            ctx.fillStyle = '#0f172a';
+            ctx.font = getCanvasFont('storeName', 12, true);
+            ctx.fillText(formatElementText('storeName', storeName || 'Store').substring(0, 16), midX, sY);
+          }
+          if (showProductName) {
+            const pY = (pos.productName.y / 100) * canvas.height;
+            ctx.fillStyle = '#1e293b';
+            ctx.font = getCanvasFont('productName', 13, true);
+            ctx.fillText(formatElementText('productName', productName || 'Item').substring(0, 16), midX, pY);
+          }
+          if (showPrice) {
+            const prY = (pos.price.y / 100) * canvas.height;
+            ctx.fillStyle = '#1e1b4b';
+            ctx.font = getCanvasFont('price', 16, true);
+            ctx.fillText(`₹${(price || 0).toFixed(2)}`, midX, prY);
+          }
+
+          if (rawDataUrl) {
+            const img = new Image();
+            await new Promise((res) => {
+              img.onload = res;
+              img.src = rawDataUrl;
+            });
+            const cW = Math.round((codeType === 'QR' ? 90 : 130) * codeScale);
+            const cH = Math.round((codeType === 'QR' ? 90 : 54) * codeScale);
+            const cY = (pos.code.y / 100) * canvas.height;
+            ctx.drawImage(img, midX - cW / 2, cY - cH / 2, cW, cH);
+          }
+
+          const bY = (pos.barcodeText.y / 100) * canvas.height;
+          ctx.fillStyle = '#0f172a';
+          ctx.font = getCanvasFont('barcodeText', 11, true, true);
+          ctx.fillText(formatElementText('barcodeText', effectiveBarcodeText).substring(0, 14), midX, bY);
+
+          if (showSku && sku) {
+            const skY = (pos.sku.y / 100) * canvas.height;
+            ctx.fillStyle = '#64748b';
+            ctx.font = getCanvasFont('sku', 10, false);
+            ctx.fillText(formatElementText('sku', `SKU:${sku.substring(0, 12)}`), midX, skY);
+          }
+        }
+      } else if (isSeznik) {
         // High-res Seznik Jewellery Tag: 1000px x 150px (Flap 1: 320px, Flap 2: 320px, Tail: 360px)
         canvas.width = 1000;
         canvas.height = 150;
@@ -1020,9 +1212,21 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
       let w_mm = '50mm';
       let h_mm = '30mm';
-      if (isSeznik) {
-        w_mm = '100mm';
-        h_mm = '15mm';
+      if (isA4) {
+        const grid = activeA4Grid;
+        w_mm = `${grid.labelW_mm}mm`;
+        h_mm = `${grid.labelH_mm}mm`;
+      } else if (isSeznik3Up) {
+        w_mm = '48mm';
+        h_mm = '100mm';
+      } else if (isSeznik) {
+        if (orientation === 'PORTRAIT') {
+          w_mm = '15mm';
+          h_mm = '100mm';
+        } else {
+          w_mm = '100mm';
+          h_mm = '15mm';
+        }
       } else if (isDumbbell) {
         w_mm = '70mm';
         h_mm = '12mm';
@@ -1035,18 +1239,59 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       } else if (paperSize === 'THERMAL_38x25') {
         w_mm = '38mm';
         h_mm = '25mm';
-      } else if (paperSize === 'A4_GRID_24' || paperSize === 'A4_GRID_40') {
-        w_mm = '210mm';
-        h_mm = '297mm';
       }
 
-      const defaultPos = resolveDefaultPositions(arrangement, style, paperSize);
+      const defaultPos = resolveDefaultPositions(arrangement, style, paperSize, orientation);
       const pos: LayoutPositions = { ...defaultPos, ...elementPositions };
 
       // Construct Unit HTML matching user drag & drop coordinates
       const buildUnitHtml = () => {
-        if (isSeznik) {
-          // Authentic Seznik Josh Jewellery Tag 100mm x 15mm (32mm Front Flap, 32mm Back Flap, 36mm Tail)
+        if (isA4) {
+          const grid = activeA4Grid;
+          const qrH = paperSize === 'A4_GRID_65' ? 10.5 : paperSize === 'A4_GRID_40' ? 12.0 : 15.0;
+          const barH = paperSize === 'A4_GRID_65' ? 6.0 : paperSize === 'A4_GRID_40' ? 7.5 : 9.5;
+          return `
+            <div class="label-unit-a4" style="width:${grid.labelW_mm}mm;height:${grid.labelH_mm}mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;border:0.15mm dashed #cbd5e1;padding:1mm;font-family:Arial,Helvetica,sans-serif;color:#000000;">
+              ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('storeName', paperSize === 'A4_GRID_65' ? 5.2 : 6, true)}white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+              ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('productName', paperSize === 'A4_GRID_65' ? 5.5 : 6.5, true)}white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+              ${codeDataUrl ? `
+                <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;">
+                  <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${barH * codeScale}mm` : `${qrH * codeScale}mm`};max-width:${grid.labelW_mm - 6}mm;object-fit:contain;" />
+                </div>
+              ` : ''}
+              <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('barcodeText', paperSize === 'A4_GRID_65' ? 4.5 : 5, true, true)}white-space:nowrap;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText))}</div>
+              ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('price', paperSize === 'A4_GRID_65' ? 5.8 : 7, true)}">₹${Number(price || 0).toFixed(2)}</div>` : ''}
+              ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('sku', paperSize === 'A4_GRID_65' ? 4.2 : 5, false)}color:#333;">SKU:${escapeHtml(formatElementText('sku', sku))}</div>` : ''}
+            </div>
+          `;
+        } else if (isSeznik) {
+          if (orientation === 'PORTRAIT') {
+            // Authentic Seznik Portrait Tag 14.3mm x 100mm (32mm Top Flap, 32mm Middle Flap, 36mm Tail)
+            return `
+              <div class="label-unit-seznik-portrait" style="width:14.3mm;height:100mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
+                <!-- Background Guides -->
+                <div style="position:absolute;left:0;top:0;width:14.3mm;height:32mm;border:0.2mm solid #cbd5e1;border-bottom:0.3mm dashed #64748b;box-sizing:border-box;"></div>
+                <div style="position:absolute;left:0;top:32mm;width:14.3mm;height:32mm;border:0.2mm solid #cbd5e1;box-sizing:border-box;"></div>
+                <div style="position:absolute;left:5.15mm;top:64mm;width:4mm;height:36mm;border:0.2mm solid #cbd5e1;background:#f8fafc;box-sizing:border-box;"></div>
+
+                <!-- Custom Elements in Portrait -->
+                ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('storeName', 5.2, true)}line-height:1;white-space:nowrap;text-align:center;width:100%;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
+                ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('productName', 5.5, true)}line-height:1;white-space:nowrap;text-align:center;width:100%;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
+                ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('price', 6.8, true)}line-height:1;text-align:center;width:100%;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
+
+                ${codeDataUrl ? `
+                  <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;width:100%;">
+                    <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${6.5 * codeScale}mm` : `${10.0 * codeScale}mm`};max-width:13.5mm;object-fit:contain;" />
+                  </div>
+                ` : ''}
+
+                <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('barcodeText', 4.8, true, true)}line-height:1;text-align:center;width:100%;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14)))}</div>
+                ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(-50%,-50%);${getPrintInlineCss('sku', 4.4, false)}color:#333;line-height:1;text-align:center;width:100%;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 12)))}</div>` : ''}
+              </div>
+            `;
+          }
+
+          // Authentic Seznik Landscape Jewellery Tag 100mm x 15mm (32mm Front Flap, 32mm Back Flap, 36mm Tail)
           return `
             <div class="label-unit-seznik-100x15" style="width:100mm;height:15mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
               <!-- Background Guides -->
@@ -1054,7 +1299,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style="position:absolute;left:32mm;top:0;width:32mm;height:15mm;border:0.2mm solid #cbd5e1;box-sizing:border-box;"></div>
               <div style="position:absolute;left:64mm;top:5.5mm;width:36mm;height:4mm;border:0.2mm solid #cbd5e1;background:#f8fafc;box-sizing:border-box;"></div>
 
-              <!-- Custom Elements -->
+              <!-- Custom Elements in Landscape -->
               ${showStoreName ? `<div style="position:absolute;left:${pos.storeName.x}%;top:${pos.storeName.y}%;transform:translate(0,-50%);${getPrintInlineCss('storeName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('storeName', storeName || 'Store'))}</div>` : ''}
               ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(0,-50%);${getPrintInlineCss('productName', 5.5, true)}line-height:1;white-space:nowrap;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
               ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(0,-50%);${getPrintInlineCss('price', 7, true)}line-height:1;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
@@ -1153,25 +1398,56 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
       const singleLabelHtml = buildUnitHtml();
       let bodyHtml = '';
+      const printQty = effectiveQuantity;
 
-      if (paperSize === 'A4_GRID_24' || paperSize === 'A4_GRID_40') {
-        const cols = paperSize === 'A4_GRID_40' ? 4 : 3;
-        const rows = paperSize === 'A4_GRID_40' ? 10 : 8;
-        const totalSlots = cols * rows;
-        const pagesCount = Math.ceil(quantity / totalSlots);
+      if (isA4) {
+        // Calibrated Multi-Page A4 Sheet Grid Printing
+        const grid = activeA4Grid;
+        const totalSlots = grid.totalSlots;
+        const pagesCount = Math.ceil(((startOffsetSlot - 1) + printQty) / totalSlots);
+        let remainingToPrint = printQty;
 
-        let curIndex = 0;
         for (let p = 0; p < pagesCount; p++) {
           bodyHtml += `
-            <div style="width:210mm;height:297mm;padding:10mm;display:grid;grid-template-columns:repeat(${cols}, 1fr);grid-template-rows:repeat(${rows}, 1fr);gap:2mm;box-sizing:border-box;page-break-after:always;">
+            <div class="a4-sheet-page" style="width:210mm;height:297mm;padding:${grid.marginV_mm}mm ${grid.marginH_mm}mm;display:grid;grid-template-columns:repeat(${grid.cols}, ${grid.labelW_mm}mm);grid-template-rows:repeat(${grid.rows}, ${grid.labelH_mm}mm);gap:0;box-sizing:border-box;page-break-after:always;background:#ffffff;margin:0 auto;overflow:hidden;">
           `;
-          for (let slot = 0; slot < totalSlots && curIndex < quantity; slot++, curIndex++) {
-            bodyHtml += `<div style="display:flex;align-items:center;justify-content:center;overflow:hidden;border:0.2mm solid #e2e8f0;">${singleLabelHtml}</div>`;
+
+          for (let slot = 1; slot <= totalSlots; slot++) {
+            if (p === 0 && slot < startOffsetSlot) {
+              // Blank slot for already peeled stickers on page 1
+              bodyHtml += `<div style="width:${grid.labelW_mm}mm;height:${grid.labelH_mm}mm;box-sizing:border-box;"></div>`;
+            } else if (remainingToPrint > 0) {
+              bodyHtml += singleLabelHtml;
+              remainingToPrint--;
+            } else {
+              // Empty slot at the end of the final page
+              bodyHtml += `<div style="width:${grid.labelW_mm}mm;height:${grid.labelH_mm}mm;box-sizing:border-box;"></div>`;
+            }
+          }
+
+          bodyHtml += `</div>`;
+        }
+      } else if (isSeznik3Up) {
+        // 3-Across Seznik Reel (48mm x 100mm feed, 3 columns side by side)
+        const cols = 3;
+        const totalRows = Math.ceil(printQty / cols);
+        let curIndex = 0;
+        for (let r = 0; r < totalRows; r++) {
+          bodyHtml += `
+            <div style="width:48mm;height:100mm;page-break-after:always;display:flex;flex-direction:row;justify-content:space-between;box-sizing:border-box;margin:0 auto;overflow:hidden;background:#ffffff;">
+          `;
+          for (let c = 0; c < cols; c++) {
+            if (curIndex < printQty) {
+              bodyHtml += singleLabelHtml;
+              curIndex++;
+            } else {
+              bodyHtml += `<div style="width:14.3mm;height:100mm;box-sizing:border-box;"></div>`;
+            }
           }
           bodyHtml += `</div>`;
         }
       } else {
-        for (let i = 0; i < quantity; i++) {
+        for (let i = 0; i < printQty; i++) {
           bodyHtml += `
             <div style="width:${w_mm};height:${h_mm};page-break-after:always;display:flex;align-items:center;justify-content:center;overflow:hidden;box-sizing:border-box;">
               ${singleLabelHtml}
@@ -1193,6 +1469,14 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       const doc = iframe.contentWindow?.document;
       if (!doc) throw new Error('Cannot access print iframe document');
 
+      const printPageSize = isA4
+        ? 'A4 portrait'
+        : isSeznik3Up 
+        ? '48mm 100mm' 
+        : (isSeznik && orientation === 'PORTRAIT') 
+        ? '15mm 100mm' 
+        : `${w_mm} ${h_mm}`;
+
       doc.open();
       doc.write(`
         <!DOCTYPE html>
@@ -1202,7 +1486,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           <title>QuickBill Print - ${escapeHtml(productName)}</title>
           <style>
             @page {
-              size: auto;
+              size: ${printPageSize};
               margin: 0mm !important;
             }
             * {
@@ -1247,7 +1531,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   const handleDownloadPdf = async () => {
     setIsGenerating(true);
     try {
-      const defaultPos = resolveDefaultPositions(arrangement, style, paperSize);
+      const defaultPos = resolveDefaultPositions(arrangement, style, paperSize, orientation);
       const pos: LayoutPositions = { ...defaultPos, ...elementPositions };
 
       const payload = {
@@ -1258,8 +1542,10 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         publicItemId,
         style,
         paperSize,
+        orientation,
+        labelsAcross: isSeznik3Up ? 3 : 1,
         codeType,
-        quantity,
+        quantity: effectiveQuantity,
         showPrice,
         showSku,
         showStoreName,
@@ -1278,7 +1564,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `Label_${isDumbbell ? 'Dumbbell' : style}_${codeType}_${sku || barcodeValue}_${quantity}qty.pdf`);
+      link.setAttribute('download', `Label_${isA4 ? 'A4_Sticker_Grid' : isSeznik3Up ? 'Seznik_3UP' : isDumbbell ? 'Dumbbell' : style}_${codeType}_${sku || barcodeValue}_${effectiveQuantity}qty.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1476,7 +1762,25 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   2. Interactive Design Canvas
                 </label>
                 <span style={{ fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'var(--primary-100)', color: 'var(--primary-800)', padding: '2px 8px', borderRadius: 10 }}>
-                  {paperSize === 'RAT_TAIL_76x12' ? '76 × 12 mm' : paperSize === 'DUMBBELL_70x12' ? '70 × 12 mm' : paperSize === 'THERMAL_40x40' ? '40 × 40 mm' : paperSize === 'THERMAL_38x25' ? '38 × 25 mm' : paperSize === 'THERMAL_50x30' ? '50 × 30 mm' : 'A4 Sheet'}
+                  {paperSize === 'SEZNIK_3UP_100x15'
+                    ? '100 × 15 mm (3-UP Reel)'
+                    : paperSize === 'SEZNIK_100x15'
+                    ? '100 × 15 mm (1-UP Tag)'
+                    : paperSize === 'RAT_TAIL_76x12'
+                    ? '76 × 12 mm'
+                    : paperSize === 'DUMBBELL_70x12'
+                    ? '70 × 12 mm'
+                    : paperSize === 'THERMAL_40x40'
+                    ? '40 × 40 mm'
+                    : paperSize === 'THERMAL_38x25'
+                    ? '38 × 25 mm'
+                    : paperSize === 'THERMAL_50x30'
+                    ? '50 × 30 mm'
+                    : paperSize === 'A4_GRID_40'
+                    ? 'A4 40-Up (48.5 × 25.4 mm)'
+                    : paperSize === 'A4_GRID_65'
+                    ? 'A4 65-Up (38.1 × 21.2 mm)'
+                    : 'A4 24-Up (64 × 33.9 mm)'}
                 </span>
                 {isCustomLayout && (
                   <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#b45309', backgroundColor: '#fef3c7', padding: '2px 6px', borderRadius: 6 }}>
@@ -1505,7 +1809,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   onClick={() => {
                     const nextSnap = !dragSnapToGrid;
                     setDragSnapToGrid(nextSnap);
-                    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, nextSnap);
+                    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, codeScale, nextSnap, elementStyles, orientation);
                   }}
                   style={{
                     padding: '3px 8px',
@@ -1525,6 +1829,32 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   <Grid size={12} />
                   <span>Snap: {dragSnapToGrid ? 'ON' : 'OFF'}</span>
                 </button>
+
+                {/* Orientation Switcher */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', backgroundColor: 'var(--neutral-100)', padding: '2px 4px', borderRadius: 'var(--radius-sm)' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--neutral-500)', padding: '0 4px' }}>Orient:</span>
+                  {(['PORTRAIT', 'LANDSCAPE'] as const).map((orient) => (
+                    <button
+                      key={orient}
+                      type="button"
+                      onClick={() => handleOrientationSelect(orient)}
+                      style={{
+                        padding: '2px 8px',
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        border: 'none',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                        backgroundColor: orientation === orient ? '#ffffff' : 'transparent',
+                        color: orientation === orient ? 'var(--primary-700)' : 'var(--neutral-600)',
+                        boxShadow: orientation === orient ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                      }}
+                      title={orient === 'PORTRAIT' ? 'Vertical 14.3mm Strip (Amazon Reel Standard)' : 'Horizontal 32mm Flap (Rotated)'}
+                    >
+                      {orient === 'PORTRAIT' ? 'Portrait' : 'Landscape'}
+                    </button>
+                  ))}
+                </div>
 
                 {/* Layout Switcher */}
                 <div style={{ display: 'inline-flex', alignItems: 'center', backgroundColor: 'var(--neutral-100)', padding: '2px 4px', borderRadius: 'var(--radius-sm)' }}>
@@ -1947,245 +2277,552 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
 
               {/* RENDERED CANVAS WORKBENCH */}
               {isSeznik ? (
-                /* AUTHENTIC SEZNIK JOSH JEWELRY TAG CANVAS (100mm x 15mm) */
-                <div style={{ width: '100%', maxWidth: 640, padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}>
-                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary-700)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      🏷️ SEZNIK Josh Tag (100 × 15 mm) • 32mm Front / 32mm Back / 36mm Tail
-                    </span>
-                    <span style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>
-                      Drag items freely • Fold at 32mm crease
-                    </span>
+                orientation === 'PORTRAIT' ? (
+                  /* AUTHENTIC SEZNIK PORTRAIT JEWELRY TAG CANVAS (14.3mm x 100mm Strip) */
+                  <div style={{ width: '100%', maxWidth: 760, padding: 4, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px', flexWrap: 'wrap', gap: 6 }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary-700)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        🏷️ SEZNIK Jewellery Tag (14.3 × 100 mm) • PORTRAIT
+                        {isSeznik3Up && (
+                          <span style={{ fontSize: '0.62rem', backgroundColor: 'var(--primary-100)', color: 'var(--primary-800)', padding: '1px 6px', borderRadius: 4, fontWeight: 800 }}>
+                            ✨ 3-Across Reel (3 Labels per row)
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>
+                        Front Face (32mm) • Fold Crease • Back Face (32mm) • Tail Strap (36mm)
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', gap: 20, flexWrap: 'wrap', width: '100%' }}>
+                      {/* INTERACTIVE STRIP DESIGNER */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--neutral-600)' }}>
+                          Interactive Strip Editor {isSeznik3Up ? '(Column Template)' : ''}
+                        </span>
+                        <div 
+                          ref={canvasContainerRef}
+                          style={{
+                            width: 160,
+                            height: 460,
+                            backgroundColor: '#ffffff',
+                            border: '1.5px solid var(--neutral-400)',
+                            borderRadius: 8,
+                            boxShadow: 'var(--shadow-md)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            position: 'relative',
+                            overflow: 'hidden',
+                            userSelect: 'none'
+                          }}
+                        >
+                          {/* FLAP 1: Front Face (0 to 32% height) */}
+                          <div style={{
+                            width: '100%',
+                            height: '32%',
+                            borderBottom: '1.5px dashed var(--neutral-400)',
+                            backgroundColor: '#ffffff',
+                            position: 'relative',
+                            boxSizing: 'border-box'
+                          }}>
+                            <div style={{ position: 'absolute', right: 4, bottom: -9, backgroundColor: 'var(--neutral-200)', color: 'var(--neutral-700)', fontSize: '0.50rem', fontWeight: 800, padding: '1px 4px', borderRadius: 3, zIndex: 12 }}>
+                              FOLD (32mm)
+                            </div>
+                            <div style={{ position: 'absolute', left: 4, top: 2, fontSize: '0.48rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
+                              Front Face (32mm)
+                            </div>
+                          </div>
+
+                          {/* FLAP 2: Back Face (32% to 64% height) */}
+                          <div style={{
+                            width: '100%',
+                            height: '32%',
+                            borderBottom: '1px solid var(--neutral-200)',
+                            backgroundColor: '#ffffff',
+                            position: 'relative',
+                            boxSizing: 'border-box'
+                          }}>
+                            <div style={{ position: 'absolute', left: 4, top: 2, fontSize: '0.48rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
+                              Back Face (32mm)
+                            </div>
+                          </div>
+
+                          {/* TAIL STRAP (64% to 100% height) */}
+                          <div style={{
+                            width: '100%',
+                            height: '36%',
+                            backgroundColor: 'var(--neutral-50)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            position: 'relative'
+                          }}>
+                            <div style={{
+                              width: 44,
+                              height: '92%',
+                              borderRadius: 4,
+                              backgroundColor: '#ffffff',
+                              border: '1px solid var(--neutral-300)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                            }}>
+                              <span style={{ fontSize: '0.52rem', color: 'var(--neutral-500)', fontWeight: 700, transform: 'rotate(-90deg)', whiteSpace: 'nowrap' }}>
+                                Tail Strap (36mm)
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* DRAGGABLE ELEMENTS IN PORTRAIT */}
+                          {showStoreName && (
+                            <div
+                              onPointerDown={(e) => handlePointerDown('storeName', e)}
+                              onClick={() => setSelectedElementId('storeName')}
+                              style={{
+                                position: 'absolute',
+                                left: `${elementPositions.storeName?.x ?? 50}%`,
+                                top: `${elementPositions.storeName?.y ?? 7}%`,
+                                transform: 'translate(-50%, -50%)',
+                                cursor: 'move',
+                                padding: '2px 4px',
+                                borderRadius: 4,
+                                border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                color: 'var(--neutral-900)',
+                                whiteSpace: 'nowrap',
+                                textAlign: 'center',
+                                maxWidth: 150,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                zIndex: 10,
+                                ...getElementStyleProps('storeName', 0.68, true)
+                              }}
+                            >
+                              {formatElementText('storeName', storeName || 'Store')}
+                            </div>
+                          )}
+
+                          {showProductName && (
+                            <div
+                              onPointerDown={(e) => handlePointerDown('productName', e)}
+                              onClick={() => setSelectedElementId('productName')}
+                              style={{
+                                position: 'absolute',
+                                left: `${elementPositions.productName?.x ?? 50}%`,
+                                top: `${elementPositions.productName?.y ?? 16}%`,
+                                transform: 'translate(-50%, -50%)',
+                                cursor: 'move',
+                                padding: '2px 4px',
+                                borderRadius: 4,
+                                border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                color: 'var(--neutral-800)',
+                                maxWidth: 150,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                textAlign: 'center',
+                                zIndex: 10,
+                                ...getElementStyleProps('productName', 0.74, true)
+                              }}
+                            >
+                              {formatElementText('productName', productName)}
+                            </div>
+                          )}
+
+                          {showPrice && (
+                            <div
+                              onPointerDown={(e) => handlePointerDown('price', e)}
+                              onClick={() => setSelectedElementId('price')}
+                              style={{
+                                position: 'absolute',
+                                left: `${elementPositions.price?.x ?? 50}%`,
+                                top: `${elementPositions.price?.y ?? 26}%`,
+                                transform: 'translate(-50%, -50%)',
+                                cursor: 'move',
+                                padding: '2px 4px',
+                                borderRadius: 4,
+                                border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                color: '#1e1b4b',
+                                whiteSpace: 'nowrap',
+                                textAlign: 'center',
+                                zIndex: 10,
+                                ...getElementStyleProps('price', 0.96, true)
+                              }}
+                            >
+                              ₹{Number(price || 0).toFixed(2)}
+                            </div>
+                          )}
+
+                          <div
+                            onPointerDown={(e) => handlePointerDown('code', e)}
+                            style={{
+                              position: 'absolute',
+                              left: `${elementPositions.code?.x ?? 50}%`,
+                              top: `${elementPositions.code?.y ?? 44}%`,
+                              transform: `translate(-50%, -50%) scale(${codeScale})`,
+                              transformOrigin: 'center center',
+                              cursor: 'move',
+                              padding: '2px',
+                              borderRadius: 4,
+                              border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                              backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 'max-content',
+                              height: 'max-content',
+                              flexShrink: 0,
+                              whiteSpace: 'nowrap',
+                              zIndex: 10
+                            }}
+                          >
+                            <BarcodeRenderer
+                              ref={barcodeRendererRef}
+                              value={activePayload}
+                              codeType={codeType}
+                              width={codeType === 'BARCODE' ? 0.9 : undefined}
+                              height={codeType === 'BARCODE' ? 36 : 60}
+                              showText={false}
+                            />
+                          </div>
+
+                          <div
+                            onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                            onClick={() => setSelectedElementId('barcodeText')}
+                            style={{
+                              position: 'absolute',
+                              left: `${elementPositions.barcodeText?.x ?? 50}%`,
+                              top: `${elementPositions.barcodeText?.y ?? 55}%`,
+                              transform: 'translate(-50%, -50%)',
+                              cursor: 'move',
+                              padding: '2px 4px',
+                              borderRadius: 4,
+                              border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                              backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                              color: 'var(--neutral-900)',
+                              whiteSpace: 'nowrap',
+                              textAlign: 'center',
+                              zIndex: 10,
+                              ...getElementStyleProps('barcodeText', 0.68, true, true)
+                            }}
+                          >
+                            {formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14))}
+                          </div>
+
+                          {showSku && sku && (
+                            <div
+                              onPointerDown={(e) => handlePointerDown('sku', e)}
+                              onClick={() => setSelectedElementId('sku')}
+                              style={{
+                                position: 'absolute',
+                                left: `${elementPositions.sku?.x ?? 50}%`,
+                                top: `${elementPositions.sku?.y ?? 61}%`,
+                                transform: 'translate(-50%, -50%)',
+                                cursor: 'move',
+                                padding: '2px 4px',
+                                borderRadius: 4,
+                                border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                color: 'var(--neutral-500)',
+                                whiteSpace: 'nowrap',
+                                textAlign: 'center',
+                                zIndex: 10,
+                                ...getElementStyleProps('sku', 0.60, false)
+                              }}
+                            >
+                              {formatElementText('sku', `SKU:${sku}`)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* REEL PREVIEW: 3-Across side-by-side feed simulation */}
+                      {isSeznik3Up && (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, backgroundColor: '#f8fafc', padding: '12px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--primary-700)' }}>
+                              🖨️ 3-Across Reel Feed Preview (48mm Web)
+                            </span>
+                            <span style={{ fontSize: '0.60rem', backgroundColor: 'var(--primary-100)', color: 'var(--primary-800)', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                              3 Labels / Row
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 8, backgroundColor: '#ffffff', border: '1.5px solid var(--neutral-300)', borderRadius: 6, boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.04)' }}>
+                            {[1, 2, 3].map((col) => (
+                              <div key={col} style={{ width: 80, height: 250, border: '1px solid var(--neutral-300)', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: '#ffffff', position: 'relative' }}>
+                                {/* Miniature Flap 1 */}
+                                <div style={{ height: '32%', borderBottom: '1px dashed #cbd5e1', padding: '2px 3px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+                                  <div style={{ fontSize: '0.45rem', fontWeight: 800, color: '#334155', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 74 }}>{formatElementText('storeName', storeName || 'Store')}</div>
+                                  <div style={{ fontSize: '0.42rem', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 74 }}>{formatElementText('productName', productName)}</div>
+                                  <div style={{ fontSize: '0.50rem', fontWeight: 800, color: '#0f172a' }}>₹{Number(price || 0).toFixed(0)}</div>
+                                </div>
+                                {/* Miniature Flap 2 */}
+                                <div style={{ height: '32%', borderBottom: '1px solid #e2e8f0', padding: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+                                  <div style={{ fontSize: '0.40rem', fontWeight: 700, color: '#0f172a' }}>{codeType === 'QR' ? '⬛ QR' : '||||| BARCODE'}</div>
+                                  <div style={{ fontSize: '0.38rem', fontFamily: 'monospace', color: '#475569' }}>{effectiveBarcodeText.slice(0, 8)}</div>
+                                  <div style={{ fontSize: '0.36rem', color: '#94a3b8' }}>SKU:{sku.slice(0, 6)}</div>
+                                </div>
+                                {/* Miniature Tail */}
+                                <div style={{ height: '36%', backgroundColor: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <div style={{ width: 22, height: '90%', backgroundColor: '#ffffff', border: '0.5px solid #cbd5e1', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <span style={{ fontSize: '0.30rem', color: '#94a3b8', transform: 'rotate(-90deg)', whiteSpace: 'nowrap' }}>Tail #{col}</span>
+                                  </div>
+                                </div>
+                                <span style={{ position: 'absolute', bottom: 2, right: 2, fontSize: '0.48rem', fontWeight: 800, color: 'var(--primary-600)' }}>#{col}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ fontSize: '0.62rem', color: 'var(--neutral-500)', textAlign: 'center', maxWidth: 280 }}>
+                            Thermal head prints 3 tags simultaneously across the 48mm roll feed width.
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div 
-                    ref={canvasContainerRef}
-                    style={{
-                      width: '100%',
-                      height: 105,
-                      backgroundColor: '#ffffff',
-                      border: '1.5px solid var(--neutral-400)',
-                      borderRadius: 8,
-                      boxShadow: 'var(--shadow-sm)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      position: 'relative',
-                      overflow: 'hidden',
-                      userSelect: 'none'
-                    }}
-                  >
-                    {/* FLAP 1: Front Face (0 to 32%) */}
-                    <div style={{
-                      width: '32%',
-                      height: '100%',
-                      borderRight: '1.5px dashed var(--neutral-400)',
-                      backgroundColor: '#ffffff',
-                      position: 'relative'
-                    }}>
-                      <div style={{ position: 'absolute', right: -12, top: 4, backgroundColor: 'var(--neutral-200)', color: 'var(--neutral-700)', fontSize: '0.54rem', fontWeight: 800, padding: '1px 3px', borderRadius: 3, zIndex: 2 }}>
-                        FOLD
-                      </div>
-                      <div style={{ position: 'absolute', left: 4, bottom: 2, fontSize: '0.52rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
-                        Front Face (32mm)
-                      </div>
+                ) : (
+                  /* AUTHENTIC SEZNIK LANDSCAPE JEWELRY TAG CANVAS (100mm x 15mm Horizontal) */
+                  <div style={{ width: '100%', maxWidth: 640, padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary-700)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        🏷️ SEZNIK Josh Tag (100 × 15 mm) • LANDSCAPE • 32mm Front / 32mm Back / 36mm Tail
+                      </span>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>
+                        Drag items freely • Fold at 32mm crease
+                      </span>
                     </div>
-
-                    {/* FLAP 2: Back Face (32% to 64%) */}
-                    <div style={{
-                      width: '32%',
-                      height: '100%',
-                      backgroundColor: '#ffffff',
-                      position: 'relative',
-                      borderRight: '1px solid var(--neutral-200)'
-                    }}>
-                      <div style={{ position: 'absolute', left: 6, bottom: 2, fontSize: '0.52rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
-                        Back Face (32mm)
-                      </div>
-                    </div>
-
-                    {/* TAIL STRAP: Looping strap (64% to 100%, 36mm) */}
-                    <div style={{
-                      width: '36%',
-                      height: '100%',
-                      backgroundColor: 'var(--neutral-50)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: '0 8px',
-                      position: 'relative'
-                    }}>
-                      <div style={{
+                    <div 
+                      ref={canvasContainerRef}
+                      style={{
                         width: '100%',
-                        height: 24,
-                        borderRadius: 4,
+                        height: 105,
                         backgroundColor: '#ffffff',
-                        border: '1px solid var(--neutral-300)',
+                        border: '1.5px solid var(--neutral-400)',
+                        borderRadius: 8,
+                        boxShadow: 'var(--shadow-sm)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        userSelect: 'none'
+                      }}
+                    >
+                      {/* FLAP 1: Front Face (0 to 32%) */}
+                      <div style={{
+                        width: '32%',
+                        height: '100%',
+                        borderRight: '1.5px dashed var(--neutral-400)',
+                        backgroundColor: '#ffffff',
+                        position: 'relative'
+                      }}>
+                        <div style={{ position: 'absolute', right: -12, top: 4, backgroundColor: 'var(--neutral-200)', color: 'var(--neutral-700)', fontSize: '0.54rem', fontWeight: 800, padding: '1px 3px', borderRadius: 3, zIndex: 2 }}>
+                          FOLD
+                        </div>
+                        <div style={{ position: 'absolute', left: 4, bottom: 2, fontSize: '0.52rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
+                          Front Face (32mm)
+                        </div>
+                      </div>
+
+                      {/* FLAP 2: Back Face (32% to 64%) */}
+                      <div style={{
+                        width: '32%',
+                        height: '100%',
+                        backgroundColor: '#ffffff',
+                        position: 'relative',
+                        borderRight: '1px solid var(--neutral-200)'
+                      }}>
+                        <div style={{ position: 'absolute', left: 6, bottom: 2, fontSize: '0.52rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
+                          Back Face (32mm)
+                        </div>
+                      </div>
+
+                      {/* TAIL STRAP: Looping strap (64% to 100%, 36mm) */}
+                      <div style={{
+                        width: '36%',
+                        height: '100%',
+                        backgroundColor: 'var(--neutral-50)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        fontSize: '0.58rem',
-                        color: 'var(--neutral-500)',
-                        fontWeight: 700
+                        padding: '0 8px',
+                        position: 'relative'
                       }}>
-                        Tail Strap (36mm)
+                        <div style={{
+                          width: '100%',
+                          height: 24,
+                          borderRadius: 4,
+                          backgroundColor: '#ffffff',
+                          border: '1px solid var(--neutral-300)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.58rem',
+                          color: 'var(--neutral-500)',
+                          fontWeight: 700
+                        }}>
+                          Tail Strap (36mm)
+                        </div>
                       </div>
-                    </div>
 
-                    {/* DRAGGABLE ELEMENTS LAYER */}
-                    {showStoreName && (
+                      {/* DRAGGABLE ELEMENTS LAYER (LANDSCAPE) */}
+                      {showStoreName && (
+                        <div
+                          onPointerDown={(e) => handlePointerDown('storeName', e)}
+                          onClick={() => setSelectedElementId('storeName')}
+                          style={{
+                            position: 'absolute',
+                            left: `${elementPositions.storeName?.x ?? 3}%`,
+                            top: `${elementPositions.storeName?.y ?? 16}%`,
+                            transform: 'translate(0, -50%)',
+                            cursor: 'move',
+                            padding: '2px 4px',
+                            borderRadius: 4,
+                            border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                            backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                            color: 'var(--neutral-900)',
+                            whiteSpace: 'nowrap',
+                            zIndex: 10,
+                            ...getElementStyleProps('storeName', 0.68, true)
+                          }}
+                        >
+                          {formatElementText('storeName', storeName || 'Store')}
+                        </div>
+                      )}
+
+                      {showProductName && (
+                        <div
+                          onPointerDown={(e) => handlePointerDown('productName', e)}
+                          onClick={() => setSelectedElementId('productName')}
+                          style={{
+                            position: 'absolute',
+                            left: `${elementPositions.productName?.x ?? 3}%`,
+                            top: `${elementPositions.productName?.y ?? 46}%`,
+                            transform: 'translate(0, -50%)',
+                            cursor: 'move',
+                            padding: '2px 4px',
+                            borderRadius: 4,
+                            border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                            backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                            color: 'var(--neutral-800)',
+                            maxWidth: 180,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            zIndex: 10,
+                            ...getElementStyleProps('productName', 0.74, true)
+                          }}
+                        >
+                          {formatElementText('productName', productName)}
+                        </div>
+                      )}
+
+                      {showPrice && (
+                        <div
+                          onPointerDown={(e) => handlePointerDown('price', e)}
+                          onClick={() => setSelectedElementId('price')}
+                          style={{
+                            position: 'absolute',
+                            left: `${elementPositions.price?.x ?? 3}%`,
+                            top: `${elementPositions.price?.y ?? 78}%`,
+                            transform: 'translate(0, -50%)',
+                            cursor: 'move',
+                            padding: '2px 4px',
+                            borderRadius: 4,
+                            border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                            backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                            color: '#1e1b4b',
+                            whiteSpace: 'nowrap',
+                            zIndex: 10,
+                            ...getElementStyleProps('price', 0.96, true)
+                          }}
+                        >
+                          ₹{Number(price || 0).toFixed(2)}
+                        </div>
+                      )}
+
                       <div
-                        onPointerDown={(e) => handlePointerDown('storeName', e)}
-                        onClick={() => setSelectedElementId('storeName')}
+                        onPointerDown={(e) => handlePointerDown('code', e)}
                         style={{
                           position: 'absolute',
-                          left: `${elementPositions.storeName?.x ?? 3}%`,
-                          top: `${elementPositions.storeName?.y ?? 16}%`,
+                          left: `${elementPositions.code?.x ?? 50}%`,
+                          top: `${elementPositions.code?.y ?? 50}%`,
+                          transform: `translate(-50%, -50%) scale(${codeScale})`,
+                          transformOrigin: 'center center',
+                          cursor: 'move',
+                          padding: '2px',
+                          borderRadius: 4,
+                          border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 'max-content',
+                          height: 'max-content',
+                          flexShrink: 0,
+                          whiteSpace: 'nowrap',
+                          zIndex: 10
+                        }}
+                      >
+                        <BarcodeRenderer
+                          ref={barcodeRendererRef}
+                          value={activePayload}
+                          codeType={codeType}
+                          width={codeType === 'BARCODE' ? 1.0 : undefined}
+                          height={codeType === 'BARCODE' ? 40 : 64}
+                          showText={false}
+                        />
+                      </div>
+
+                      <div
+                        onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                        onClick={() => setSelectedElementId('barcodeText')}
+                        style={{
+                          position: 'absolute',
+                          left: `${elementPositions.barcodeText?.x ?? 35}%`,
+                          top: `${elementPositions.barcodeText?.y ?? 36}%`,
                           transform: 'translate(0, -50%)',
                           cursor: 'move',
                           padding: '2px 4px',
                           borderRadius: 4,
-                          border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                          backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                          border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                          backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
                           color: 'var(--neutral-900)',
                           whiteSpace: 'nowrap',
                           zIndex: 10,
-                          ...getElementStyleProps('storeName', 0.68, true)
+                          ...getElementStyleProps('barcodeText', 0.70, true, true)
                         }}
                       >
-                        {formatElementText('storeName', storeName || 'Store')}
+                        {formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14))}
                       </div>
-                    )}
 
-                    {showProductName && (
-                      <div
-                        onPointerDown={(e) => handlePointerDown('productName', e)}
-                        onClick={() => setSelectedElementId('productName')}
-                        style={{
-                          position: 'absolute',
-                          left: `${elementPositions.productName?.x ?? 3}%`,
-                          top: `${elementPositions.productName?.y ?? 46}%`,
-                          transform: 'translate(0, -50%)',
-                          cursor: 'move',
-                          padding: '2px 4px',
-                          borderRadius: 4,
-                          border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                          backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          color: 'var(--neutral-800)',
-                          maxWidth: 180,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          zIndex: 10,
-                          ...getElementStyleProps('productName', 0.74, true)
-                        }}
-                      >
-                        {formatElementText('productName', productName)}
-                      </div>
-                    )}
-
-                    {showPrice && (
-                      <div
-                        onPointerDown={(e) => handlePointerDown('price', e)}
-                        onClick={() => setSelectedElementId('price')}
-                        style={{
-                          position: 'absolute',
-                          left: `${elementPositions.price?.x ?? 3}%`,
-                          top: `${elementPositions.price?.y ?? 78}%`,
-                          transform: 'translate(0, -50%)',
-                          cursor: 'move',
-                          padding: '2px 4px',
-                          borderRadius: 4,
-                          border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                          backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          color: '#1e1b4b',
-                          whiteSpace: 'nowrap',
-                          zIndex: 10,
-                          ...getElementStyleProps('price', 0.96, true)
-                        }}
-                      >
-                        ₹{Number(price || 0).toFixed(2)}
-                      </div>
-                    )}
-
-                    <div
-                      onPointerDown={(e) => handlePointerDown('code', e)}
-                      style={{
-                        position: 'absolute',
-                        left: `${elementPositions.code?.x ?? 50}%`,
-                        top: `${elementPositions.code?.y ?? 50}%`,
-                        transform: `translate(-50%, -50%) scale(${codeScale})`,
-                        transformOrigin: 'center center',
-                        cursor: 'move',
-                        padding: '2px',
-                        borderRadius: 4,
-                        border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                        backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 'max-content',
-                        height: 'max-content',
-                        flexShrink: 0,
-                        whiteSpace: 'nowrap',
-                        zIndex: 10
-                      }}
-                    >
-                      <BarcodeRenderer
-                        ref={barcodeRendererRef}
-                        value={activePayload}
-                        codeType={codeType}
-                        width={codeType === 'BARCODE' ? 1.0 : undefined}
-                        height={codeType === 'BARCODE' ? 40 : 64}
-                        showText={false}
-                      />
+                      {showSku && sku && (
+                        <div
+                          onPointerDown={(e) => handlePointerDown('sku', e)}
+                          onClick={() => setSelectedElementId('sku')}
+                          style={{
+                            position: 'absolute',
+                            left: `${elementPositions.sku?.x ?? 35}%`,
+                            top: `${elementPositions.sku?.y ?? 72}%`,
+                            transform: 'translate(0, -50%)',
+                            cursor: 'move',
+                            padding: '2px 4px',
+                            borderRadius: 4,
+                            border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                            backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                            color: 'var(--neutral-500)',
+                            whiteSpace: 'nowrap',
+                            zIndex: 10,
+                            ...getElementStyleProps('sku', 0.62, false)
+                          }}
+                        >
+                          {formatElementText('sku', `SKU: ${sku}`)}
+                        </div>
+                      )}
                     </div>
-
-                    <div
-                      onPointerDown={(e) => handlePointerDown('barcodeText', e)}
-                      onClick={() => setSelectedElementId('barcodeText')}
-                      style={{
-                        position: 'absolute',
-                        left: `${elementPositions.barcodeText?.x ?? 35}%`,
-                        top: `${elementPositions.barcodeText?.y ?? 36}%`,
-                        transform: 'translate(0, -50%)',
-                        cursor: 'move',
-                        padding: '2px 4px',
-                        borderRadius: 4,
-                        border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                        backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                        color: 'var(--neutral-900)',
-                        whiteSpace: 'nowrap',
-                        zIndex: 10,
-                        ...getElementStyleProps('barcodeText', 0.70, true, true)
-                      }}
-                    >
-                      {formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14))}
-                    </div>
-
-                    {showSku && sku && (
-                      <div
-                        onPointerDown={(e) => handlePointerDown('sku', e)}
-                        onClick={() => setSelectedElementId('sku')}
-                        style={{
-                          position: 'absolute',
-                          left: `${elementPositions.sku?.x ?? 35}%`,
-                          top: `${elementPositions.sku?.y ?? 72}%`,
-                          transform: 'translate(0, -50%)',
-                          cursor: 'move',
-                          padding: '2px 4px',
-                          borderRadius: 4,
-                          border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                          backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                          color: 'var(--neutral-500)',
-                          whiteSpace: 'nowrap',
-                          zIndex: 10,
-                          ...getElementStyleProps('sku', 0.62, false)
-                        }}
-                      >
-                        {formatElementText('sku', `SKU: ${sku}`)}
-                      </div>
-                    )}
                   </div>
-                </div>
+                )
               ) : isDumbbell ? (
                 /* AUTHENTIC JEWELRY DUMBBELL CANVAS (70mm x 12mm Symmetrical) */
                 <div style={{ width: '100%', maxWidth: 580, padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -2687,6 +3324,237 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   </div>
                 </div>
 
+              ) : isA4 ? (
+                /* AUTHENTIC A4 STICKER CELL CANVAS & MINI SHEET PREVIEW */
+                <div style={{ width: '100%', maxWidth: 720, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '0 4px', flexWrap: 'wrap', gap: 6 }}>
+                    <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--primary-700)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      📄 {activeA4Grid.name} Sticker Cell ({activeA4Grid.labelW_mm} × {activeA4Grid.labelH_mm} mm)
+                      <span style={{ fontSize: '0.62rem', backgroundColor: 'var(--primary-100)', color: 'var(--primary-800)', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                        {activeA4Grid.cols} cols × {activeA4Grid.rows} rows = {activeA4Grid.totalSlots} labels/sheet
+                      </span>
+                    </span>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--neutral-500)' }}>
+                      Dashed border = Peel outline • Drag elements directly inside the cell
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', gap: 20, flexWrap: 'wrap', width: '100%' }}>
+                    {/* LEFT: Single Sticker Interactive Cell Canvas */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--neutral-600)' }}>
+                        Single Sticker Cell Editor ({activeA4Grid.labelW_mm} × {activeA4Grid.labelH_mm} mm)
+                      </span>
+                      <div 
+                        ref={canvasContainerRef}
+                        style={{ 
+                          width: 320, 
+                          height: Math.round(320 * (activeA4Grid.labelH_mm / activeA4Grid.labelW_mm)),
+                          minHeight: 140,
+                          maxHeight: 210,
+                          backgroundColor: '#ffffff', 
+                          border: '2px dashed var(--primary-400)', 
+                          borderRadius: 6, 
+                          boxShadow: 'var(--shadow-md)', 
+                          position: 'relative',
+                          overflow: 'hidden',
+                          userSelect: 'none'
+                        }}
+                      >
+                        {showStoreName && (
+                          <div
+                            onPointerDown={(e) => handlePointerDown('storeName', e)}
+                            onClick={() => setSelectedElementId('storeName')}
+                            style={{
+                              position: 'absolute',
+                              left: `${elementPositions.storeName?.x ?? 50}%`,
+                              top: `${elementPositions.storeName?.y ?? 12}%`,
+                              transform: 'translate(-50%, -50%)',
+                              cursor: 'move',
+                              padding: '2px 4px',
+                              color: 'var(--neutral-900)',
+                              border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                              backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                              whiteSpace: 'nowrap',
+                              maxWidth: 300,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              zIndex: 10,
+                              ...getElementStyleProps('storeName', 0.72, true)
+                            }}
+                          >
+                            {formatElementText('storeName', storeName || 'Store')}
+                          </div>
+                        )}
+
+                        {showProductName && (
+                          <div
+                            onPointerDown={(e) => handlePointerDown('productName', e)}
+                            onClick={() => setSelectedElementId('productName')}
+                            style={{
+                              position: 'absolute',
+                              left: `${elementPositions.productName?.x ?? 50}%`,
+                              top: `${elementPositions.productName?.y ?? 26}%`,
+                              transform: 'translate(-50%, -50%)',
+                              cursor: 'move',
+                              padding: '2px 4px',
+                              color: 'var(--neutral-800)',
+                              border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                              backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                              maxWidth: 300,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              zIndex: 10,
+                              ...getElementStyleProps('productName', 0.76, true)
+                            }}
+                          >
+                            {formatElementText('productName', productName)}
+                          </div>
+                        )}
+
+                        <div
+                          onPointerDown={(e) => handlePointerDown('code', e)}
+                          style={{
+                            position: 'absolute',
+                            left: `${elementPositions.code?.x ?? 50}%`,
+                            top: `${elementPositions.code?.y ?? 52}%`,
+                            transform: `translate(-50%, -50%) scale(${codeScale})`,
+                            transformOrigin: 'center center',
+                            cursor: 'move',
+                            padding: 2,
+                            border: activeDragId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                            backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 'max-content',
+                            height: 'max-content',
+                            flexShrink: 0,
+                            whiteSpace: 'nowrap',
+                            zIndex: 10
+                          }}
+                        >
+                          <BarcodeRenderer
+                            ref={barcodeRendererRef}
+                            value={activePayload}
+                            codeType={codeType}
+                            width={codeType === 'BARCODE' ? (paperSize === 'A4_GRID_65' ? 1.0 : 1.2) : 1.4}
+                            height={codeType === 'BARCODE' ? (paperSize === 'A4_GRID_65' ? 28 : paperSize === 'A4_GRID_40' ? 34 : 40) : (paperSize === 'A4_GRID_65' ? 52 : 68)}
+                            showText={false}
+                          />
+                        </div>
+
+                        <div
+                          onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                          onClick={() => setSelectedElementId('barcodeText')}
+                          style={{
+                            position: 'absolute',
+                            left: `${elementPositions.barcodeText?.x ?? 50}%`,
+                            top: `${elementPositions.barcodeText?.y ?? 74}%`,
+                            transform: 'translate(-50%, -50%)',
+                            cursor: 'move',
+                            padding: '1px 4px',
+                            color: 'var(--neutral-700)',
+                            border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                            backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                            zIndex: 10,
+                            ...getElementStyleProps('barcodeText', 0.68, true, true)
+                          }}
+                        >
+                          {formatElementText('barcodeText', effectiveBarcodeText)}
+                        </div>
+
+                        {showPrice && (
+                          <div
+                            onPointerDown={(e) => handlePointerDown('price', e)}
+                            onClick={() => setSelectedElementId('price')}
+                            style={{
+                              position: 'absolute',
+                              left: `${elementPositions.price?.x ?? 50}%`,
+                              top: `${elementPositions.price?.y ?? 88}%`,
+                              transform: 'translate(-50%, -50%)',
+                              cursor: 'move',
+                              padding: '1px 4px',
+                              color: '#1e1b4b',
+                              border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                              backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                              zIndex: 10,
+                              ...getElementStyleProps('price', 0.88, true)
+                            }}
+                          >
+                            ₹{Number(price || 0).toFixed(2)}
+                          </div>
+                        )}
+
+                        {showSku && sku && (
+                          <div
+                            onPointerDown={(e) => handlePointerDown('sku', e)}
+                            onClick={() => setSelectedElementId('sku')}
+                            style={{
+                              position: 'absolute',
+                              left: `${elementPositions.sku?.x ?? 88}%`,
+                              top: `${elementPositions.sku?.y ?? 88}%`,
+                              transform: 'translate(-50%, -50%)',
+                              cursor: 'move',
+                              padding: '1px 3px',
+                              color: 'var(--neutral-600)',
+                              border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                              backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                              zIndex: 10,
+                              ...getElementStyleProps('sku', 0.60, false)
+                            }}
+                          >
+                            {formatElementText('sku', `SKU:${sku}`)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* RIGHT: Scaled Mini A4 Sheet Grid Layout */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--neutral-600)' }}>
+                        Mini A4 Sheet Layout ({effectiveQuantity} labels • {Math.ceil(((startOffsetSlot - 1) + effectiveQuantity) / activeA4Grid.totalSlots)} Sheet(s))
+                      </span>
+                      <div style={{
+                        width: 140,
+                        height: 198,
+                        backgroundColor: '#ffffff',
+                        border: '1.5px solid var(--neutral-400)',
+                        borderRadius: 4,
+                        boxShadow: 'var(--shadow-sm)',
+                        padding: '8px 6px',
+                        display: 'grid',
+                        gridTemplateColumns: `repeat(${activeA4Grid.cols}, 1fr)`,
+                        gridTemplateRows: `repeat(${activeA4Grid.rows}, 1fr)`,
+                        gap: 1.5,
+                        boxSizing: 'border-box'
+                      }}>
+                        {Array.from({ length: activeA4Grid.totalSlots }).map((_, idx) => {
+                          const slotNumber = idx + 1;
+                          const isSkipped = slotNumber < startOffsetSlot;
+                          const isFilled = slotNumber >= startOffsetSlot && slotNumber < (startOffsetSlot + effectiveQuantity);
+                          return (
+                            <div
+                              key={idx}
+                              title={`Slot #${slotNumber}${isSkipped ? ' (Peeled/Skipped)' : isFilled ? ' (Active print)' : ' (Blank)'}`}
+                              style={{
+                                backgroundColor: isSkipped ? '#f1f5f9' : isFilled ? 'var(--primary-600)' : '#f8fafc',
+                                border: `0.5px solid ${isFilled ? 'var(--primary-700)' : '#e2e8f0'}`,
+                                borderRadius: 1,
+                                opacity: isSkipped ? 0.35 : 1
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize: '0.60rem', color: 'var(--neutral-500)', textAlign: 'center', maxWidth: 140 }}>
+                        Blue = Printing slots • Gray = Skipped
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
               ) : arrangement === 'SIDE_BY_SIDE' ? (
                 /* HORIZONTAL SIDE-BY-SIDE CANVAS */
                 <div 
@@ -3072,6 +3940,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   type="number"
                   step="0.01"
                   value={price}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setPrice(parseFloat(e.target.value) || 0)}
                   placeholder="Selling Price"
                   className="input input-sm"
@@ -3161,220 +4030,281 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
             </div>
           </div>
 
-          {/* 4. PRESETS & PAPER FORMAT SELECTION */}
-          <div className="modal-grid-row-2">
-            {/* Tag Style Selection */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* 4. CHOOSE LABEL FORMAT & PRESET */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
               <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                4. Tag Preset
+                4. Select Label Format &amp; Preset
               </label>
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--primary-700)', backgroundColor: 'var(--primary-50)', padding: '2px 8px', borderRadius: 6, border: '1px solid var(--primary-200)' }}>
+                Active: {
+                  paperSize === 'SEZNIK_3UP_100x15' ? 'Seznik 3-UP Reel (100x15mm)' :
+                  paperSize === 'SEZNIK_100x15' ? 'Seznik 1-UP (100x15mm)' :
+                  paperSize === 'DUMBBELL_70x12' ? 'Jewelry Dumbbell (70x12mm)' :
+                  paperSize === 'RAT_TAIL_76x12' ? 'Jewelry Rat-Tail (76x12mm)' :
+                  paperSize === 'A4_GRID_24' ? 'A4 24-Up Sheet (64x33.9mm)' :
+                  paperSize === 'A4_GRID_40' ? 'A4 40-Up Sheet (48.5x25.4mm)' :
+                  paperSize === 'A4_GRID_65' ? 'A4 65-Up Sheet (38.1x21.2mm)' :
+                  paperSize === 'THERMAL_40x40' ? 'Thermal Square (40x40mm)' :
+                  paperSize === 'THERMAL_38x25' ? 'Thermal Compact (38x25mm)' :
+                  'Thermal Standard (50x30mm)'
+                }
+              </span>
+            </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+            {/* Category 1: 💎 Jewelry Tags & Reels */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: '0.70rem', fontWeight: 800, color: 'var(--neutral-700)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                💎 Jewelry Tags &amp; Reels
+              </span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+                {/* SEZNIK 3-UP */}
                 <button
                   type="button"
-                  onClick={() => handleStyleSelect('JEWELRY_STRING_TAG')}
+                  onClick={() => handleSelectPreset('SEZNIK_3UP_100x15')}
                   style={{
-                    padding: 10,
+                    padding: '10px 12px',
                     borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${isDumbbell ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: isDumbbell ? 'var(--primary-50)' : '#ffffff',
+                    border: `2px solid ${paperSize === 'SEZNIK_3UP_100x15' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'SEZNIK_3UP_100x15' ? 'var(--primary-50)' : '#ffffff',
                     cursor: 'pointer',
-                    textAlign: 'left'
+                    textAlign: 'left',
+                    position: 'relative',
+                    boxShadow: paperSize === 'SEZNIK_3UP_100x15' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
                   }}
                 >
-                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: isDumbbell ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'SEZNIK_3UP_100x15' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                      Seznik 3-UP Reel
+                    </div>
+                    <span style={{ fontSize: '0.56rem', fontWeight: 800, backgroundColor: '#fef3c7', color: '#92400e', padding: '1px 5px', borderRadius: 4 }}>
+                      Amazon 3-UP
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    100 × 15 mm • 3 labels/row across 48mm web
+                  </div>
+                </button>
+
+                {/* SEZNIK 1-UP */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset('SEZNIK_100x15')}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${paperSize === 'SEZNIK_100x15' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'SEZNIK_100x15' ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: paperSize === 'SEZNIK_100x15' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'SEZNIK_100x15' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    Seznik 1-UP Tag
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    100 × 15 mm • Single continuous tag strip
+                  </div>
+                </button>
+
+                {/* DUMBBELL */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset('DUMBBELL_70x12')}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${paperSize === 'DUMBBELL_70x12' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'DUMBBELL_70x12' ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: paperSize === 'DUMBBELL_70x12' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'DUMBBELL_70x12' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
                     Jewelry Dumbbell
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Symmetric bridge tag (70x12)</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    70 × 12 mm • Symmetrical bridge fold tag
+                  </div>
                 </button>
 
+                {/* RAT-TAIL */}
                 <button
                   type="button"
-                  onClick={() => handleStyleSelect('JEWELRY_RAT_TAIL')}
+                  onClick={() => handleSelectPreset('RAT_TAIL_76x12')}
                   style={{
-                    padding: 10,
+                    padding: '10px 12px',
                     borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${isRatTail ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: isRatTail ? 'var(--primary-50)' : '#ffffff',
+                    border: `2px solid ${paperSize === 'RAT_TAIL_76x12' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'RAT_TAIL_76x12' ? 'var(--primary-50)' : '#ffffff',
                     cursor: 'pointer',
-                    textAlign: 'left'
+                    textAlign: 'left',
+                    boxShadow: paperSize === 'RAT_TAIL_76x12' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
                   }}
                 >
-                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: isRatTail ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'RAT_TAIL_76x12' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
                     Jewelry Rat-Tail
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Dual-flap roll tag (76x12)</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleStyleSelect('STANDARD')}
-                  style={{
-                    padding: 10,
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${style === 'STANDARD' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: style === 'STANDARD' ? 'var(--primary-50)' : '#ffffff',
-                    cursor: 'pointer',
-                    textAlign: 'left'
-                  }}
-                >
-                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: style === 'STANDARD' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
-                    Standard Sticker
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    76 × 12 mm • Dual-flap with tail loop
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>Rolls &amp; box tags (50x30)</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleStyleSelect('A4_SHEET')}
-                  style={{
-                    padding: 10,
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${style === 'A4_SHEET' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: style === 'A4_SHEET' ? 'var(--primary-50)' : '#ffffff',
-                    cursor: 'pointer',
-                    textAlign: 'left'
-                  }}
-                >
-                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: style === 'A4_SHEET' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
-                    A4 Sticker Sheet
-                  </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--neutral-500)' }}>24-Up / 40-Up Grid</div>
                 </button>
               </div>
             </div>
 
-            {/* Paper Format */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Paper Format
-              </label>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+            {/* Category 2: 📄 A4 Sticker Sheets (Standard Laser / Inkjet Printers) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: '0.70rem', fontWeight: 800, color: 'var(--neutral-700)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                📄 A4 Sticker Sheets (Office Printers)
+              </span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+                {/* A4 24-Up */}
                 <button
                   type="button"
-                  onClick={() => handlePaperSelect('DUMBBELL_70x12')}
+                  onClick={() => handleSelectPreset('A4_GRID_24')}
                   style={{
-                    padding: '8px 6px',
+                    padding: '10px 12px',
                     borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'DUMBBELL_70x12' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: paperSize === 'DUMBBELL_70x12' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'DUMBBELL_70x12' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
-                >
-                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>70 x 12 mm</div>
-                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Dumbbell</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handlePaperSelect('RAT_TAIL_76x12')}
-                  style={{
-                    padding: '8px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'RAT_TAIL_76x12' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: paperSize === 'RAT_TAIL_76x12' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'RAT_TAIL_76x12' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
-                >
-                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>76 x 12 mm</div>
-                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Rat-Tail Roll</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handlePaperSelect('SEZNIK_100x15')}
-                  style={{
-                    padding: '8px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'SEZNIK_100x15' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: paperSize === 'SEZNIK_100x15' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'SEZNIK_100x15' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
-                >
-                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>100 x 15 mm</div>
-                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Seznik Josh Tag</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handlePaperSelect('THERMAL_50x30')}
-                  style={{
-                    padding: '8px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'THERMAL_50x30' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: paperSize === 'THERMAL_50x30' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'THERMAL_50x30' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
-                >
-                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>50 x 30 mm</div>
-                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Thermal Roll</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handlePaperSelect('THERMAL_40x40')}
-                  style={{
-                    padding: '8px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'THERMAL_40x40' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: paperSize === 'THERMAL_40x40' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'THERMAL_40x40' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
-                >
-                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>40 x 40 mm</div>
-                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Square QR</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handlePaperSelect('THERMAL_38x25')}
-                  style={{
-                    padding: '8px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'THERMAL_38x25' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
-                    backgroundColor: paperSize === 'THERMAL_38x25' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'THERMAL_38x25' ? 'var(--primary-700)' : 'var(--neutral-700)',
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
-                >
-                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>38 x 25 mm</div>
-                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>Compact Roll</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handlePaperSelect('A4_GRID_24')}
-                  style={{
-                    padding: '8px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1.5px solid ${paperSize === 'A4_GRID_24' ? 'var(--primary-500)' : 'var(--neutral-200)'}`,
+                    border: `2px solid ${paperSize === 'A4_GRID_24' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
                     backgroundColor: paperSize === 'A4_GRID_24' ? 'var(--primary-50)' : '#ffffff',
-                    color: paperSize === 'A4_GRID_24' ? 'var(--primary-700)' : 'var(--neutral-700)',
                     cursor: 'pointer',
-                    textAlign: 'center'
+                    textAlign: 'left',
+                    boxShadow: paperSize === 'A4_GRID_24' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
                   }}
                 >
-                  <div style={{ fontSize: '0.76rem', fontWeight: 800 }}>A4 (24-Up)</div>
-                  <div style={{ fontSize: '0.64rem', color: 'var(--neutral-500)' }}>3x8 Grid</div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'A4_GRID_24' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    A4 (24-Up Grid)
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    64 × 33.9 mm • 3 cols × 8 rows (24 labels/sheet)
+                  </div>
+                </button>
+
+                {/* A4 40-Up */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset('A4_GRID_40')}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${paperSize === 'A4_GRID_40' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'A4_GRID_40' ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: paperSize === 'A4_GRID_40' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'A4_GRID_40' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    A4 (40-Up Grid)
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    48.5 × 25.4 mm • 4 cols × 10 rows (40 labels/sheet)
+                  </div>
+                </button>
+
+                {/* A4 65-Up */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset('A4_GRID_65')}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${paperSize === 'A4_GRID_65' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'A4_GRID_65' ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: paperSize === 'A4_GRID_65' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'A4_GRID_65' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    A4 (65-Up Grid)
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    38.1 × 21.2 mm • 5 cols × 13 rows (65 labels/sheet)
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Category 3: 📦 Standard Direct Thermal Rolls */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: '0.70rem', fontWeight: 800, color: 'var(--neutral-700)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                📦 Direct Thermal Rolls
+              </span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+                {/* 50x30 */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset('THERMAL_50x30')}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${paperSize === 'THERMAL_50x30' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'THERMAL_50x30' ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: paperSize === 'THERMAL_50x30' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'THERMAL_50x30' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    Standard 50 × 30 mm
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    Universal barcode / QR thermal roll
+                  </div>
+                </button>
+
+                {/* 40x40 */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset('THERMAL_40x40')}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${paperSize === 'THERMAL_40x40' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'THERMAL_40x40' ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: paperSize === 'THERMAL_40x40' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'THERMAL_40x40' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    Square QR 40 × 40 mm
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    Square high-density 2D QR roll
+                  </div>
+                </button>
+
+                {/* 38x25 */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset('THERMAL_38x25')}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${paperSize === 'THERMAL_38x25' ? 'var(--primary-600)' : 'var(--neutral-200)'}`,
+                    backgroundColor: paperSize === 'THERMAL_38x25' ? 'var(--primary-50)' : '#ffffff',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: paperSize === 'THERMAL_38x25' ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none'
+                  }}
+                >
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: paperSize === 'THERMAL_38x25' ? 'var(--primary-900)' : 'var(--neutral-800)' }}>
+                    Compact 38 × 25 mm
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)', marginTop: 2 }}>
+                    Small packaging &amp; retail tag
+                  </div>
                 </button>
               </div>
             </div>
           </div>
 
           {/* 5. PRINT QUANTITY */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-500)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               5. Print Quantity Copies
             </label>
@@ -3383,9 +4313,10 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid var(--neutral-300)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
                 <button
                   type="button"
-                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  onClick={() => setQuantity(Math.max(1, effectiveQuantity - 1))}
                   className="btn btn-secondary"
                   style={{ padding: '6px 14px', borderRadius: 0, border: 'none', borderRight: '1px solid var(--neutral-300)' }}
+                  title="Decrease copies"
                 >
                   -
                 </button>
@@ -3394,7 +4325,25 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                   min="1"
                   max="5000"
                   value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw === '') {
+                      setQuantity('');
+                      return;
+                    }
+                    const num = parseInt(raw, 10);
+                    if (isNaN(num)) {
+                      setQuantity('');
+                    } else {
+                      setQuantity(Math.min(5000, Math.max(0, num)));
+                    }
+                  }}
+                  onBlur={() => {
+                    if (quantity === '' || Number(quantity) < 1) {
+                      setQuantity(1);
+                    }
+                  }}
                   style={{
                     width: 64,
                     textAlign: 'center',
@@ -3408,9 +4357,10 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 />
                 <button
                   type="button"
-                  onClick={() => setQuantity(quantity + 1)}
+                  onClick={() => setQuantity(Math.min(5000, effectiveQuantity + 1))}
                   className="btn btn-secondary"
                   style={{ padding: '6px 14px', borderRadius: 0, border: 'none', borderLeft: '1px solid var(--neutral-300)' }}
+                  title="Increase copies"
                 >
                   +
                 </button>
@@ -3440,6 +4390,79 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 </button>
               )}
             </div>
+
+            {/* A4 Sheet Planner Breakdown Card */}
+            {isA4 && (
+              <div style={{
+                backgroundColor: 'var(--primary-50)',
+                border: '1.5px solid var(--primary-200)',
+                borderRadius: 'var(--radius-md)',
+                padding: '10px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 12
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <LayoutGrid size={16} color="var(--primary-600)" />
+                  <div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--primary-900)' }}>
+                      A4 Sheet Breakdown: {Math.ceil(((startOffsetSlot - 1) + effectiveQuantity) / activeA4Grid.totalSlots)} Sheet(s)
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--neutral-500)' }}>
+                      {effectiveQuantity} labels • {activeA4Grid.totalSlots} stickers per sheet ({activeA4Grid.cols}×{activeA4Grid.rows} grid)
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--neutral-700)' }} title="Skip already peeled slots on sheet 1">
+                    Start at sticker slot:
+                  </label>
+                  <select
+                    value={startOffsetSlot}
+                    onChange={(e) => setStartOffsetSlot(parseInt(e.target.value, 10) || 1)}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      borderRadius: 4,
+                      border: '1px solid var(--neutral-300)',
+                      backgroundColor: '#ffffff',
+                      color: 'var(--neutral-900)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {Array.from({ length: activeA4Grid.totalSlots }).map((_, idx) => (
+                      <option key={idx + 1} value={idx + 1}>
+                        Slot #{idx + 1} {idx === 0 ? '(Top Left)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* 3-UP Seznik Information Card */}
+            {isSeznik3Up && (
+              <div style={{
+                backgroundColor: '#f8fafc',
+                border: '1px solid var(--neutral-300)',
+                borderRadius: 'var(--radius-md)',
+                padding: '8px 12px',
+                fontSize: '0.72rem',
+                color: 'var(--neutral-600)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                <span style={{ fontSize: '0.9rem' }}>🖨️</span>
+                <span>
+                  <strong>Seznik 3-UP Reel:</strong> Thermal desktop printer advances in rows of 3 tags across the 48mm web ({Math.ceil(effectiveQuantity / 3)} rows total).
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -3524,7 +4547,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 18px' }}
             >
               <Printer size={16} />
-              <span>{isGenerating ? 'Printing...' : `Print ${quantity} Labels`}</span>
+              <span>{isGenerating ? 'Printing...' : `Print ${effectiveQuantity} Labels`}</span>
             </button>
           </div>
         </div>

@@ -14,7 +14,7 @@ from reportlab.graphics.barcode import code128, qr
 from reportlab.graphics.shapes import Drawing
 from reportlab.lib.pagesizes import A4, mm
 from reportlab.pdfgen import canvas
-from app.schemas.label import LabelPrintConfig, LabelStyle, PaperSize, CodeType
+from app.schemas.label import LabelPrintConfig, LabelStyle, PaperSize, CodeType, LabelOrientation
 from app.core.pdf_fonts import register_pdf_unicode_fonts
 
 class LabelService:
@@ -436,17 +436,407 @@ class LabelService:
         return buffer.getvalue()
 
     @staticmethod
+    def _draw_seznik_tag_strip(
+        c: canvas.Canvas,
+        config: LabelPrintConfig,
+        display_store: str,
+        x0: float,
+        y0: float,
+        strip_width: float,
+        strip_height: float,
+        orientation: LabelOrientation = LabelOrientation.PORTRAIT,
+        is_qr: bool = True,
+        code_payload: str = "ITM-01",
+        raw_code: str = "ITM-01",
+        scale: float = 1.0,
+        cp: Optional[dict] = None,
+        use_custom: bool = False,
+    ) -> None:
+        """
+        Renders a single 14.3mm x 100mm physical Seznik jewelry tag strip.
+        - Flap 1 (Top 32mm: y0 + 68mm to y0 + 100mm): Store Name, Item Name, Sale Price
+        - Fold Crease (y0 + 68mm): Dashed fold boundary
+        - Flap 2 (Middle 32mm: y0 + 36mm to y0 + 68mm): 2D QR Code or 1D Barcode, Code Text, SKU
+        - Tail Strap (Bottom 36mm: y0 to y0 + 36mm): 4mm centered looping strap
+        Supports both PORTRAIT (stacked down strip) and LANDSCAPE (rotated along flap) orientation.
+        """
+        cp = cp or {}
+        cx = x0 + (strip_width / 2.0)
+
+        # Draw physical boundaries & folding crease
+        # Flap 1: Top 32mm
+        c.setLineWidth(0.2)
+        c.setStrokeColorRGB(0.85, 0.85, 0.85)
+        c.rect(x0, y0 + 68 * mm, strip_width, 32 * mm)
+
+        # Fold crease line (68mm)
+        c.setLineWidth(0.3)
+        c.setStrokeColorRGB(0.65, 0.65, 0.65)
+        c.setDash(1, 1)
+        c.line(x0, y0 + 68 * mm, x0 + strip_width, y0 + 68 * mm)
+        c.setDash()
+
+        # Flap 2: Middle 32mm
+        c.setLineWidth(0.2)
+        c.setStrokeColorRGB(0.85, 0.85, 0.85)
+        c.rect(x0, y0 + 36 * mm, strip_width, 32 * mm)
+
+        # Tail strap: Bottom 36mm (4mm narrow centered loop)
+        tail_w = 4.0 * mm
+        tail_x = x0 + (strip_width - tail_w) / 2.0
+        c.setLineWidth(0.3)
+        c.setStrokeColorRGB(0.75, 0.75, 0.75)
+        c.rect(tail_x, y0 + 0.5 * mm, tail_w, 35.5 * mm)
+
+        if orientation == LabelOrientation.PORTRAIT:
+            # ==========================================================
+            # PORTRAIT ORIENTATION (Matches physical Amazon reel)
+            # Text flows across the 14.3mm width, stacked down the strip
+            # ==========================================================
+            if use_custom:
+                # Custom Drag & Drop coordinates relative to strip bounding box
+                if config.show_store_name and "storeName" in cp:
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5.2, True, display_store[:16], config.element_styles)
+                    c.setFont(fn, fs)
+                    sx = x0 + (cp["storeName"]["x"] / 100.0) * strip_width
+                    sy = y0 + ((100.0 - cp["storeName"]["y"]) / 100.0) * strip_height
+                    c.drawCentredString(sx, sy - 1.2 * mm, txt)
+                elif config.show_store_name:
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5.2, True, display_store[:16], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawCentredString(cx, y0 + 94.0 * mm, txt)
+
+                if "productName" in cp:
+                    fn, fs, txt = LabelService._resolve_font_and_text("productName", 5.5, True, config.item_name[:16], config.element_styles)
+                    c.setFont(fn, fs)
+                    px = x0 + (cp["productName"]["x"] / 100.0) * strip_width
+                    py = y0 + ((100.0 - cp["productName"]["y"]) / 100.0) * strip_height
+                    c.drawCentredString(px, py - 1.2 * mm, txt)
+                else:
+                    fn, fs, txt = LabelService._resolve_font_and_text("productName", 5.5, True, config.item_name[:16], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawCentredString(cx, y0 + 85.0 * mm, txt)
+
+                if config.show_price and config.sale_price:
+                    _, _, _, curr_sym = register_pdf_unicode_fonts()
+                    price_val = f"{curr_sym}{config.sale_price:,.0f}" if config.sale_price == int(config.sale_price) else f"{curr_sym}{config.sale_price:,.2f}"
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 6.8, True, price_val, config.element_styles)
+                    c.setFont(fn, fs)
+                    if "price" in cp:
+                        prx = x0 + (cp["price"]["x"] / 100.0) * strip_width
+                        pry = y0 + ((100.0 - cp["price"]["y"]) / 100.0) * strip_height
+                        c.drawCentredString(prx, pry - 1.2 * mm, txt)
+                    else:
+                        c.drawCentredString(cx, y0 + 74.5 * mm, txt)
+
+                # Flap 2: Code, Text & SKU
+                if is_qr:
+                    qr_size = min(12.5 * mm, max(6.0 * mm, 10.0 * mm * scale))
+                    if "code" in cp:
+                        qx = x0 + (cp["code"]["x"] / 100.0) * strip_width - (qr_size / 2.0)
+                        qy = y0 + ((100.0 - cp["code"]["y"]) / 100.0) * strip_height - (qr_size / 2.0)
+                        LabelService._draw_qr(c, code_payload, qx, qy, qr_size)
+                    else:
+                        LabelService._draw_qr(c, code_payload, cx - (qr_size / 2.0), y0 + 51.5 * mm - (qr_size / 2.0), qr_size)
+
+                    if "barcodeText" in cp:
+                        bx = x0 + (cp["barcodeText"]["x"] / 100.0) * strip_width
+                        by = y0 + ((100.0 - cp["barcodeText"]["y"]) / 100.0) * strip_height
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawCentredString(bx, by - 1.2 * mm, txt)
+                    else:
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawCentredString(cx, y0 + 44.0 * mm, txt)
+
+                    if config.show_sku and config.sku:
+                        fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.4, False, f"SKU:{config.sku[:12]}", config.element_styles)
+                        c.setFont(fn, fs)
+                        if "sku" in cp:
+                            skx = x0 + (cp["sku"]["x"] / 100.0) * strip_width
+                            sky = y0 + ((100.0 - cp["sku"]["y"]) / 100.0) * strip_height
+                            c.drawCentredString(skx, sky - 1.2 * mm, txt)
+                        else:
+                            c.drawCentredString(cx, y0 + 39.5 * mm, txt)
+                else:
+                    # 1D Barcode: Auto-fit within 13.0 mm width
+                    num_modules = max(35, len(raw_code) * 11 + 35)
+                    bar_w = min(0.24, max(0.11, (12.5 * mm / (num_modules * 72.0 / 25.4))))
+                    bc_h = min(9.0 * mm, max(4.5 * mm, 6.5 * mm * scale))
+                    approx_bc_width = num_modules * bar_w * (25.4 / 72.0)
+                    bc_x = cx - (approx_bc_width / 2.0)
+                    bc_y = y0 + 50.0 * mm
+                    if "code" in cp:
+                        bc_x = x0 + (cp["code"]["x"] / 100.0) * strip_width - (approx_bc_width / 2.0)
+                        bc_y = y0 + ((100.0 - cp["code"]["y"]) / 100.0) * strip_height - (bc_h / 2.0)
+                    try:
+                        bc = code128.Code128(raw_code, barHeight=bc_h, barWidth=bar_w)
+                        bc.drawOn(c, bc_x, bc_y)
+                    except Exception:
+                        c.setFont("Helvetica-Bold", 4.8)
+                        c.drawCentredString(cx, bc_y + 2 * mm, raw_code)
+
+                    if "barcodeText" in cp:
+                        bx = x0 + (cp["barcodeText"]["x"] / 100.0) * strip_width
+                        by = y0 + ((100.0 - cp["barcodeText"]["y"]) / 100.0) * strip_height
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawCentredString(bx, by - 1.2 * mm, txt)
+                    else:
+                        fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
+                        c.setFont(fn, fs)
+                        c.drawCentredString(cx, y0 + 44.0 * mm, txt)
+
+                    if config.show_sku and config.sku:
+                        fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.4, False, f"SKU:{config.sku[:12]}", config.element_styles)
+                        c.setFont(fn, fs)
+                        if "sku" in cp:
+                            skx = x0 + (cp["sku"]["x"] / 100.0) * strip_width
+                            sky = y0 + ((100.0 - cp["sku"]["y"]) / 100.0) * strip_height
+                            c.drawCentredString(skx, sky - 1.2 * mm, txt)
+                        else:
+                            c.drawCentredString(cx, y0 + 39.5 * mm, txt)
+            else:
+                # Default clean Portrait alignment
+                _, bold_font, _, curr_sym = register_pdf_unicode_fonts()
+                if config.show_store_name:
+                    fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5.2, True, display_store[:16], config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawCentredString(cx, y0 + 94.0 * mm, txt)
+
+                fn, fs, txt = LabelService._resolve_font_and_text("productName", 5.5, True, config.item_name[:16], config.element_styles)
+                c.setFont(fn, fs)
+                c.drawCentredString(cx, y0 + 85.0 * mm, txt)
+
+                if config.show_price and config.sale_price:
+                    price_val = f"{curr_sym}{config.sale_price:,.0f}" if config.sale_price == int(config.sale_price) else f"{curr_sym}{config.sale_price:,.2f}"
+                    fn, fs, txt = LabelService._resolve_font_and_text("price", 6.8, True, price_val, config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawCentredString(cx, y0 + 74.5 * mm, txt)
+
+                if is_qr:
+                    qr_size = min(12.5 * mm, max(6.0 * mm, 10.0 * mm * scale))
+                    LabelService._draw_qr(c, code_payload, cx - (qr_size / 2.0), y0 + 51.5 * mm - (qr_size / 2.0), qr_size)
+                    fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
+                    c.setFont(fn, fs)
+                    c.drawCentredString(cx, y0 + 44.0 * mm, txt)
+                    if config.show_sku and config.sku:
+                        fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.4, False, f"SKU:{config.sku[:12]}", config.element_styles)
+                        c.setFont(fn, fs)
+                        c.drawCentredString(cx, y0 + 39.5 * mm, txt)
+                else:
+                    num_modules = max(35, len(raw_code) * 11 + 35)
+                    bar_w = min(0.24, max(0.11, (12.5 * mm / (num_modules * 72.0 / 25.4))))
+                    bc_h = min(9.0 * mm, max(4.5 * mm, 6.5 * mm * scale))
+                    approx_bc_width = num_modules * bar_w * (25.4 / 72.0)
+                    bc_x = cx - (approx_bc_width / 2.0)
+                    bc_y = y0 + 50.0 * mm
+                    try:
+                        bc = code128.Code128(raw_code, barHeight=bc_h, barWidth=bar_w)
+                        bc.drawOn(c, bc_x, bc_y)
+                    except Exception:
+                        c.setFont("Helvetica-Bold", 4.8)
+                        c.drawCentredString(cx, bc_y + 2 * mm, raw_code)
+
+                    fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 4.8, True, raw_code[:14], config.element_styles, is_monospace=True)
+                    c.setFont(fn, fs)
+                    c.drawCentredString(cx, y0 + 44.0 * mm, txt)
+
+                    if config.show_sku and config.sku:
+                        fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.4, False, f"SKU:{config.sku[:12]}", config.element_styles)
+                        c.setFont(fn, fs)
+                        c.drawCentredString(cx, y0 + 39.5 * mm, txt)
+
+        else:
+            # ==========================================================
+            # LANDSCAPE ORIENTATION (Rotated 90 degrees along flap)
+            # Text flows horizontally along the 32mm length
+            # ==========================================================
+            # Flap 1 (Top 32mm): rotated coordinate system
+            c.saveState()
+            c.translate(x0 + strip_width, y0 + 68 * mm)
+            c.rotate(90)
+            # In this transformed frame: x is 0 to 32mm, y is 0 to 14.3mm
+            if config.show_store_name:
+                fn, fs, txt = LabelService._resolve_font_and_text("storeName", 5.5, True, display_store[:20], config.element_styles)
+                c.setFont(fn, fs)
+                c.drawString(2 * mm, 10.5 * mm, txt)
+
+            fn, fs, txt = LabelService._resolve_font_and_text("productName", 5.5, True, config.item_name[:20], config.element_styles)
+            c.setFont(fn, fs)
+            c.drawString(2 * mm, 6.5 * mm, txt)
+
+            if config.show_price and config.sale_price:
+                _, _, _, curr_sym = register_pdf_unicode_fonts()
+                price_val = f"{curr_sym}{config.sale_price:,.2f}"
+                fn, fs, txt = LabelService._resolve_font_and_text("price", 7.0, True, price_val, config.element_styles)
+                c.setFont(fn, fs)
+                c.drawString(2 * mm, 2.0 * mm, txt)
+            c.restoreState()
+
+            # Flap 2 (Middle 32mm): rotated coordinate system
+            c.saveState()
+            c.translate(x0 + strip_width, y0 + 36 * mm)
+            c.rotate(90)
+            if is_qr:
+                qr_size = min(11 * mm, max(5 * mm, 9.5 * mm * scale))
+                LabelService._draw_qr(c, code_payload, 2 * mm, (14.3 * mm - qr_size) / 2.0, qr_size)
+                fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.0, True, raw_code[:14], config.element_styles, is_monospace=True)
+                c.setFont(fn, fs)
+                c.drawString(14 * mm, 8.5 * mm, txt)
+                if config.show_sku and config.sku:
+                    fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.5, False, f"SKU:{config.sku[:12]}", config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawString(14 * mm, 4.0 * mm, txt)
+            else:
+                bc_h = min(8 * mm, max(4 * mm, 6.5 * mm * scale))
+                try:
+                    bc = code128.Code128(raw_code, barHeight=bc_h, barWidth=0.22)
+                    bc.drawOn(c, 2 * mm, 5.0 * mm)
+                except Exception:
+                    c.setFont("Helvetica-Bold", 5.0)
+                    c.drawString(2 * mm, 5.0 * mm, raw_code)
+
+                fn, fs, txt = LabelService._resolve_font_and_text("barcodeText", 5.0, True, raw_code[:16], config.element_styles, is_monospace=True)
+                c.setFont(fn, fs)
+                c.drawString(2 * mm, 1.8 * mm, txt)
+
+                if config.show_sku and config.sku:
+                    fn, fs, txt = LabelService._resolve_font_and_text("sku", 4.5, False, f"SKU:{config.sku[:12]}", config.element_styles)
+                    c.setFont(fn, fs)
+                    c.drawString(18 * mm, 1.8 * mm, txt)
+            c.restoreState()
+
+    @staticmethod
+    def generate_seznik_3up_tag(
+        config: LabelPrintConfig, store_name: str
+    ) -> bytes:
+        """
+        Generates 3-Across Seznik Jewellery Tag PDF (48mm x 100mm roll feed).
+        Matches physical 3-UP Seznik jewelry reel (14.3mm x 100mm per label, 3 abreast):
+        - 3 columns side-by-side per row: col 0 (1.0mm), col 1 (16.85mm), col 2 (32.7mm)
+        - Supports PORTRAIT (vertical text across 14.3mm width) and LANDSCAPE (rotated along flap)
+        - Quantity packing: groups labels in rows of 3, leaving empty slots on final page if needed
+        """
+        buffer = BytesIO()
+        width, height = 48 * mm, 100 * mm
+        c = canvas.Canvas(buffer, pagesize=(width, height))
+
+        display_store = config.store_name or store_name or "QuickBill Jewelers"
+        is_qr = config.code_type == CodeType.QR
+
+        if is_qr:
+            code_payload = f"ITEM:{config.public_item_id}" if config.public_item_id else (config.barcode or config.sku or "ITM-01")
+            raw_code = (config.public_item_id or config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+        else:
+            code_payload = (config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+            raw_code = code_payload
+
+        cp = config.custom_positions or {}
+        use_custom = bool(cp)
+        scale = getattr(config, 'code_scale', 1.0) or 1.0
+        try:
+            scale = max(0.3, min(2.5, float(scale)))
+        except (ValueError, TypeError):
+            scale = 1.0
+
+        orientation = getattr(config, 'orientation', LabelOrientation.PORTRAIT) or LabelOrientation.PORTRAIT
+
+        col_width = 14.3 * mm
+        col_offsets = [1.0 * mm, 16.85 * mm, 32.7 * mm]
+        labels_across = 3
+        total_quantity = config.quantity
+        total_rows = (total_quantity + labels_across - 1) // labels_across
+
+        printed = 0
+        for _ in range(total_rows):
+            for col_idx in range(labels_across):
+                if printed < total_quantity:
+                    x0 = col_offsets[col_idx]
+                    y0 = 0.0 * mm
+                    LabelService._draw_seznik_tag_strip(
+                        c=c,
+                        config=config,
+                        display_store=display_store,
+                        x0=x0,
+                        y0=y0,
+                        strip_width=col_width,
+                        strip_height=100 * mm,
+                        orientation=orientation,
+                        is_qr=is_qr,
+                        code_payload=code_payload,
+                        raw_code=raw_code,
+                        scale=scale,
+                        cp=cp,
+                        use_custom=use_custom,
+                    )
+                    printed += 1
+            c.showPage()
+
+        c.save()
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    @staticmethod
     def generate_seznik_jewelry_tag(
         config: LabelPrintConfig, store_name: str
     ) -> bytes:
         """
-        Generates 100mm x 15mm Seznik Jewellery Rat-Tail Tag PDF (Dual Foldable Flaps + Right Tail).
-        Matches physical Seznik 14.3mm x 100mm jewelry roll labels:
-        - Flap 1 (0mm to 32mm): Store Header, Item Name, Sale Price, MRP
-        - Fold Crease (32mm): Dashed fold boundary
-        - Flap 2 (32mm to 64mm): 2D QR Code or 1D Barcode, Public Code, SKU
-        - Tail (64mm to 100mm): 36mm narrow looping strap
+        Generates Seznik Jewellery Rat-Tail Tag PDF (1-UP).
+        Supports:
+        - PORTRAIT: 15mm x 100mm vertical strip
+        - LANDSCAPE: 100mm x 15mm horizontal strip (Dual Foldable Flaps + Right Tail)
         """
+        orientation = getattr(config, 'orientation', LabelOrientation.PORTRAIT) or LabelOrientation.PORTRAIT
+
+        if orientation == LabelOrientation.PORTRAIT:
+            buffer = BytesIO()
+            width, height = 15 * mm, 100 * mm
+            c = canvas.Canvas(buffer, pagesize=(width, height))
+
+            display_store = config.store_name or store_name or "QuickBill Jewelers"
+            is_qr = config.code_type == CodeType.QR
+
+            if is_qr:
+                code_payload = f"ITEM:{config.public_item_id}" if config.public_item_id else (config.barcode or config.sku or "ITM-01")
+                raw_code = (config.public_item_id or config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+            else:
+                code_payload = (config.barcode or config.sku or "ITM-01").replace("ITEM:", "").strip()
+                raw_code = code_payload
+
+            cp = config.custom_positions or {}
+            use_custom = bool(cp)
+            scale = getattr(config, 'code_scale', 1.0) or 1.0
+            try:
+                scale = max(0.3, min(2.5, float(scale)))
+            except (ValueError, TypeError):
+                scale = 1.0
+
+            for _ in range(config.quantity):
+                LabelService._draw_seznik_tag_strip(
+                    c=c,
+                    config=config,
+                    display_store=display_store,
+                    x0=0.35 * mm,
+                    y0=0.0 * mm,
+                    strip_width=14.3 * mm,
+                    strip_height=100 * mm,
+                    orientation=LabelOrientation.PORTRAIT,
+                    is_qr=is_qr,
+                    code_payload=code_payload,
+                    raw_code=raw_code,
+                    scale=scale,
+                    cp=cp,
+                    use_custom=use_custom,
+                )
+                c.showPage()
+
+            c.save()
+            buffer.seek(0)
+            return buffer.getvalue()
+
+        # Existing 100mm x 15mm horizontal implementation
         buffer = BytesIO()
         width, height = 100 * mm, 15 * mm
         c = canvas.Canvas(buffer, pagesize=(width, height))

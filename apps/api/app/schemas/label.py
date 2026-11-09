@@ -17,6 +17,7 @@ class PaperSize(str, Enum):
     THERMAL_38x25 = "THERMAL_38x25"
     RAT_TAIL_76x12 = "RAT_TAIL_76x12"
     SEZNIK_100x15 = "SEZNIK_100x15"
+    SEZNIK_3UP_100x15 = "SEZNIK_3UP_100x15"
     DUMBBELL_70x12 = "DUMBBELL_70x12"
     A4_GRID_24 = "A4_GRID_24"
     A4_GRID_40 = "A4_GRID_40"
@@ -26,6 +27,10 @@ class PaperSize(str, Enum):
 class CodeType(str, Enum):
     BARCODE = "BARCODE"
     QR = "QR"
+
+class LabelOrientation(str, Enum):
+    PORTRAIT = "PORTRAIT"
+    LANDSCAPE = "LANDSCAPE"
 
 class LabelPrintConfig(BaseSchema):
     item_id: Optional[str] = Field(None, alias="itemId")
@@ -48,6 +53,8 @@ class LabelPrintConfig(BaseSchema):
     code_scale: Optional[float] = Field(default=1.0, alias="codeScale")
     element_styles: Optional[dict] = Field(default=None, alias="elementStyles")
     custom_barcode_text: Optional[str] = Field(default=None, alias="customBarcodeText")
+    orientation: LabelOrientation = Field(default=LabelOrientation.PORTRAIT)
+    labels_across: int = Field(default=3, ge=1, le=5, alias="labelsAcross")
 
 class BatchLabelPrintRequest(BaseSchema):
     items: List[LabelPrintConfig]

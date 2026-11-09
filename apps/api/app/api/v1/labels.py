@@ -35,7 +35,10 @@ async def generate_custom_label_pdf(
     """
     store_name = await _resolve_store_name(business_id, config.store_name)
     
-    if config.paper_size == PaperSize.SEZNIK_100x15:
+    if config.paper_size == PaperSize.SEZNIK_3UP_100x15:
+        pdf_bytes = LabelService.generate_seznik_3up_tag(config=config, store_name=store_name)
+        filename = f"Seznik_3UP_Jewelry_Tag_{config.sku or 'Item'}_{config.quantity}qty.pdf"
+    elif config.paper_size == PaperSize.SEZNIK_100x15:
         pdf_bytes = LabelService.generate_seznik_jewelry_tag(config=config, store_name=store_name)
         filename = f"Seznik_Jewelry_Tag_{config.sku or 'Item'}.pdf"
     elif config.paper_size == PaperSize.RAT_TAIL_76x12 or config.style == LabelStyle.JEWELRY_RAT_TAIL:
