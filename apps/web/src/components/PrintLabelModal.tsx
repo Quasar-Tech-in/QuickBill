@@ -250,6 +250,11 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     try { return parseFloat(localStorage.getItem('qb_label_hardware_offset_y') || '0') || 0; } catch { return 0; }
   });
 
+  // 3-UP Seznik Inter-Sticker Gap (in mm) with default 1.70mm (calibrated for 48mm web with 14.3mm tags)
+  const [seznikGap_mm, setSeznikGap_mm] = useState<number>(() => {
+    try { return parseFloat(localStorage.getItem('qb_label_seznik_gap_mm') || '1.70') || 1.70; } catch { return 1.70; }
+  });
+
   const handleOffsetXChange = (val: number) => {
     const clamped = Math.round(Math.max(-10, Math.min(10, val)) * 10) / 10;
     setPrintOffsetX_mm(clamped);
@@ -260,6 +265,12 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     const clamped = Math.round(Math.max(-10, Math.min(10, val)) * 10) / 10;
     setPrintOffsetY_mm(clamped);
     try { localStorage.setItem('qb_label_hardware_offset_y', String(clamped)); } catch {}
+  };
+
+  const handleSeznikGapChange = (val: number) => {
+    const clamped = Math.round(Math.max(0.4, Math.min(3.0, val)) * 100) / 100;
+    setSeznikGap_mm(clamped);
+    try { localStorage.setItem('qb_label_seznik_gap_mm', String(clamped)); } catch {}
   };
 
   // Active element positions
@@ -424,7 +435,16 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
   const handleUpdateCodeScale = (newScale: number) => {
     const clamped = Math.round(Math.max(0.3, Math.min(2.5, newScale)) * 100) / 100;
     setCodeScale(clamped);
-    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, clamped, dragSnapToGrid, elementStyles, orientation);
+    const curCodeStyle = elementStyles.code || DEFAULT_ELEMENT_STYLES.code || { size: 1.0, bold: true, italic: false, uppercase: false, rotation: 0 };
+    const nextStyles: LayoutStyles = {
+      ...elementStyles,
+      code: {
+        ...curCodeStyle,
+        size: clamped,
+      }
+    };
+    setElementStyles(nextStyles);
+    saveDesignToCache(elementPositions, paperSize, style, arrangement, codeType, clamped, dragSnapToGrid, nextStyles, orientation);
   };
 
   // Switch label orientation (Portrait vs Landscape)
@@ -1345,11 +1365,26 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                 ${showProductName ? `<div style="position:absolute;left:${pos.productName.x}%;top:${pos.productName.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.productName?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('productName', 5.5, true)}line-height:1;white-space:nowrap;text-align:center;">${escapeHtml(formatElementText('productName', productName || 'Item'))}</div>` : ''}
                 ${showPrice ? `<div style="position:absolute;left:${pos.price.x}%;top:${pos.price.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.price?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('price', 6.8, true)}line-height:1;text-align:center;">₹${Number(price || 0).toFixed(2)}</div>` : ''}
 
-                ${codeDataUrl ? `
-                  <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.code?.rotation || 0}deg);transform-origin:center center;display:flex;align-items:center;justify-content:center;">
-                    <img src="${codeDataUrl}" style="height:${codeType === 'BARCODE' ? `${6.5 * codeScale}mm` : `${10.0 * codeScale}mm`};max-width:13.5mm;object-fit:contain;" />
-                  </div>
-                ` : ''}
+                ${codeDataUrl ? (() => {
+                  const rot = elementStyles.code?.rotation || 0;
+                  const isRotated = rot === 90 || rot === 270;
+                  if (codeType === 'QR') {
+                    const qrDim = Math.min(13.2, Math.max(5.0, 8.5 * codeScale)).toFixed(2);
+                    return `
+                      <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${rot}deg);transform-origin:center center;display:flex;align-items:center;justify-content:center;">
+                        <img src="${codeDataUrl}" style="width:${qrDim}mm;height:${qrDim}mm;max-width:13.2mm;max-height:13.2mm;object-fit:contain;" />
+                      </div>
+                    `;
+                  } else {
+                    const bcW = (isRotated ? Math.min(28.0, Math.max(12.0, 18.0 * codeScale)) : Math.min(13.2, Math.max(8.0, 11.5 * codeScale))).toFixed(2);
+                    const bcH = (isRotated ? Math.min(12.0, Math.max(4.0, 7.0 * codeScale)) : Math.min(9.5, Math.max(3.5, 5.2 * codeScale))).toFixed(2);
+                    return `
+                      <div style="position:absolute;left:${pos.code.x}%;top:${pos.code.y}%;transform:translate(-50%,-50%) rotate(${rot}deg);transform-origin:center center;display:flex;align-items:center;justify-content:center;">
+                        <img src="${codeDataUrl}" style="width:${bcW}mm;height:${bcH}mm;object-fit:contain;" />
+                      </div>
+                    `;
+                  }
+                })() : ''}
 
                 <div style="position:absolute;left:${pos.barcodeText.x}%;top:${pos.barcodeText.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('barcodeText', 4.8, true, true)}line-height:1;text-align:center;">${escapeHtml(formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14)))}</div>
                 ${showSku && sku ? `<div style="position:absolute;left:${pos.sku.x}%;top:${pos.sku.y}%;transform:translate(-50%,-50%) rotate(${elementStyles.sku?.rotation || 0}deg);transform-origin:center center;${getPrintInlineCss('sku', 4.4, false)}color:#333;line-height:1;text-align:center;">SKU:${escapeHtml(formatElementText('sku', sku.substring(0, 12)))}</div>` : ''}
@@ -1494,13 +1529,14 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           bodyHtml += `</div>`;
         }
       } else if (isSeznik3Up) {
-        // 3-Across Seznik Reel (48mm x 100mm feed, 3 columns side by side with calibrated 0.85mm gap and 1.70mm margins)
+        // 3-Across Seznik Reel (48mm x 100mm feed, 3 columns side by side with calibrated gap and symmetrical margins)
         const cols = 3;
         const totalRows = Math.ceil(printQty / cols);
+        const leftMargin_mm = Math.max(0.4, (48.0 - (3 * 14.3 + 2 * seznikGap_mm)) / 2.0);
         let curIndex = 0;
         for (let r = 0; r < totalRows; r++) {
           bodyHtml += `
-            <div style="width:48mm;height:100mm;page-break-after:always;display:flex;flex-direction:row;padding:${printOffsetY_mm}mm 0 0 ${1.7 + printOffsetX_mm}mm;gap:0.85mm;box-sizing:border-box;margin:0 auto;overflow:hidden;background:#ffffff;">
+            <div style="width:48mm;height:100mm;page-break-after:always;display:flex;flex-direction:row;padding:${printOffsetY_mm}mm 0 0 ${(leftMargin_mm + printOffsetX_mm).toFixed(2)}mm;gap:${seznikGap_mm}mm;box-sizing:border-box;margin:0 auto;overflow:hidden;background:#ffffff;">
           `;
           for (let c = 0; c < cols; c++) {
             if (curIndex < printQty) {
@@ -1622,6 +1658,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
         customBarcodeText: effectiveBarcodeText,
         printOffsetX: printOffsetX_mm,
         printOffsetY: printOffsetY_mm,
+        seznikGapMm: seznikGap_mm,
       };
 
       const response = await apiClient.post('/labels/custom-pdf', payload, {
@@ -2194,41 +2231,58 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 {/* Size Controls */}
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, backgroundColor: 'var(--neutral-100)', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--neutral-200)' }}>
-                  <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--neutral-600)' }}>Text Size:</span>
+                  <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--neutral-600)' }}>
+                    {selectedElementId === 'code' ? 'Code Size:' : 'Text Size:'}
+                  </span>
                   <button
                     type="button"
                     onClick={() => {
-                      const cur = elementStyles[selectedElementId]?.size ?? 1.0;
-                      handleUpdateElementStyle(selectedElementId, { size: Math.max(0.6, Math.round((cur - 0.05) * 100) / 100) });
+                      if (selectedElementId === 'code') {
+                        handleUpdateCodeScale(codeScale - 0.05);
+                      } else {
+                        const cur = elementStyles[selectedElementId]?.size ?? 1.0;
+                        handleUpdateElementStyle(selectedElementId, { size: Math.max(0.6, Math.round((cur - 0.05) * 100) / 100) });
+                      }
                     }}
                     style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
-                    title="Decrease font size by 5%"
+                    title={selectedElementId === 'code' ? "Decrease code size by 5%" : "Decrease font size by 5%"}
                   >
                     -
                   </button>
                   <input
                     type="range"
-                    min="0.6"
-                    max="1.8"
+                    min={selectedElementId === 'code' ? "0.4" : "0.6"}
+                    max={selectedElementId === 'code' ? "2.0" : "1.8"}
                     step="0.05"
-                    value={elementStyles[selectedElementId]?.size ?? 1.0}
-                    onChange={(e) => handleUpdateElementStyle(selectedElementId, { size: parseFloat(e.target.value) })}
+                    value={selectedElementId === 'code' ? codeScale : (elementStyles[selectedElementId]?.size ?? 1.0)}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      if (selectedElementId === 'code') {
+                        handleUpdateCodeScale(val);
+                      } else {
+                        handleUpdateElementStyle(selectedElementId, { size: val });
+                      }
+                    }}
                     style={{ width: 50, height: 4, accentColor: 'var(--primary-600)', cursor: 'pointer' }}
-                    title={`Text Size: ${Math.round((elementStyles[selectedElementId]?.size ?? 1.0) * 100)}%`}
+                    title={`${selectedElementId === 'code' ? 'Code' : 'Text'} Size: ${Math.round((selectedElementId === 'code' ? codeScale : (elementStyles[selectedElementId]?.size ?? 1.0)) * 100)}%`}
                   />
                   <button
                     type="button"
                     onClick={() => {
-                      const cur = elementStyles[selectedElementId]?.size ?? 1.0;
-                      handleUpdateElementStyle(selectedElementId, { size: Math.min(1.8, Math.round((cur + 0.05) * 100) / 100) });
+                      if (selectedElementId === 'code') {
+                        handleUpdateCodeScale(codeScale + 0.05);
+                      } else {
+                        const cur = elementStyles[selectedElementId]?.size ?? 1.0;
+                        handleUpdateElementStyle(selectedElementId, { size: Math.min(1.8, Math.round((cur + 0.05) * 100) / 100) });
+                      }
                     }}
                     style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
-                    title="Increase font size by 5%"
+                    title={selectedElementId === 'code' ? "Increase code size by 5%" : "Increase font size by 5%"}
                   >
                     +
                   </button>
                   <span style={{ fontSize: '0.66rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 32, textAlign: 'center' }}>
-                    {Math.round((elementStyles[selectedElementId]?.size ?? 1.0) * 100)}%
+                    {Math.round((selectedElementId === 'code' ? codeScale : (elementStyles[selectedElementId]?.size ?? 1.0)) * 100)}%
                   </span>
                 </div>
 
@@ -2443,6 +2497,56 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                     +
                   </button>
                 </div>
+
+                {/* 3-UP Inter-Sticker Gap Calibration */}
+                {isSeznik3Up && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, borderLeft: '1.5px solid var(--neutral-300)', paddingLeft: 8 }}>
+                    <span style={{ fontSize: '0.66rem', fontWeight: 800, color: 'var(--primary-800)' }}>Sticker Gap:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleSeznikGapChange(seznikGap_mm - 0.05)}
+                      style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
+                      title="Decrease inter-sticker gap by 0.05mm"
+                    >
+                      -
+                    </button>
+                    <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--primary-700)', minWidth: 42, textAlign: 'center' }}>
+                      {seznikGap_mm.toFixed(2)} mm
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleSeznikGapChange(seznikGap_mm + 0.05)}
+                      style={{ width: 18, height: 18, borderRadius: 3, border: '1px solid var(--neutral-300)', backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 800, fontSize: '0.75rem', lineHeight: 1 }}
+                      title="Increase inter-sticker gap by 0.05mm"
+                    >
+                      +
+                    </button>
+
+                    {/* Quick Preset Chips for Gap */}
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      {([0.85, 1.0, 1.25, 1.5, 1.7, 2.0] as const).map((gp) => (
+                        <button
+                          key={gp}
+                          type="button"
+                          onClick={() => handleSeznikGapChange(gp)}
+                          style={{
+                            padding: '1px 4px',
+                            fontSize: '0.60rem',
+                            fontWeight: 700,
+                            borderRadius: 3,
+                            border: '1px solid',
+                            borderColor: Math.abs(seznikGap_mm - gp) < 0.02 ? 'var(--primary-500)' : 'var(--neutral-300)',
+                            backgroundColor: Math.abs(seznikGap_mm - gp) < 0.02 ? 'var(--primary-100)' : '#ffffff',
+                            color: Math.abs(seznikGap_mm - gp) < 0.02 ? 'var(--primary-800)' : 'var(--neutral-600)',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {gp.toFixed(2)}mm
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Reset Offsets */}
                 {(printOffsetX_mm !== 0 || printOffsetY_mm !== 0) && (
@@ -2793,7 +2897,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                               3 Labels / Row
                             </span>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '8px 6px', backgroundColor: '#ffffff', border: '1.5px solid var(--neutral-300)', borderRadius: 6, boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.04)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: Math.max(2, Math.round(seznikGap_mm * 3)), padding: '8px 6px', backgroundColor: '#ffffff', border: '1.5px solid var(--neutral-300)', borderRadius: 6, boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.04)' }}>
                             {[1, 2, 3].map((col) => (
                               <div key={col} style={{ width: 48, height: 250, border: '1px solid var(--neutral-300)', borderRadius: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: '#ffffff', position: 'relative' }}>
                                 {/* Miniature Flap 1 */}
@@ -2818,8 +2922,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                               </div>
                             ))}
                           </div>
-                          <div style={{ fontSize: '0.62rem', color: 'var(--neutral-500)', textAlign: 'center', maxWidth: 220 }}>
-                            3 labels print abreast with 0.85mm die-cut gap across 48mm thermal web.
+                          <div style={{ fontSize: '0.62rem', color: 'var(--neutral-500)', textAlign: 'center', maxWidth: 240 }}>
+                            3 labels print abreast with {seznikGap_mm.toFixed(2)}mm die-cut gap across 48mm thermal web.
                           </div>
                         </div>
                       )}

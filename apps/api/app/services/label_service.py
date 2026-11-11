@@ -565,7 +565,7 @@ class LabelService:
                 # Flap 2: Code, Text & SKU
                 code_rot = LabelService._get_element_rotation("code", config.element_styles)
                 if is_qr:
-                    qr_size = min(12.5 * mm, max(6.0 * mm, 10.0 * mm * scale))
+                    qr_size = min(13.0 * mm, max(5.0 * mm, 8.5 * mm * scale))
                     if "code" in cp:
                         qx = x0 + (cp["code"]["x"] / 100.0) * strip_width
                         qy = y0 + ((100.0 - cp["code"]["y"]) / 100.0) * strip_height
@@ -595,10 +595,17 @@ class LabelService:
                         rot = LabelService._get_element_rotation("sku", config.element_styles)
                         LabelService._draw_text_with_rotation(c, skx, sky, txt, fn, fs, rot)
                 else:
-                    # 1D Barcode: Auto-fit within 13.0 mm width
+                    # 1D Barcode: Dynamically scale with code_scale and handle 90° rotation along flap
                     num_modules = max(35, len(raw_code) * 11 + 35)
-                    bar_w = min(0.24, max(0.11, (12.5 * mm / (num_modules * 72.0 / 25.4))))
-                    bc_h = min(9.0 * mm, max(4.5 * mm, 6.5 * mm * scale))
+                    is_rotated = code_rot in (90, 270)
+                    if is_rotated:
+                        target_len = min(28.0 * mm, max(14.0 * mm, 18.0 * mm * scale))
+                        bc_h = min(12.0 * mm, max(4.0 * mm, 7.0 * mm * scale))
+                    else:
+                        target_len = min(13.5 * mm, max(8.0 * mm, 11.5 * mm * scale))
+                        bc_h = min(9.5 * mm, max(3.5 * mm, 5.5 * mm * scale))
+
+                    bar_w = min(0.35, max(0.09, (target_len / (num_modules * 72.0 / 25.4))))
                     approx_bc_width = num_modules * bar_w * (25.4 / 72.0)
                     bc_x = x0 + (cp["code"]["x"] / 100.0) * strip_width if "code" in cp else cx
                     bc_y = y0 + ((100.0 - cp["code"]["y"]) / 100.0) * strip_height if "code" in cp else (y0 + 50.0 * mm)
@@ -786,8 +793,15 @@ class LabelService:
         off_x = float(getattr(config, 'print_offset_x', 0.0) or 0.0) * mm
         off_y = float(getattr(config, 'print_offset_y', 0.0) or 0.0) * mm
         col_width = 14.3 * mm
-        # Calibrated 0.85mm inter-sticker gap (pitch 15.15mm) with 1.70mm symmetrical margins on 48mm web
-        col_offsets = [1.70 * mm + off_x, 16.85 * mm + off_x, 32.00 * mm + off_x]
+        # Dynamic gap calibration (default 1.70mm) with auto-balanced symmetrical margins across 48mm web
+        gap_mm = float(getattr(config, 'seznik_gap_mm', 1.70) or 1.70)
+        pitch = (14.3 + gap_mm) * mm
+        left_margin = max(0.5, (48.0 - (3 * 14.3 + 2 * gap_mm)) / 2.0) * mm
+        col_offsets = [
+            left_margin + off_x,
+            left_margin + pitch + off_x,
+            left_margin + 2 * pitch + off_x,
+        ]
         labels_across = 3
         total_quantity = config.quantity
         total_rows = (total_quantity + labels_across - 1) // labels_across

@@ -57,6 +57,7 @@ class LabelPrintConfig(BaseSchema):
     labels_across: int = Field(default=3, ge=1, le=5, alias="labelsAcross")
     print_offset_x: Optional[float] = Field(default=0.0, alias="printOffsetX")
     print_offset_y: Optional[float] = Field(default=0.0, alias="printOffsetY")
+    seznik_gap_mm: Optional[float] = Field(default=1.70, alias="seznikGapMm")
 
 class BatchLabelPrintRequest(BaseSchema):
     items: List[LabelPrintConfig]
