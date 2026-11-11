@@ -785,8 +785,9 @@ class LabelService:
 
         off_x = float(getattr(config, 'print_offset_x', 0.0) or 0.0) * mm
         off_y = float(getattr(config, 'print_offset_y', 0.0) or 0.0) * mm
-        col_width = 14.0 * mm
-        col_offsets = [2.0 * mm + off_x, 18.0 * mm + off_x, 34.0 * mm + off_x]
+        col_width = 14.3 * mm
+        # Calibrated 0.85mm inter-sticker gap (pitch 15.15mm) with 1.70mm symmetrical margins on 48mm web
+        col_offsets = [1.70 * mm + off_x, 16.85 * mm + off_x, 32.00 * mm + off_x]
         labels_across = 3
         total_quantity = config.quantity
         total_rows = (total_quantity + labels_across - 1) // labels_across

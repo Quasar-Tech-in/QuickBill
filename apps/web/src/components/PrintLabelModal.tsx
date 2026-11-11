@@ -275,6 +275,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     startElemY: number;
     containerW: number;
     containerH: number;
+    isSeznikPortrait?: boolean;
+    headHeight?: number;
   } | null>(null);
 
   // Action / UI feedback states
@@ -630,6 +632,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
     if (!canvasContainerRef.current) return;
     const rect = canvasContainerRef.current.getBoundingClientRect();
     const currentPos = elementPositions[id] || { x: 50, y: 50 };
+    const isCurrentSeznikPortrait = isSeznik && orientation === 'PORTRAIT';
 
     dragStartRef.current = {
       startX: e.clientX,
@@ -638,27 +641,48 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
       startElemY: currentPos.y,
       containerW: rect.width,
       containerH: rect.height,
+      isSeznikPortrait: isCurrentSeznikPortrait,
+      headHeight: 470,
     };
 
     let latestPositions = { ...elementPositions };
 
     const handlePointerMove = (ev: PointerEvent) => {
       if (!dragStartRef.current) return;
-      const { startX, startY, startElemX, startElemY, containerW, containerH } = dragStartRef.current;
+      const { startX, startY, startElemX, startElemY, containerW, containerH, isSeznikPortrait, headHeight } = dragStartRef.current;
       const deltaX = ev.clientX - startX;
       const deltaY = ev.clientY - startY;
 
-      let newX = startElemX + (deltaX / containerW) * 100;
-      let newY = startElemY + (deltaY / containerH) * 100;
+      let newX: number;
+      let newY: number;
 
-      // Clamping inside canvas bounds
-      newX = Math.max(2, Math.min(94, newX));
-      newY = Math.max(5, Math.min(95, newY));
+      if (isSeznikPortrait) {
+        // Authentic Seznik Portrait: 14.3mm width (105px) x 64mm printable head (470px)
+        const headH = headHeight || 470;
+        newX = startElemX + (deltaX / containerW) * 100;
+        newY = startElemY + (deltaY / headH) * 64;
 
-      // 2% grid snap (~1-1.5mm)
-      if (dragSnapToGrid) {
-        newX = Math.round(newX / 2) * 2;
-        newY = Math.round(newY / 2) * 2;
+        // Clamping strictly within Flap 1 & Flap 2 (0 to 64mm), avoiding non-printable tail strap
+        newX = Math.max(3, Math.min(97, newX));
+        newY = Math.max(2, Math.min(62, newY));
+
+        if (dragSnapToGrid) {
+          newX = Math.round(newX / 2) * 2;
+          newY = Math.round(newY);
+        }
+      } else {
+        newX = startElemX + (deltaX / containerW) * 100;
+        newY = startElemY + (deltaY / containerH) * 100;
+
+        // Clamping inside canvas bounds
+        newX = Math.max(2, Math.min(94, newX));
+        newY = Math.max(5, Math.min(95, newY));
+
+        // 2% grid snap (~1-1.5mm)
+        if (dragSnapToGrid) {
+          newX = Math.round(newX / 2) * 2;
+          newY = Math.round(newY / 2) * 2;
+        }
       }
 
       latestPositions = {
@@ -1310,7 +1334,7 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           if (orientation === 'PORTRAIT') {
             // Authentic Seznik Portrait Tag 14.3mm x 100mm (32mm Top Flap, 32mm Middle Flap, 36mm Tail)
             return `
-              <div class="label-unit-seznik-portrait" style="width:${isSeznik3Up ? '14mm' : '14.3mm'};height:100mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
+              <div class="label-unit-seznik-portrait" style="width:14.3mm;height:100mm;position:relative;box-sizing:border-box;overflow:hidden;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#000000;">
                 <!-- Background Guides -->
                 <div style="position:absolute;left:0;top:0;width:100%;height:32mm;border:0.2mm solid #cbd5e1;border-bottom:0.3mm dashed #64748b;box-sizing:border-box;"></div>
                 <div style="position:absolute;left:0;top:32mm;width:100%;height:32mm;border:0.2mm solid #cbd5e1;box-sizing:border-box;"></div>
@@ -1470,20 +1494,20 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
           bodyHtml += `</div>`;
         }
       } else if (isSeznik3Up) {
-        // 3-Across Seznik Reel (48mm x 100mm feed, 3 columns side by side with calibrated side padding and gap)
+        // 3-Across Seznik Reel (48mm x 100mm feed, 3 columns side by side with calibrated 0.85mm gap and 1.70mm margins)
         const cols = 3;
         const totalRows = Math.ceil(printQty / cols);
         let curIndex = 0;
         for (let r = 0; r < totalRows; r++) {
           bodyHtml += `
-            <div style="width:48mm;height:100mm;page-break-after:always;display:flex;flex-direction:row;padding:${printOffsetY_mm}mm 0 0 ${2.0 + printOffsetX_mm}mm;gap:1.5mm;box-sizing:border-box;margin:0 auto;overflow:hidden;background:#ffffff;">
+            <div style="width:48mm;height:100mm;page-break-after:always;display:flex;flex-direction:row;padding:${printOffsetY_mm}mm 0 0 ${1.7 + printOffsetX_mm}mm;gap:0.85mm;box-sizing:border-box;margin:0 auto;overflow:hidden;background:#ffffff;">
           `;
           for (let c = 0; c < cols; c++) {
             if (curIndex < printQty) {
               bodyHtml += singleLabelHtml;
               curIndex++;
             } else {
-              bodyHtml += `<div style="width:14mm;height:100mm;box-sizing:border-box;"></div>`;
+              bodyHtml += `<div style="width:14.3mm;height:100mm;box-sizing:border-box;"></div>`;
             }
           }
           bodyHtml += `</div>`;
@@ -2504,8 +2528,8 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                         <div 
                           ref={canvasContainerRef}
                           style={{
-                            width: 160,
-                            height: 460,
+                            width: 105,
+                            height: 525,
                             backgroundColor: '#ffffff',
                             border: '1.5px solid var(--neutral-400)',
                             borderRadius: 8,
@@ -2517,51 +2541,232 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                             userSelect: 'none'
                           }}
                         >
-                          {/* FLAP 1: Front Face (0 to 32% height) */}
+                          {/* PRINTABLE HEAD (470px = 64mm, exact physical ratio 105:470 = 14.3:64) */}
                           <div style={{
-                            width: '100%',
-                            height: '32%',
-                            borderBottom: '1.5px dashed var(--neutral-400)',
-                            backgroundColor: '#ffffff',
+                            width: 105,
+                            height: 470,
                             position: 'relative',
-                            boxSizing: 'border-box'
+                            backgroundColor: '#ffffff'
                           }}>
-                            <div style={{ position: 'absolute', right: 4, bottom: -9, backgroundColor: 'var(--neutral-200)', color: 'var(--neutral-700)', fontSize: '0.50rem', fontWeight: 800, padding: '1px 4px', borderRadius: 3, zIndex: 12 }}>
-                              FOLD (32mm)
+                            {/* FLAP 1: Front Face (0 to 32mm = 235px) */}
+                            <div style={{
+                              width: '100%',
+                              height: 235,
+                              borderBottom: '1.5px dashed var(--neutral-400)',
+                              backgroundColor: '#ffffff',
+                              position: 'relative',
+                              boxSizing: 'border-box'
+                            }}>
+                              <div style={{ position: 'absolute', right: 3, bottom: -9, backgroundColor: 'var(--neutral-200)', color: 'var(--neutral-700)', fontSize: '0.46rem', fontWeight: 800, padding: '1px 3px', borderRadius: 3, zIndex: 12 }}>
+                                FOLD (32mm)
+                              </div>
+                              <div style={{ position: 'absolute', left: 3, top: 2, fontSize: '0.45rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
+                                Flap 1 (32mm)
+                              </div>
                             </div>
-                            <div style={{ position: 'absolute', left: 4, top: 2, fontSize: '0.48rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
-                              Front Face (32mm)
+
+                            {/* FLAP 2: Back Face (32 to 64mm = 235px) */}
+                            <div style={{
+                              width: '100%',
+                              height: 235,
+                              borderBottom: '1.5px solid var(--neutral-300)',
+                              backgroundColor: '#ffffff',
+                              position: 'relative',
+                              boxSizing: 'border-box'
+                            }}>
+                              <div style={{ position: 'absolute', left: 3, top: 2, fontSize: '0.45rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
+                                Flap 2 (32mm)
+                              </div>
                             </div>
+
+                            {/* DRAGGABLE ELEMENTS IN PORTRAIT */}
+                            {showStoreName && (
+                              <div
+                                onPointerDown={(e) => handlePointerDown('storeName', e)}
+                                onClick={() => setSelectedElementId('storeName')}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${elementPositions.storeName?.x ?? 50}%`,
+                                  top: `${((elementPositions.storeName?.y ?? 7) / 64) * 470}px`,
+                                  transform: `translate(-50%, -50%) rotate(${elementStyles.storeName?.rotation || 0}deg)`,
+                                  transformOrigin: 'center center',
+                                  cursor: 'move',
+                                  padding: '2px 3px',
+                                  borderRadius: 4,
+                                  border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                  backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                  color: 'var(--neutral-900)',
+                                  whiteSpace: 'nowrap',
+                                  textAlign: 'center',
+                                  maxWidth: (elementStyles.storeName?.rotation === 90 || elementStyles.storeName?.rotation === 270) ? 200 : 96,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  zIndex: 10,
+                                  ...getElementStyleProps('storeName', 0.65, true)
+                                }}
+                              >
+                                {formatElementText('storeName', storeName || 'Store')}
+                              </div>
+                            )}
+
+                            {showProductName && (
+                              <div
+                                onPointerDown={(e) => handlePointerDown('productName', e)}
+                                onClick={() => setSelectedElementId('productName')}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${elementPositions.productName?.x ?? 50}%`,
+                                  top: `${((elementPositions.productName?.y ?? 16) / 64) * 470}px`,
+                                  transform: `translate(-50%, -50%) rotate(${elementStyles.productName?.rotation || 0}deg)`,
+                                  transformOrigin: 'center center',
+                                  cursor: 'move',
+                                  padding: '2px 3px',
+                                  borderRadius: 4,
+                                  border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                  backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                  color: 'var(--neutral-800)',
+                                  maxWidth: (elementStyles.productName?.rotation === 90 || elementStyles.productName?.rotation === 270) ? 200 : 96,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  textAlign: 'center',
+                                  zIndex: 10,
+                                  ...getElementStyleProps('productName', 0.70, true)
+                                }}
+                              >
+                                {formatElementText('productName', productName)}
+                              </div>
+                            )}
+
+                            {showPrice && (
+                              <div
+                                onPointerDown={(e) => handlePointerDown('price', e)}
+                                onClick={() => setSelectedElementId('price')}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${elementPositions.price?.x ?? 50}%`,
+                                  top: `${((elementPositions.price?.y ?? 26) / 64) * 470}px`,
+                                  transform: `translate(-50%, -50%) rotate(${elementStyles.price?.rotation || 0}deg)`,
+                                  transformOrigin: 'center center',
+                                  cursor: 'move',
+                                  padding: '2px 3px',
+                                  borderRadius: 4,
+                                  border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                  backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                  color: '#1e1b4b',
+                                  whiteSpace: 'nowrap',
+                                  textAlign: 'center',
+                                  maxWidth: (elementStyles.price?.rotation === 90 || elementStyles.price?.rotation === 270) ? 200 : 96,
+                                  zIndex: 10,
+                                  ...getElementStyleProps('price', 0.88, true)
+                                }}
+                              >
+                                ₹{Number(price || 0).toFixed(2)}
+                              </div>
+                            )}
+
+                            <div
+                              onPointerDown={(e) => handlePointerDown('code', e)}
+                              onClick={() => setSelectedElementId('code')}
+                              style={{
+                                position: 'absolute',
+                                left: `${elementPositions.code?.x ?? 50}%`,
+                                top: `${((elementPositions.code?.y ?? 44) / 64) * 470}px`,
+                                transform: `translate(-50%, -50%) scale(${codeScale}) rotate(${elementStyles.code?.rotation || 0}deg)`,
+                                transformOrigin: 'center center',
+                                cursor: 'move',
+                                padding: '2px',
+                                borderRadius: 4,
+                                border: activeDragId === 'code' || selectedElementId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: 'max-content',
+                                height: 'max-content',
+                                flexShrink: 0,
+                                whiteSpace: 'nowrap',
+                                zIndex: 10
+                              }}
+                            >
+                              <BarcodeRenderer
+                                ref={barcodeRendererRef}
+                                value={activePayload}
+                                codeType={codeType}
+                                width={codeType === 'BARCODE' ? 0.75 : undefined}
+                                height={codeType === 'BARCODE' ? 32 : 55}
+                                showText={false}
+                              />
+                            </div>
+
+                            <div
+                              onPointerDown={(e) => handlePointerDown('barcodeText', e)}
+                              onClick={() => setSelectedElementId('barcodeText')}
+                              style={{
+                                position: 'absolute',
+                                left: `${elementPositions.barcodeText?.x ?? 50}%`,
+                                top: `${((elementPositions.barcodeText?.y ?? 53) / 64) * 470}px`,
+                                transform: `translate(-50%, -50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg)`,
+                                transformOrigin: 'center center',
+                                cursor: 'move',
+                                padding: '2px 3px',
+                                borderRadius: 4,
+                                border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                color: 'var(--neutral-900)',
+                                whiteSpace: 'nowrap',
+                                textAlign: 'center',
+                                maxWidth: (elementStyles.barcodeText?.rotation === 90 || elementStyles.barcodeText?.rotation === 270) ? 200 : 96,
+                                zIndex: 10,
+                                ...getElementStyleProps('barcodeText', 0.65, true, true)
+                              }}
+                            >
+                              {formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14))}
+                            </div>
+
+                            {showSku && sku && (
+                              <div
+                                onPointerDown={(e) => handlePointerDown('sku', e)}
+                                onClick={() => setSelectedElementId('sku')}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${elementPositions.sku?.x ?? 50}%`,
+                                  top: `${((elementPositions.sku?.y ?? 58) / 64) * 470}px`,
+                                  transform: `translate(-50%, -50%) rotate(${elementStyles.sku?.rotation || 0}deg)`,
+                                  transformOrigin: 'center center',
+                                  cursor: 'move',
+                                  padding: '2px 3px',
+                                  borderRadius: 4,
+                                  border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
+                                  backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                  color: 'var(--neutral-500)',
+                                  whiteSpace: 'nowrap',
+                                  textAlign: 'center',
+                                  maxWidth: (elementStyles.sku?.rotation === 90 || elementStyles.sku?.rotation === 270) ? 200 : 96,
+                                  zIndex: 10,
+                                  ...getElementStyleProps('sku', 0.58, false)
+                                }}
+                              >
+                                {formatElementText('sku', `SKU:${sku}`)}
+                              </div>
+                            )}
                           </div>
 
-                          {/* FLAP 2: Back Face (32% to 64% height) */}
+                          {/* TAIL STRAP (Condensed representation of 36mm non-printable loop) */}
                           <div style={{
                             width: '100%',
-                            height: '32%',
-                            borderBottom: '1px solid var(--neutral-200)',
-                            backgroundColor: '#ffffff',
-                            position: 'relative',
-                            boxSizing: 'border-box'
-                          }}>
-                            <div style={{ position: 'absolute', left: 4, top: 2, fontSize: '0.48rem', color: 'var(--neutral-400)', fontWeight: 600 }}>
-                              Back Face (32mm)
-                            </div>
-                          </div>
-
-                          {/* TAIL STRAP (64% to 100% height) */}
-                          <div style={{
-                            width: '100%',
-                            height: '36%',
-                            backgroundColor: 'var(--neutral-50)',
+                            height: 55,
+                            backgroundColor: 'var(--neutral-100)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            position: 'relative'
+                            position: 'relative',
+                            borderTop: '1px dashed var(--neutral-300)'
                           }}>
                             <div style={{
-                              width: 44,
-                              height: '92%',
-                              borderRadius: 4,
+                              width: 28,
+                              height: '86%',
+                              borderRadius: '0 0 14px 14px',
                               backgroundColor: '#ffffff',
                               border: '1px solid var(--neutral-300)',
                               display: 'flex',
@@ -2569,186 +2774,17 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                               justifyContent: 'center',
                               boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
                             }}>
-                              <span style={{ fontSize: '0.52rem', color: 'var(--neutral-500)', fontWeight: 700, transform: 'rotate(-90deg)', whiteSpace: 'nowrap' }}>
-                                Tail Strap (36mm)
+                              <span style={{ fontSize: '0.45rem', color: 'var(--neutral-500)', fontWeight: 700, transform: 'rotate(-90deg)', whiteSpace: 'nowrap' }}>
+                                Tail (Loop Void)
                               </span>
                             </div>
                           </div>
-
-                          {/* DRAGGABLE ELEMENTS IN PORTRAIT */}
-                          {showStoreName && (
-                            <div
-                              onPointerDown={(e) => handlePointerDown('storeName', e)}
-                              onClick={() => setSelectedElementId('storeName')}
-                              style={{
-                                position: 'absolute',
-                                left: `${elementPositions.storeName?.x ?? 50}%`,
-                                top: `${elementPositions.storeName?.y ?? 7}%`,
-                                transform: `translate(-50%, -50%) rotate(${elementStyles.storeName?.rotation || 0}deg)`,
-                                transformOrigin: 'center center',
-                                cursor: 'move',
-                                padding: '2px 4px',
-                                borderRadius: 4,
-                                border: activeDragId === 'storeName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                                backgroundColor: activeDragId === 'storeName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                                color: 'var(--neutral-900)',
-                                whiteSpace: 'nowrap',
-                                textAlign: 'center',
-                                maxWidth: 150,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                zIndex: 10,
-                                ...getElementStyleProps('storeName', 0.68, true)
-                              }}
-                            >
-                              {formatElementText('storeName', storeName || 'Store')}
-                            </div>
-                          )}
-
-                          {showProductName && (
-                            <div
-                              onPointerDown={(e) => handlePointerDown('productName', e)}
-                              onClick={() => setSelectedElementId('productName')}
-                              style={{
-                                position: 'absolute',
-                                left: `${elementPositions.productName?.x ?? 50}%`,
-                                top: `${elementPositions.productName?.y ?? 16}%`,
-                                transform: `translate(-50%, -50%) rotate(${elementStyles.productName?.rotation || 0}deg)`,
-                                transformOrigin: 'center center',
-                                cursor: 'move',
-                                padding: '2px 4px',
-                                borderRadius: 4,
-                                border: activeDragId === 'productName' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                                backgroundColor: activeDragId === 'productName' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                                color: 'var(--neutral-800)',
-                                maxWidth: 150,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                textAlign: 'center',
-                                zIndex: 10,
-                                ...getElementStyleProps('productName', 0.74, true)
-                              }}
-                            >
-                              {formatElementText('productName', productName)}
-                            </div>
-                          )}
-
-                          {showPrice && (
-                            <div
-                              onPointerDown={(e) => handlePointerDown('price', e)}
-                              onClick={() => setSelectedElementId('price')}
-                              style={{
-                                position: 'absolute',
-                                left: `${elementPositions.price?.x ?? 50}%`,
-                                top: `${elementPositions.price?.y ?? 26}%`,
-                                transform: `translate(-50%, -50%) rotate(${elementStyles.price?.rotation || 0}deg)`,
-                                transformOrigin: 'center center',
-                                cursor: 'move',
-                                padding: '2px 4px',
-                                borderRadius: 4,
-                                border: activeDragId === 'price' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                                backgroundColor: activeDragId === 'price' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                                color: '#1e1b4b',
-                                whiteSpace: 'nowrap',
-                                textAlign: 'center',
-                                zIndex: 10,
-                                ...getElementStyleProps('price', 0.96, true)
-                              }}
-                            >
-                              ₹{Number(price || 0).toFixed(2)}
-                            </div>
-                          )}
-
-                          <div
-                            onPointerDown={(e) => handlePointerDown('code', e)}
-                            onClick={() => setSelectedElementId('code')}
-                            style={{
-                              position: 'absolute',
-                              left: `${elementPositions.code?.x ?? 50}%`,
-                              top: `${elementPositions.code?.y ?? 44}%`,
-                              transform: `translate(-50%, -50%) scale(${codeScale}) rotate(${elementStyles.code?.rotation || 0}deg)`,
-                              transformOrigin: 'center center',
-                              cursor: 'move',
-                              padding: '2px',
-                              borderRadius: 4,
-                              border: activeDragId === 'code' || selectedElementId === 'code' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                              backgroundColor: activeDragId === 'code' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 'max-content',
-                              height: 'max-content',
-                              flexShrink: 0,
-                              whiteSpace: 'nowrap',
-                              zIndex: 10
-                            }}
-                          >
-                            <BarcodeRenderer
-                              ref={barcodeRendererRef}
-                              value={activePayload}
-                              codeType={codeType}
-                              width={codeType === 'BARCODE' ? 0.9 : undefined}
-                              height={codeType === 'BARCODE' ? 36 : 60}
-                              showText={false}
-                            />
-                          </div>
-
-                          <div
-                            onPointerDown={(e) => handlePointerDown('barcodeText', e)}
-                            onClick={() => setSelectedElementId('barcodeText')}
-                            style={{
-                              position: 'absolute',
-                              left: `${elementPositions.barcodeText?.x ?? 50}%`,
-                              top: `${elementPositions.barcodeText?.y ?? 53}%`,
-                              transform: `translate(-50%, -50%) rotate(${elementStyles.barcodeText?.rotation || 0}deg)`,
-                              transformOrigin: 'center center',
-                              cursor: 'move',
-                              padding: '2px 4px',
-                              borderRadius: 4,
-                              border: activeDragId === 'barcodeText' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                              backgroundColor: activeDragId === 'barcodeText' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                              color: 'var(--neutral-900)',
-                              whiteSpace: 'nowrap',
-                              textAlign: 'center',
-                              zIndex: 10,
-                              ...getElementStyleProps('barcodeText', 0.68, true, true)
-                            }}
-                          >
-                            {formatElementText('barcodeText', effectiveBarcodeText.substring(0, 14))}
-                          </div>
-
-                          {showSku && sku && (
-                            <div
-                              onPointerDown={(e) => handlePointerDown('sku', e)}
-                              onClick={() => setSelectedElementId('sku')}
-                              style={{
-                                position: 'absolute',
-                                left: `${elementPositions.sku?.x ?? 50}%`,
-                                top: `${elementPositions.sku?.y ?? 58}%`,
-                                transform: `translate(-50%, -50%) rotate(${elementStyles.sku?.rotation || 0}deg)`,
-                                transformOrigin: 'center center',
-                                cursor: 'move',
-                                padding: '2px 4px',
-                                borderRadius: 4,
-                                border: activeDragId === 'sku' ? '1.5px solid var(--primary-500)' : '1px dashed transparent',
-                                backgroundColor: activeDragId === 'sku' ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                                color: 'var(--neutral-500)',
-                                whiteSpace: 'nowrap',
-                                textAlign: 'center',
-                                zIndex: 10,
-                                ...getElementStyleProps('sku', 0.60, false)
-                              }}
-                            >
-                              {formatElementText('sku', `SKU:${sku}`)}
-                            </div>
-                          )}
                         </div>
                       </div>
 
                       {/* REEL PREVIEW: 3-Across side-by-side feed simulation */}
                       {isSeznik3Up && (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, backgroundColor: '#f8fafc', padding: '12px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, backgroundColor: '#f8fafc', padding: '10px 14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--neutral-200)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--primary-700)' }}>
                               🖨️ 3-Across Reel Feed Preview (48mm Web)
@@ -2757,33 +2793,33 @@ export const PrintLabelModal: React.FC<PrintLabelModalProps> = ({
                               3 Labels / Row
                             </span>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 8, backgroundColor: '#ffffff', border: '1.5px solid var(--neutral-300)', borderRadius: 6, boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.04)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '8px 6px', backgroundColor: '#ffffff', border: '1.5px solid var(--neutral-300)', borderRadius: 6, boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.04)' }}>
                             {[1, 2, 3].map((col) => (
-                              <div key={col} style={{ width: 80, height: 250, border: '1px solid var(--neutral-300)', borderRadius: 4, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: '#ffffff', position: 'relative' }}>
+                              <div key={col} style={{ width: 48, height: 250, border: '1px solid var(--neutral-300)', borderRadius: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: '#ffffff', position: 'relative' }}>
                                 {/* Miniature Flap 1 */}
-                                <div style={{ height: '32%', borderBottom: '1px dashed #cbd5e1', padding: '2px 3px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-                                  <div style={{ fontSize: '0.45rem', fontWeight: 800, color: '#334155', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 74 }}>{formatElementText('storeName', storeName || 'Store')}</div>
-                                  <div style={{ fontSize: '0.42rem', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 74 }}>{formatElementText('productName', productName)}</div>
-                                  <div style={{ fontSize: '0.50rem', fontWeight: 800, color: '#0f172a' }}>₹{Number(price || 0).toFixed(0)}</div>
+                                <div style={{ height: 107, borderBottom: '1px dashed #cbd5e1', padding: '2px 2px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', overflow: 'hidden' }}>
+                                  <div style={{ fontSize: '0.38rem', fontWeight: 800, color: '#334155', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 44, transform: elementStyles.storeName?.rotation ? `rotate(${elementStyles.storeName.rotation}deg)` : 'none' }}>{formatElementText('storeName', storeName || 'Store')}</div>
+                                  <div style={{ fontSize: '0.36rem', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 44, transform: elementStyles.productName?.rotation ? `rotate(${elementStyles.productName.rotation}deg)` : 'none' }}>{formatElementText('productName', productName)}</div>
+                                  <div style={{ fontSize: '0.42rem', fontWeight: 800, color: '#0f172a', transform: elementStyles.price?.rotation ? `rotate(${elementStyles.price.rotation}deg)` : 'none' }}>₹{Number(price || 0).toFixed(0)}</div>
                                 </div>
                                 {/* Miniature Flap 2 */}
-                                <div style={{ height: '32%', borderBottom: '1px solid #e2e8f0', padding: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-                                  <div style={{ fontSize: '0.40rem', fontWeight: 700, color: '#0f172a' }}>{codeType === 'QR' ? '⬛ QR' : '||||| BARCODE'}</div>
-                                  <div style={{ fontSize: '0.38rem', fontFamily: 'monospace', color: '#475569' }}>{effectiveBarcodeText.slice(0, 8)}</div>
-                                  <div style={{ fontSize: '0.36rem', color: '#94a3b8' }}>SKU:{sku.slice(0, 6)}</div>
+                                <div style={{ height: 107, borderBottom: '1px solid #e2e8f0', padding: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', overflow: 'hidden' }}>
+                                  <div style={{ fontSize: '0.36rem', fontWeight: 700, color: '#0f172a', transform: elementStyles.code?.rotation ? `rotate(${elementStyles.code.rotation}deg)` : 'none' }}>{codeType === 'QR' ? '⬛ QR' : '|||||'}</div>
+                                  <div style={{ fontSize: '0.34rem', fontFamily: 'monospace', color: '#475569', transform: elementStyles.barcodeText?.rotation ? `rotate(${elementStyles.barcodeText.rotation}deg)` : 'none' }}>{effectiveBarcodeText.slice(0, 8)}</div>
+                                  <div style={{ fontSize: '0.32rem', color: '#94a3b8', transform: elementStyles.sku?.rotation ? `rotate(${elementStyles.sku.rotation}deg)` : 'none' }}>SKU:{sku.slice(0, 6)}</div>
                                 </div>
-                                {/* Miniature Tail */}
-                                <div style={{ height: '36%', backgroundColor: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  <div style={{ width: 22, height: '90%', backgroundColor: '#ffffff', border: '0.5px solid #cbd5e1', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <span style={{ fontSize: '0.30rem', color: '#94a3b8', transform: 'rotate(-90deg)', whiteSpace: 'nowrap' }}>Tail #{col}</span>
+                                {/* Miniature Tail (36px condensed) */}
+                                <div style={{ height: 36, backgroundColor: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <div style={{ width: 14, height: '88%', backgroundColor: '#ffffff', border: '0.5px solid #cbd5e1', borderRadius: '0 0 4px 4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <span style={{ fontSize: '0.24rem', color: '#94a3b8', transform: 'rotate(-90deg)', whiteSpace: 'nowrap' }}>#{col}</span>
                                   </div>
                                 </div>
-                                <span style={{ position: 'absolute', bottom: 2, right: 2, fontSize: '0.48rem', fontWeight: 800, color: 'var(--primary-600)' }}>#{col}</span>
+                                <span style={{ position: 'absolute', bottom: 1, right: 1, fontSize: '0.40rem', fontWeight: 800, color: 'var(--primary-600)' }}>#{col}</span>
                               </div>
                             ))}
                           </div>
-                          <div style={{ fontSize: '0.62rem', color: 'var(--neutral-500)', textAlign: 'center', maxWidth: 280 }}>
-                            Thermal head prints 3 tags simultaneously across the 48mm roll feed width.
+                          <div style={{ fontSize: '0.62rem', color: 'var(--neutral-500)', textAlign: 'center', maxWidth: 220 }}>
+                            3 labels print abreast with 0.85mm die-cut gap across 48mm thermal web.
                           </div>
                         </div>
                       )}
