@@ -696,14 +696,41 @@ class MobileStore {
     if (existingIdx >= 0) {
       const existing = this.cart[existingIdx];
       const newQty = Number((existing.quantity + quantity).toFixed(3));
-      this.updateCartItem(existingIdx, newQty, existing.unitPrice, existing.discountPercent);
+      const unitPrice = existing.unitPrice;
+      const discountPercent = existing.discountPercent;
+      const discountType = existing.discountType || 'PERCENT';
+      const discountValue = existing.discountValue;
+
+      const gross = unitPrice * newQty;
+      let effectiveDiscPercent = discountPercent;
+      if (discountType === 'FLAT' && discountValue !== undefined && discountValue > 0) {
+        effectiveDiscPercent = gross > 0 ? (discountValue / gross) * 100 : 0;
+      }
+      const discAmt = (gross * effectiveDiscPercent) / 100;
+      const lineTotal = Number(Math.max(0, gross - discAmt).toFixed(2));
+
+      const updatedLine: CartItem = {
+        ...existing,
+        quantity: newQty,
+        unitPrice,
+        discountPercent: Number(effectiveDiscPercent.toFixed(2)),
+        discountType,
+        discountValue: discountValue !== undefined ? discountValue : discountPercent,
+        lineTotal,
+      };
+
+      // Remove from previous index and move to the top so biller confirms it immediately
+      this.cart.splice(existingIdx, 1);
+      this.cart.unshift(updatedLine);
+      this.notify();
     } else {
       const unitPrice = item.salePrice;
       const discountPercent = item.hasDiscount && item.discountType === 'PERCENT' ? (item.discountValue || 0) : 0;
       const effectivePrice = unitPrice * (1 - discountPercent / 100);
       const lineTotal = Number((effectivePrice * quantity).toFixed(2));
 
-      this.cart.push({
+      // Add new item to the top of the cart
+      this.cart.unshift({
         item,
         quantity,
         unitPrice,

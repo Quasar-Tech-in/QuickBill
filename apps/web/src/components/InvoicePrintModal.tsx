@@ -598,10 +598,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_55' ? '0.66rem' : '0.74rem', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px dashed #000000', fontWeight: 800, fontSize: printFormat === 'POS_48' ? '0.62rem' : printFormat === 'POS_55' ? '0.66rem' : '0.74rem' }}>
-                    <th style={{ padding: '3px 0', textAlign: 'left', width: printFormat === 'POS_48' ? '38%' : printFormat === 'POS_55' ? '38%' : '44%' }}>ITEM</th>
-                    <th style={{ padding: '3px 0', textAlign: 'center', width: printFormat === 'POS_48' ? '14%' : printFormat === 'POS_55' ? '14%' : '15%' }}>QTY</th>
-                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '21%' : printFormat === 'POS_55' ? '21%' : '19%' }}>PRICE</th>
-                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '27%' : printFormat === 'POS_55' ? '27%' : '22%', paddingRight: 0 }}>AMT</th>
+                    <th style={{ padding: '3px 0', textAlign: 'left', width: printFormat === 'POS_48' ? '36%' : printFormat === 'POS_55' ? '36%' : '44%' }}>ITEM</th>
+                    <th style={{ padding: '3px 0', textAlign: 'center', width: printFormat === 'POS_48' ? '13%' : printFormat === 'POS_55' ? '13%' : '15%', whiteSpace: 'nowrap' }}>QTY</th>
+                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '23%' : printFormat === 'POS_55' ? '23%' : '19%', whiteSpace: 'nowrap' }}>PRICE</th>
+                    <th style={{ padding: '3px 0', textAlign: 'right', width: printFormat === 'POS_48' ? '28%' : printFormat === 'POS_55' ? '28%' : '22%', whiteSpace: 'nowrap', paddingRight: 0 }}>AMT</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -637,20 +637,20 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                             </div>
                           )}
                         </td>
-                        <td style={{ padding: '3px 0', textAlign: 'center' }}>
+                        <td style={{ padding: '3px 0', textAlign: 'center', whiteSpace: 'nowrap' }}>
                           {hasRet ? `${formatQty(activeQty)}/${formatQty(line.quantity)}` : formatQty(line.quantity)}
                         </td>
-                        <td style={{ padding: '3px 0', textAlign: 'right' }}>
+                        <td style={{ padding: '3px 0', textAlign: 'right', whiteSpace: 'nowrap' }}>
                           {line.unitPrice.toFixed(2)}
                         </td>
 
-                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700, paddingRight: printFormat === 'POS_48' ? 0 : printFormat === 'POS_55' ? 1 : 2 }}>
+                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', paddingRight: printFormat === 'POS_48' ? 0 : printFormat === 'POS_55' ? 0 : 2 }}>
                           {hasDisc && line.originalTotal !== undefined && Math.abs(line.originalTotal - line.total) > 0.01 && (
-                            <div style={{ fontSize: '0.62rem', textDecoration: 'line-through', color: '#777777', fontWeight: 400 }}>
+                            <div style={{ fontSize: '0.60rem', textDecoration: 'line-through', color: '#777777', fontWeight: 400, whiteSpace: 'nowrap', lineHeight: 1.1 }}>
                               {line.originalTotal.toFixed(2)}
                             </div>
                           )}
-                          <div>{line.total.toFixed(2)}</div>
+                          <div style={{ whiteSpace: 'nowrap' }}>{line.total.toFixed(2)}</div>
                         </td>
                       </tr>
                     );
@@ -720,11 +720,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 margin: '6px 0',
                 display: 'flex', 
                 justifyContent: 'space-between', 
-                fontSize: printFormat === 'POS_48' ? '0.80rem' : printFormat === 'POS_55' ? '0.90rem' : '0.98rem', 
+                alignItems: 'center',
+                fontSize: printFormat === 'POS_48' ? '0.78rem' : printFormat === 'POS_55' ? '0.84rem' : '0.98rem', 
                 fontWeight: 900 
               }}>
-                <span>GRAND TOTAL:</span>
-                <span>₹{activeInvoice.grandTotal.toFixed(2)}</span>
+                <span style={{ whiteSpace: 'nowrap' }}>GRAND TOTAL:</span>
+                <span style={{ whiteSpace: 'nowrap' }}>₹{activeInvoice.grandTotal.toFixed(2)}</span>
               </div>
 
               {/* Settlement Info */}

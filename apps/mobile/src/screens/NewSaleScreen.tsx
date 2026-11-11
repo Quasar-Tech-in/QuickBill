@@ -53,23 +53,25 @@ export const NewSaleScreen: React.FC<{ onComplete: () => void }> = ({ onComplete
       if (existingIdx >= 0) {
         const nextCart = [...prevCart];
         const step = nextCart[existingIdx].allowParts ? 1.0 : 1;
-        nextCart[existingIdx] = {
+        const updatedItem = {
           ...nextCart[existingIdx],
           qty: Number((nextCart[existingIdx].qty + step).toFixed(3)),
         };
-        return nextCart;
+        const remaining = nextCart.filter((_, idx) => idx !== existingIdx);
+        return [updatedItem, ...remaining];
       } else {
+        const newItem = {
+          id: cleanCode,
+          name: matchedProduct.name,
+          price: matchedProduct.price,
+          qty: 1,
+          taxRate: matchedProduct.taxRate,
+          allowParts: matchedProduct.allowParts,
+          unit: matchedProduct.unit,
+        };
         return [
+          newItem,
           ...prevCart,
-          {
-            id: cleanCode,
-            name: matchedProduct.name,
-            price: matchedProduct.price,
-            qty: 1,
-            taxRate: matchedProduct.taxRate,
-            allowParts: matchedProduct.allowParts,
-            unit: matchedProduct.unit,
-          },
         ];
       }
     });
